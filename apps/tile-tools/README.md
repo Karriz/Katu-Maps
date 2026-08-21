@@ -95,3 +95,19 @@ The conversion uses a base value of `-10000` and a precision interval of
 `0.1` metres, matching the MapLibre `encoding: "mapbox"` configuration.
 The raw GeoTIFF and generated MBTiles are build artifacts and are not checked
 into Git.
+
+## Dockerized data build
+
+The repository also includes a one-shot Docker builder with GDAL, osmium,
+tilemaker, Rasterio, and rio-rgbify. Build and run it from the repository root:
+
+```sh
+export NLS_API_KEY=your-key
+docker compose --profile build build tile-builder
+docker compose --profile build run --rm tile-builder
+docker compose up martin
+```
+
+The builder writes the generated `tampere.mbtiles` and `terrain.mbtiles` to
+`data/processed`, which is mounted into Martin. The API key is supplied only at
+runtime and is not copied into the image.

@@ -1,0 +1,8 @@
+.git
+.venv
+node_modules
+dist
+data/sources/*.osm.pbf
+data/sources/*.tif
+data/processed/*
+!data/processed/.gitkeep
