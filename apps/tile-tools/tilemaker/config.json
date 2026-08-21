@@ -2,6 +2,7 @@
   "layers": {
     "water": { "minzoom": 10, "maxzoom": 14 },
     "water_detail": { "minzoom": 13, "maxzoom": 14 },
+    "river_areas": { "minzoom": 10, "maxzoom": 14 },
     "waterways": { "minzoom": 10, "maxzoom": 14 },
     "bridges": { "minzoom": 10, "maxzoom": 14 },
     "parking": { "minzoom": 12, "maxzoom": 14 },
@@ -14,6 +15,7 @@
     "roads": { "minzoom": 10, "maxzoom": 14 },
     "paths": { "minzoom": 12, "maxzoom": 14 },
     "buildings": { "minzoom": 13, "maxzoom": 14 },
+    "trees": { "minzoom": 13, "maxzoom": 14 },
     "places": { "minzoom": 10, "maxzoom": 14 },
     "pois": { "minzoom": 13, "maxzoom": 14 }
   },

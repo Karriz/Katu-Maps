@@ -51,6 +51,24 @@ function node_function()
     return
   end
 
+  local natural = Find("natural")
+  if natural == "tree" then
+    Layer("trees", false)
+    local leaf_type = Find("leaf_type")
+    local species = Find("species")
+    if leaf_type ~= "" then
+      Attribute("leaf_type", leaf_type)
+    end
+    if species ~= "" then
+      Attribute("species", species)
+    end
+    local height = tonumber(Find("height"))
+    if height and height > 0 then
+      AttributeNumeric("height", height)
+    end
+    return
+  end
+
   local amenity = Find("amenity")
   local shop = Find("shop")
   local tourism = Find("tourism")
@@ -170,6 +188,12 @@ function way_function()
     local is_linear_water = water == "river" or water == "stream"
       or water == "ditch" or water == "canal" or water == "drain"
     if is_linear_water then
+      if water == "river" then
+        Layer("river_areas", true)
+        Attribute("class", "river")
+        Attribute("water", water)
+        add_name()
+      end
       return
     end
     local is_overview_water = water == "lake" or water == "reservoir"

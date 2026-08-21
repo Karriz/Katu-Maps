@@ -1,9 +1,82 @@
 import { useEffect, useRef, useState } from 'react';
-import maplibregl, { type Map, type StyleSpecification } from 'maplibre-gl';
+import maplibregl, { type GeoJSONSource, type Map, type StyleSpecification } from 'maplibre-gl';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
 const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
+
+type TreeModelFeature = {
+  type: 'Feature';
+  properties: { kind: 'trunk' | 'canopy'; height: number; base: number; leafType: string };
+  geometry: { type: 'Polygon'; coordinates: number[][][] };
+};
+
+function treeCoordinates(feature: ReturnType<Map['querySourceFeatures']>[number]): number[][] {
+  const geometry = feature.geometry;
+  if (geometry?.type === 'Point' && Array.isArray(geometry.coordinates)) {
+    return [geometry.coordinates.map(Number)];
+  }
+  if (geometry?.type === 'MultiPoint' && Array.isArray(geometry.coordinates)) {
+    return geometry.coordinates.map((coordinates) => coordinates.map(Number));
+  }
+  return [];
+}
+
+function createTreeModels(map: Map, sourceFeatures: ReturnType<Map['querySourceFeatures']>) {
+  const features: TreeModelFeature[] = [];
+  const seen = new Set<string>();
+
+  for (const feature of sourceFeatures) {
+    for (const coordinates of treeCoordinates(feature)) {
+      if (coordinates.length < 2 || seen.size >= 5000) continue;
+      const longitude = coordinates[0];
+      const latitude = coordinates[1];
+      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
+      const key = `${longitude.toFixed(6)}:${latitude.toFixed(6)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const properties = feature.properties ?? {};
+      const heightValue = Number(properties.height);
+      const height = Number.isFinite(heightValue) && heightValue > 2 ? Math.min(heightValue, 24) : 12;
+      const leafType = String(properties.leaf_type ?? 'broadleaved');
+      const terrainElevation = map.queryTerrainElevation([longitude, latitude], { exaggerated: false });
+      const ground = terrainElevation ?? 0;
+      const metersPerDegreeLat = 1 / 111320;
+      const metersPerDegreeLon = metersPerDegreeLat / Math.cos((latitude * Math.PI) / 180);
+      const polygon = (radius: number, sides: number, angleOffset: number) => Array.from({ length: sides + 1 }, (_, index) => {
+        const angle = angleOffset + (index / sides) * Math.PI * 2;
+        return [
+          longitude + Math.cos(angle) * radius * metersPerDegreeLon,
+          latitude + Math.sin(angle) * radius * metersPerDegreeLat,
+        ];
+      });
+
+      features.push({
+        type: 'Feature',
+        properties: {
+          kind: 'trunk',
+          height: ground + Math.min(height * 0.42, 4),
+          base: ground,
+          leafType,
+        },
+        geometry: { type: 'Polygon', coordinates: [polygon(0.65, 4, Math.PI / 4)] },
+      });
+      features.push({
+        type: 'Feature',
+        properties: {
+          kind: 'canopy',
+          height: ground + height,
+          base: ground + Math.min(height * 0.28, 3),
+          leafType,
+        },
+        geometry: { type: 'Polygon', coordinates: [polygon(2.5, 6, Math.PI / 6)] },
+      });
+    }
+  }
+
+  return { type: 'FeatureCollection' as const, features };
+}
 
 const TAMPERE_STYLE: StyleSpecification = {
   version: 8,
@@ -27,6 +100,13 @@ const TAMPERE_STYLE: StyleSpecification = {
       maxzoom: 14,
       encoding: 'mapbox',
       attribution: 'National Land Survey of Finland, Elevation model 10 m',
+    },
+    'tree-models': {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      maxzoom: 20,
+      tolerance: 0,
+      buffer: 256,
     },
   },
   layers: [
@@ -96,6 +176,17 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'water_detail',
       paint: { 'fill-color': '#b9def1' },
+    },
+    {
+      id: 'river-areas',
+      type: 'fill',
+      source: 'tampere',
+      'source-layer': 'river_areas',
+      paint: {
+        'fill-color': '#b9def1',
+        'fill-opacity': 0.96,
+        'fill-outline-color': '#a4d2e8',
+      },
     },
     {
       id: 'waterways',
@@ -227,6 +318,67 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'road-labels',
+      type: 'symbol',
+      source: 'tampere',
+      'source-layer': 'roads',
+      minzoom: 13,
+      filter: ['has', 'name'],
+      layout: {
+        'symbol-placement': 'line',
+        'text-field': ['get', 'name'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 15, 13],
+        'text-font': ['Open Sans Regular'],
+        'text-max-angle': 30,
+        'text-padding': 20,
+      },
+      paint: {
+        'text-color': '#59645c',
+        'text-halo-color': '#f4f6f2',
+        'text-halo-width': 1.5,
+      },
+    },
+    {
+      id: 'water-labels',
+      type: 'symbol',
+      source: 'tampere',
+      'source-layer': 'water',
+      minzoom: 10,
+      filter: ['has', 'name'],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15],
+        'text-font': ['Open Sans Regular'],
+        'text-allow-overlap': false,
+      },
+      paint: {
+        'text-color': '#4f91ad',
+        'text-halo-color': '#b9def1',
+        'text-halo-width': 1.25,
+      },
+    },
+    {
+      id: 'waterway-labels',
+      type: 'symbol',
+      source: 'tampere',
+      'source-layer': 'waterways',
+      minzoom: 12,
+      filter: ['has', 'name'],
+      layout: {
+        'symbol-placement': 'line',
+        'text-field': ['get', 'name'],
+        'text-size': 10,
+        'text-font': ['Open Sans Regular'],
+        'text-max-angle': 30,
+        'text-padding': 16,
+      },
+      paint: {
+        'text-color': '#4f91ad',
+        'text-halo-color': '#b9def1',
+        'text-halo-width': 1.25,
+      },
+    },
+    {
       id: 'paths',
       type: 'line',
       source: 'tampere',
@@ -257,6 +409,51 @@ const TAMPERE_STYLE: StyleSpecification = {
         'fill-extrusion-height': ['get', 'height'],
         'fill-extrusion-base': ['get', 'base'],
         'fill-extrusion-opacity': 0.94,
+      },
+    },
+    {
+      id: 'tree-points',
+      type: 'circle',
+      source: 'tampere',
+      'source-layer': 'trees',
+      minzoom: 13,
+      paint: {
+        'circle-color': '#5d9951',
+        'circle-radius': 2,
+        'circle-opacity': 0.8,
+        'circle-stroke-color': '#39713a',
+        'circle-stroke-width': 0.5,
+      },
+    },
+    {
+      id: 'tree-trunks',
+      type: 'fill-extrusion',
+      source: 'tree-models',
+      minzoom: 13,
+      filter: ['==', ['get', 'kind'], 'trunk'],
+      paint: {
+        'fill-extrusion-color': '#76563b',
+        'fill-extrusion-height': ['get', 'height'],
+        'fill-extrusion-base': ['get', 'base'],
+        'fill-extrusion-opacity': 1,
+      },
+    },
+    {
+      id: 'tree-canopies',
+      type: 'fill-extrusion',
+      source: 'tree-models',
+      minzoom: 13,
+      filter: ['==', ['get', 'kind'], 'canopy'],
+      paint: {
+        'fill-extrusion-color': [
+          'match',
+          ['get', 'leafType'],
+          'needleleaved', '#39713a',
+          '#5d9951',
+        ],
+        'fill-extrusion-height': ['get', 'height'],
+        'fill-extrusion-base': ['get', 'base'],
+        'fill-extrusion-opacity': 1,
       },
     },
     {
@@ -293,7 +490,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'circle',
       source: 'tampere',
       'source-layer': 'pois',
-      minzoom: 13,
+      minzoom: 14,
       filter: ['has', 'name'],
       paint: {
         'circle-color': '#ffffff',
@@ -346,7 +543,41 @@ export function MapView() {
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.once('load', () => setMapLoaded(true));
+    let treeSignature = '';
+    let treeUpdateTimer: number | undefined;
+    const updateTreeModels = () => {
+      const source = map.getSource('tree-models') as GeoJSONSource | undefined;
+      if (!source) return;
+      if (map.getZoom() < 13) {
+        if (treeSignature !== '') {
+          treeSignature = '';
+          source.setData({ type: 'FeatureCollection', features: [] });
+        }
+        return;
+      }
+
+      const loadedTrees = map.querySourceFeatures('tampere', { sourceLayer: 'trees' });
+      const coordinates = loadedTrees.flatMap((feature) => treeCoordinates(feature).map(
+        ([longitude, latitude]) => `${longitude.toFixed(6)}:${latitude.toFixed(6)}`,
+      ));
+      coordinates.sort();
+      const nextSignature = coordinates.join('|');
+      if (nextSignature === treeSignature) return;
+
+      treeSignature = nextSignature;
+      const treeModels = createTreeModels(map, loadedTrees);
+      source.setData(treeModels);
+    };
+    const scheduleTreeUpdate = () => {
+      if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
+      treeUpdateTimer = window.setTimeout(updateTreeModels, 120);
+    };
+    map.once('load', () => {
+      scheduleTreeUpdate();
+      setMapLoaded(true);
+    });
+    map.on('moveend', scheduleTreeUpdate);
+    map.on('sourcedata', scheduleTreeUpdate);
     map.on('error', (event) => {
       const message = event.error?.message ?? 'The map style could not be loaded.';
       // MapLibre can emit this while backfilling a missing edge DEM tile. It
@@ -360,6 +591,9 @@ export function MapView() {
     mapRef.current = map;
 
     return () => {
+      if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
+      map.off('moveend', scheduleTreeUpdate);
+      map.off('sourcedata', scheduleTreeUpdate);
       map.remove();
       mapRef.current = null;
     };
