@@ -57,6 +57,14 @@ Closed `man_made=bridge` ways are emitted as bridge-deck polygons beneath the
 transport lines, preventing mapped roads, rails, and paths from appearing to
 float separately over the water.
 
+Linear waterways are rendered as blue line features. Their long, narrow
+`natural=water` polygon counterparts are omitted because clipping those
+polygons can produce malformed triangular fills; lakes and other area water
+features remain filled polygons.
+
+The tileset also includes parking and pedestrian areas, aeroways, power and
+barrier features, and named places/POIs for browser styling.
+
 ## Serving the result
 
 MBTiles is a build artifact, not a browser API. This repository uses the

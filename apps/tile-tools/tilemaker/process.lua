@@ -1,7 +1,8 @@
-node_keys = { "place", "name", "amenity", "shop", "tourism", "natural" }
+node_keys = { "place", "name", "amenity", "shop", "tourism", "natural", "power", "barrier" }
 way_keys = {
   "building", "highway", "railway", "waterway", "natural", "landuse",
-  "leisure", "amenity", "name", "building:part", "man_made"
+  "leisure", "amenity", "name", "building:part", "man_made", "aeroway",
+  "power", "barrier"
 }
 
 local function add_name()
@@ -52,10 +53,26 @@ function node_function()
 
   local amenity = Find("amenity")
   local shop = Find("shop")
-  if amenity ~= "" or shop ~= "" then
+  local tourism = Find("tourism")
+  if amenity ~= "" or shop ~= "" or tourism ~= "" then
     Layer("pois", false)
-    Attribute("class", amenity ~= "" and amenity or shop)
+    Attribute("class", amenity ~= "" and amenity or (shop ~= "" and shop or tourism))
     add_name()
+  end
+
+  local power = Find("power")
+  if power ~= "" then
+    Layer("power", false)
+    Attribute("class", power)
+    add_name()
+    return
+  end
+
+  local barrier = Find("barrier")
+  if barrier ~= "" then
+    Layer("barriers", false)
+    Attribute("class", barrier)
+    return
   end
 end
 
@@ -65,6 +82,37 @@ function way_function()
     Layer("bridges", true)
     Attribute("class", "bridge")
     add_name()
+    return
+  end
+
+  local amenity = Find("amenity")
+  if amenity == "parking" then
+    Layer("parking", true)
+    Attribute("class", "parking")
+    add_surface()
+    add_name()
+    return
+  end
+
+  local aeroway = Find("aeroway")
+  if aeroway ~= "" then
+    Layer("aeroway", aeroway ~= "runway" and aeroway ~= "taxiway")
+    Attribute("class", aeroway)
+    add_name()
+    return
+  end
+
+  local power = Find("power")
+  if power ~= "" then
+    Layer("power", false)
+    Attribute("class", power)
+    return
+  end
+
+  local barrier = Find("barrier")
+  if barrier ~= "" then
+    Layer("barriers", false)
+    Attribute("class", barrier)
     return
   end
 
@@ -84,6 +132,13 @@ function way_function()
 
   local highway = Find("highway")
   if highway ~= "" then
+    if highway == "pedestrian" and IsClosed() then
+      Layer("pedestrian_areas", true)
+      Attribute("class", highway)
+      add_surface()
+      add_name()
+      return
+    end
     if highway == "path" or highway == "footway" or highway == "cycleway" or highway == "track" then
       Layer("paths", false)
     else
@@ -103,26 +158,52 @@ function way_function()
     return
   end
 
+  local natural = Find("natural")
+  local landuse = Find("landuse")
+  local leisure = Find("leisure")
+  if natural == "water" or landuse == "basin" or landuse == "reservoir" then
+    local water = Find("water")
+    -- Some OSM imports represent rivers as long, narrow water polygons.
+    -- Filled versions of these polygons are prone to malformed triangle
+    -- artifacts when tilemaker clips them at tile boundaries. Render the
+    -- corresponding waterway line instead.
+    local is_linear_water = water == "river" or water == "stream"
+      or water == "ditch" or water == "canal" or water == "drain"
+    if is_linear_water then
+      return
+    end
+    local is_overview_water = water == "lake" or water == "reservoir"
+      or (water == "" and Find("name") ~= "")
+    Layer(is_overview_water and "water" or "water_detail", true)
+    if not is_overview_water then
+      MinZoom(13)
+    end
+    Attribute("class", natural ~= "" and natural or landuse)
+    if water ~= "" then
+      Attribute("water", water)
+    end
+    add_name()
+    return
+  end
+
   local waterway = Find("waterway")
   if waterway ~= "" then
-    Layer("water", false)
+    Layer("waterways", false)
     Attribute("class", waterway)
     add_name()
     return
   end
 
-  local natural = Find("natural")
-  local landuse = Find("landuse")
-  local leisure = Find("leisure")
-  if natural == "water" or landuse == "basin" or landuse == "reservoir" then
-    Layer("water", true)
-    Attribute("class", natural ~= "" and natural or landuse)
-    return
-  end
-
   if natural ~= "" or landuse ~= "" or leisure ~= "" then
     Layer("landuse", true)
-    Attribute("class", natural ~= "" and natural or (landuse ~= "" and landuse or leisure))
+    local land_class = natural ~= "" and natural or (landuse ~= "" and landuse or leisure)
+    Attribute("class", land_class)
+    if natural == "wetland" then
+      local wetland = Find("wetland")
+      if wetland ~= "" then
+        Attribute("wetland", wetland)
+      end
+    end
     add_name()
   end
 end
