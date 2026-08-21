@@ -7,4 +7,5 @@ services:
       - ./data/processed:/data:ro
     command:
       - /data/tampere.mbtiles
+      - /data/terrain.mbtiles
     restart: unless-stopped

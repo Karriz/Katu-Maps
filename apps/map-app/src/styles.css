@@ -33,6 +33,9 @@ h1 { font-size: clamp(1.4rem, 3vw, 2rem); margin: 0; }
 .map-status-error strong { color: #ffb4b4; }
 .map-status-error small { color: #a9bed2; }
 .map-hint { background: rgb(14 23 38 / 86%); border: 1px solid #29425e; border-radius: 8px; bottom: 16px; color: #d6e5f5; font-size: 0.8rem; left: 16px; padding: 8px 10px; pointer-events: none; position: absolute; }
+.terrain-toggle { background: #f4fbff; border: 1px solid #86aac2; border-radius: 8px; color: #163047; cursor: pointer; font: inherit; font-size: 0.8rem; padding: 8px 10px; position: absolute; right: 16px; top: 84px; z-index: 1; }
+.terrain-toggle:hover { background: #dff3ff; }
+.terrain-toggle[aria-pressed='true'] { background: #b9e6ff; border-color: #4f9ac5; }
 
 @media (max-width: 640px) {
   .app-shell { padding: 12px; }

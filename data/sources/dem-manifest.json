@@ -1,0 +1,17 @@
+{
+  "name": "tampere-dem-10m",
+  "provider": "National Land Survey of Finland",
+  "dataset": "Elevation model 10 m",
+  "license": "CC BY 4.0",
+  "coverageId": "korkeusmalli_2m",
+  "scaleFactor": 0.2,
+  "sourceUrl": "https://avoin-karttakuva.maanmittauslaitos.fi/ortokuvat-ja-korkeusmallit/wcs/v2",
+  "sourceCrs": "EPSG:3067",
+  "verticalCrs": "EPSG:3900",
+  "outputCrs": "EPSG:3857",
+  "bbox4326": [23.55, 61.40, 24.05, 61.60],
+  "bbox3067": [314000, 6805000, 340000, 6829000],
+  "resolutionMetres": 10,
+  "tileZoom": { "min": 8, "max": 14 },
+  "terrainEncoding": { "format": "mapbox", "base": -10000, "interval": 0.1 }
+}

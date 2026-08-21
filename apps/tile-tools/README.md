@@ -68,3 +68,30 @@ local development is reproducible. For deployment, consider converting the
 artifact to PMTiles and serving it from object storage with HTTP range
 requests; Martin remains suitable when a tile server or PostGIS backend is
 needed.
+
+## Elevation model and terrain tiles
+
+The terrain pipeline uses the National Land Survey of Finland's 2 m elevation
+model sampled at a 10 m output resolution. The source is requested from the
+NLS WCS endpoint as a GeoTIFF in EPSG:3067/N2000, then reprojected to EPSG:3857
+and encoded as Mapbox Terrain-RGB raster MBTiles. The WCS requires a personal
+NLS API key, which must never be committed to the repository.
+
+Install GDAL and Rasterio with the `rio-rgbify` plugin, then run:
+
+```sh
+NLS_API_KEY=your-key npm run download-dem
+npm run build-dem
+npm run serve
+```
+
+The generated terrain TileJSON is served at:
+
+```text
+http://localhost:3000/terrain
+```
+
+The conversion uses a base value of `-10000` and a precision interval of
+`0.1` metres, matching the MapLibre `encoding: "mapbox"` configuration.
+The raw GeoTIFF and generated MBTiles are build artifacts and are not checked
+into Git.

@@ -3,6 +3,7 @@ import maplibregl, { type Map, type StyleSpecification } from 'maplibre-gl';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
+const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
 
 const TAMPERE_STYLE: StyleSpecification = {
   version: 8,
@@ -12,6 +13,19 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'vector',
       url: TILEJSON_URL,
       attribution: '© OpenStreetMap contributors',
+    },
+    terrain: {
+      type: 'raster-dem',
+      // Use the explicit template so Martin's raster TileJSON defaults cannot
+      // override the DEM tile dimensions.
+      tiles: [`${TERRAIN_TILEJSON_URL}/{z}/{x}/{y}`],
+      // rio-rgbify's 512px PNGs are retina-style tiles for a 256px map tile.
+      tileSize: 256,
+      bounds: [23.55, 61.40, 24.05, 61.60],
+      minzoom: 8,
+      maxzoom: 14,
+      encoding: 'mapbox',
+      attribution: 'National Land Survey of Finland, Elevation model 10 m',
     },
   },
   layers: [
@@ -74,6 +88,13 @@ const TAMPERE_STYLE: StyleSpecification = {
         'fill-extrusion-opacity': 0.9,
       },
     },
+    {
+      id: 'terrain-hillshade',
+      type: 'hillshade',
+      source: 'terrain',
+      layout: { visibility: 'none' },
+      paint: { 'hillshade-shadow-color': '#52645f' },
+    },
   ],
 };
 
@@ -82,6 +103,7 @@ export function MapView() {
   const mapRef = useRef<Map | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [terrainEnabled, setTerrainEnabled] = useState(false);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -99,8 +121,15 @@ export function MapView() {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.once('load', () => setMapLoaded(true));
-    map.once('error', (event) => {
-      setMapError(event.error?.message ?? 'The map style could not be loaded.');
+    map.on('error', (event) => {
+      const message = event.error?.message ?? 'The map style could not be loaded.';
+      // MapLibre can emit this while backfilling a missing edge DEM tile. It
+      // is non-fatal when the map is otherwise rendering.
+      if (message.toLowerCase().includes('dem dimension mismatch')) {
+        console.warn(message);
+        return;
+      }
+      setMapError(message);
     });
     mapRef.current = map;
 
@@ -119,6 +148,23 @@ export function MapView() {
           <span>{mapError}</span>
           <small>Check that the browser can access the configured map style.</small>
         </div>
+      )}
+      {mapLoaded && !mapError && (
+        <button
+          className="terrain-toggle"
+          type="button"
+          aria-pressed={terrainEnabled}
+          onClick={() => {
+            const map = mapRef.current;
+            if (!map) return;
+            const nextEnabled = !terrainEnabled;
+            map.setTerrain(nextEnabled ? { source: 'terrain', exaggeration: 1.25 } : null);
+            map.setLayoutProperty('terrain-hillshade', 'visibility', nextEnabled ? 'visible' : 'none');
+            setTerrainEnabled(nextEnabled);
+          }}
+        >
+          {terrainEnabled ? 'Disable terrain' : 'Enable terrain'}
+        </button>
       )}
     </div>
   );
