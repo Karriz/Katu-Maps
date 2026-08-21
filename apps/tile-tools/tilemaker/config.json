@@ -1,6 +1,7 @@
 {
   "layers": {
     "water": { "minzoom": 10, "maxzoom": 14 },
+    "bridges": { "minzoom": 10, "maxzoom": 14 },
     "landuse": { "minzoom": 10, "maxzoom": 14 },
     "railways": { "minzoom": 10, "maxzoom": 14 },
     "roads": { "minzoom": 10, "maxzoom": 14 },

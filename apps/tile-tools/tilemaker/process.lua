@@ -1,13 +1,20 @@
 node_keys = { "place", "name", "amenity", "shop", "tourism", "natural" }
 way_keys = {
   "building", "highway", "railway", "waterway", "natural", "landuse",
-  "leisure", "amenity", "name"
+  "leisure", "amenity", "name", "building:part", "man_made"
 }
 
 local function add_name()
   local name = Find("name")
   if name ~= "" then
     Attribute("name", name)
+  end
+end
+
+local function add_surface()
+  local surface = Find("surface")
+  if surface ~= "" then
+    Attribute("surface", surface)
   end
 end
 
@@ -23,6 +30,15 @@ local function building_height()
   end
 
   return 9, "fallback"
+end
+
+local function building_base()
+  local min_height = tonumber(Find("min_height"))
+  if min_height and min_height >= 0 then
+    return min_height
+  end
+
+  return 0
 end
 
 function node_function()
@@ -44,13 +60,24 @@ function node_function()
 end
 
 function way_function()
+  local man_made = Find("man_made")
+  if man_made == "bridge" then
+    Layer("bridges", true)
+    Attribute("class", "bridge")
+    add_name()
+    return
+  end
+
   local building = Find("building")
-  if building ~= "" then
+  local building_part = Find("building:part")
+  if building ~= "" or building_part ~= "" then
     local height, source = building_height()
+    local base = building_base()
     Layer("buildings", true)
     AttributeNumeric("height", height)
+    AttributeNumeric("base", base)
     Attribute("height_source", source)
-    Attribute("building", building)
+    Attribute("building", building ~= "" and building or building_part)
     add_name()
     return
   end
@@ -63,6 +90,7 @@ function way_function()
       Layer("roads", false)
     end
     Attribute("class", highway)
+    add_surface()
     add_name()
     return
   end

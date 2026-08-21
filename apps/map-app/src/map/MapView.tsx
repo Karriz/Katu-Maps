@@ -29,27 +29,81 @@ const TAMPERE_STYLE: StyleSpecification = {
     },
   },
   layers: [
-    { id: 'background', type: 'background', paint: { 'background-color': '#dce8e4' } },
+    { id: 'background', type: 'background', paint: { 'background-color': '#f4f6f2' } },
     {
       id: 'landuse',
       type: 'fill',
       source: 'tampere',
       'source-layer': 'landuse',
-      paint: { 'fill-color': '#c9dcc9', 'fill-opacity': 0.8 },
+      paint: {
+        'fill-color': [
+          'match',
+          ['get', 'class'],
+          'forest', '#d7e8d1',
+          'wood', '#c9e2c2',
+          'scrub', '#d5e5b4',
+          'heath', '#dce3ad',
+          'wetland', '#c8e2d2',
+          'bare_rock', '#ddd9ce',
+          'sand', '#f0dfae',
+          'beach', '#f2e2b7',
+          'farmland', '#e9edbf',
+          'farmyard', '#e8e0c8',
+          'orchard', '#d5e7b3',
+          'vineyard', '#d9e4ad',
+          'park', '#c5e6bb',
+          'recreation_ground', '#d0eabd',
+          'meadow', '#dcebb4',
+          'grass', '#d7eab8',
+          'allotments', '#d1e5a9',
+          'cemetery', '#cfe3c6',
+          'nature_reserve', '#bfe0b7',
+          'pitch', '#b8dfa9',
+          'residential', '#f1f0e8',
+          'commercial', '#ece9df',
+          'retail', '#f1e8d9',
+          'industrial', '#e4e5e1',
+          'brownfield', '#e4d9c4',
+          '#edf0e8',
+        ],
+        'fill-opacity': 0.9,
+      },
     },
     {
       id: 'water',
       type: 'fill',
       source: 'tampere',
       'source-layer': 'water',
-      paint: { 'fill-color': '#9bc9e6' },
+      paint: { 'fill-color': '#b9def1' },
+    },
+    {
+      id: 'bridges',
+      type: 'fill',
+      source: 'tampere',
+      'source-layer': 'bridges',
+      paint: {
+        'fill-color': '#d7d1c5',
+        'fill-outline-color': '#b9b2a6',
+        'fill-opacity': 0.98,
+      },
     },
     {
       id: 'railways',
       type: 'line',
       source: 'tampere',
       'source-layer': 'railways',
-      paint: { 'line-color': '#765f72', 'line-width': 2.5, 'line-opacity': 0.85 },
+      paint: { 'line-color': '#a99aa8', 'line-width': 2, 'line-opacity': 0.8 },
+    },
+    {
+      id: 'road-casing',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'roads',
+      paint: {
+        'line-color': '#d3d8d5',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.8, 14, 10],
+        'line-opacity': 0.85,
+      },
     },
     {
       id: 'roads',
@@ -57,7 +111,19 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'roads',
       paint: {
-        'line-color': '#fffdf7',
+        'line-color': [
+          'match',
+          ['get', 'surface'],
+          'gravel', '#d9c9a7',
+          'unpaved', '#decda9',
+          'dirt', '#cdb78a',
+          'ground', '#cdb78a',
+          'sand', '#ead39b',
+          'cobblestone', '#eee1cb',
+          'paving_stones', '#f5ead2',
+          'concrete', '#f3eee5',
+          '#fffdf7',
+        ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.8, 14, 7],
         'line-opacity': 0.95,
       },
@@ -67,7 +133,20 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'line',
       source: 'tampere',
       'source-layer': 'paths',
-      paint: { 'line-color': '#8c9d86', 'line-width': 1.5, 'line-dasharray': [2, 2] },
+      paint: {
+        'line-color': [
+          'match',
+          ['get', 'surface'],
+          'asphalt', '#8d9c84',
+          'gravel', '#b89d70',
+          'dirt', '#aa8759',
+          'ground', '#aa8759',
+          'sand', '#d2b878',
+          '#91a989',
+        ],
+        'line-width': 1.4,
+        'line-dasharray': [2, 2],
+      },
     },
     {
       id: 'buildings',
@@ -76,16 +155,10 @@ const TAMPERE_STYLE: StyleSpecification = {
       'source-layer': 'buildings',
       minzoom: 12,
       paint: {
-        'fill-extrusion-color': [
-          'match',
-          ['get', 'height_source'],
-          'height', '#c98f72',
-          'building:levels', '#d2a17e',
-          '#b98269',
-        ],
+        'fill-extrusion-color': '#d7dade',
         'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': 0,
-        'fill-extrusion-opacity': 0.9,
+        'fill-extrusion-base': ['get', 'base'],
+        'fill-extrusion-opacity': 0.94,
       },
     },
     {
@@ -93,7 +166,12 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'hillshade',
       source: 'terrain',
       layout: { visibility: 'none' },
-      paint: { 'hillshade-shadow-color': '#52645f' },
+      paint: {
+        'hillshade-exaggeration': 0.35,
+        'hillshade-shadow-color': '#66736c',
+        'hillshade-highlight-color': '#ffffff',
+        'hillshade-accent-color': '#aeb9b0',
+      },
     },
   ],
 };
@@ -158,7 +236,7 @@ export function MapView() {
             const map = mapRef.current;
             if (!map) return;
             const nextEnabled = !terrainEnabled;
-            map.setTerrain(nextEnabled ? { source: 'terrain', exaggeration: 1.25 } : null);
+            map.setTerrain(nextEnabled ? { source: 'terrain', exaggeration: 1.0 } : null);
             map.setLayoutProperty('terrain-hillshade', 'visibility', nextEnabled ? 'visible' : 'none');
             setTerrainEnabled(nextEnabled);
           }}

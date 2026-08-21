@@ -41,6 +41,22 @@ regional boundary. The build uses tilemaker's `--skip-integrity` for that
 known boundary artifact; this should be revisited before using a larger or
 production extract.
 
+Buildings mapped as OSM `type=multipolygon` relations are assembled by
+tilemaker and use the relation's building tags, including holes and multiple
+outer rings. `building:part` ways are also emitted, which supports buildings
+whose separate wings or sections have their own heights. Building colours are
+rendered as a neutral light gray in the browser style. Parts with
+`min_height` are emitted with a raised extrusion base, so features such as
+antennae and rooftop structures appear above the main building.
+
+Road and path features also retain their OSM `surface` value when mapped,
+allowing asphalt, gravel, dirt, sand, paving stones, and similar surfaces to
+receive distinct browser styling.
+
+Closed `man_made=bridge` ways are emitted as bridge-deck polygons beneath the
+transport lines, preventing mapped roads, rails, and paths from appearing to
+float separately over the water.
+
 ## Serving the result
 
 MBTiles is a build artifact, not a browser API. This repository uses the
