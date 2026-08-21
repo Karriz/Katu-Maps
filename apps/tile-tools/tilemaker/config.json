@@ -1,0 +1,26 @@
+{
+  "layers": {
+    "water": { "minzoom": 10, "maxzoom": 14 },
+    "landuse": { "minzoom": 10, "maxzoom": 14 },
+    "railways": { "minzoom": 10, "maxzoom": 14 },
+    "roads": { "minzoom": 10, "maxzoom": 14 },
+    "paths": { "minzoom": 12, "maxzoom": 14 },
+    "buildings": { "minzoom": 13, "maxzoom": 14 },
+    "places": { "minzoom": 10, "maxzoom": 14 },
+    "pois": { "minzoom": 13, "maxzoom": 14 }
+  },
+  "settings": {
+    "minzoom": 10,
+    "maxzoom": 14,
+    "basezoom": 14,
+    "include_ids": true,
+    "compress": "gzip",
+    "name": "Tampere OSM prototype",
+    "version": "0.1.0",
+    "description": "OSM-derived vector tiles for the Tampere 3D map prototype",
+    "metadata": {
+      "attribution": "© OpenStreetMap contributors",
+      "license": "ODbL-1.0"
+    }
+  }
+}

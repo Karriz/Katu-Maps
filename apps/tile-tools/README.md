@@ -1,0 +1,70 @@
+# Tampere tile preparation
+
+This directory turns a reproducible OpenStreetMap extract into vector tiles
+for the browser map. The raw `.osm.pbf` and generated `.mbtiles` files are
+intentionally ignored by Git.
+
+## Prerequisites
+
+- `curl`
+- `sha256sum`
+- `osmium` (osmium-tool)
+- `tilemaker`
+
+The versions of the tools used for a release should be recorded in the data
+manifest or release notes. The scripts accept `OSM_SOURCE_URL` so a smaller
+regional extract can be used without changing the processing code.
+
+## Build
+
+From this directory:
+
+```sh
+npm run build-all
+```
+
+The default source is the Pirkanmaa regional extract. The script clips it to
+the Tampere bounding box in `data/sources/manifest.json`, then tilemaker
+creates `data/processed/tampere.mbtiles`.
+
+To use another extract:
+
+```sh
+OSM_SOURCE_URL=https://example.invalid/tampere.osm.pbf npm run prepare
+```
+
+The source URL, source checksum, bounding box, processing configuration, and
+tool versions together form the input manifest for a generated tileset.
+
+The current Pirkanmaa provider extract contains one incomplete way at its
+regional boundary. The build uses tilemaker's `--skip-integrity` for that
+known boundary artifact; this should be revisited before using a larger or
+production extract.
+
+## Serving the result
+
+MBTiles is a build artifact, not a browser API. This repository uses the
+open-source [Martin tile server](https://maplibre.org/martin/) for local
+development. After building the tiles, start it from this directory with:
+
+```sh
+npm run serve
+```
+
+Martin will serve the `tampere.mbtiles` source on port 3000. Its TileJSON
+endpoint is:
+
+```text
+http://localhost:3000/tampere
+```
+
+The vector tile URL template exposed by that document can be used as the
+MapLibre vector source. The MBTiles directory is mounted read-only into the
+container. The frontend should consume TileJSON/vector-tile URLs and should
+never parse the PBF or SQLite file directly.
+
+The server image is pinned in the repository root's `docker-compose.yml` so
+local development is reproducible. For deployment, consider converting the
+artifact to PMTiles and serving it from object storage with HTTP range
+requests; Martin remains suitable when a tile server or PostGIS backend is
+needed.

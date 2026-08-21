@@ -1,0 +1,12 @@
+{
+  "name": "tampere-map-tile-tools",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "download": "./scripts/download-osm.sh",
+    "build": "./scripts/build-tiles.sh",
+    "build-all": "npm run download && npm run build",
+    "serve": "./scripts/serve-tiles.sh"
+  }
+}

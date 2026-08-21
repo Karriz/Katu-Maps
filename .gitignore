@@ -1,0 +1,9 @@
+node_modules/
+dist/
+
+# Generated geospatial data. Keep the manifest and processing configuration
+# under version control, but never commit raw extracts or generated tiles.
+data/sources/*.osm.pbf
+data/sources/source.sha256
+data/processed/*
+!data/processed/.gitkeep
