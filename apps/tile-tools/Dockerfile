@@ -19,6 +19,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/apps/tile-tools
+RUN ln -s /usr/src/app/tilemaker /usr/local/bin/tilemaker
 COPY apps/tile-tools /workspace/apps/tile-tools
 COPY data/sources /workspace/data/sources
 

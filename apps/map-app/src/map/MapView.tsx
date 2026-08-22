@@ -1,81 +1,179 @@
 import { useEffect, useRef, useState } from 'react';
-import maplibregl, { type GeoJSONSource, type Map, type StyleSpecification } from 'maplibre-gl';
+import maplibregl, {
+  type ExpressionSpecification,
+  type FillExtrusionLayerSpecification,
+  type Map,
+  type StyleSpecification,
+} from 'maplibre-gl';
+import { BuildingRoofLayer } from './BuildingRoofLayer';
+import { TreeModelLayer } from './TreeModelLayer';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
 const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
+const BUILDING_DETAIL_MIN_ZOOM = 14;
+const MAX_BUILDING_STORY_SLICES = 12;
 
-type TreeModelFeature = {
-  type: 'Feature';
-  properties: { kind: 'trunk' | 'canopy'; height: number; base: number; leafType: string };
-  geometry: { type: 'Polygon'; coordinates: number[][][] };
-};
-
-function treeCoordinates(feature: ReturnType<Map['querySourceFeatures']>[number]): number[][] {
-  const geometry = feature.geometry;
-  if (geometry?.type === 'Point' && Array.isArray(geometry.coordinates)) {
-    return [geometry.coordinates.map(Number)];
-  }
-  if (geometry?.type === 'MultiPoint' && Array.isArray(geometry.coordinates)) {
-    return geometry.coordinates.map((coordinates) => coordinates.map(Number));
-  }
-  return [];
+function seededBuildingPalette(colors: string[]): ExpressionSpecification {
+  return [
+    'match',
+    ['%', ['id'], colors.length],
+    ...colors.flatMap((color, index) => [index, color]),
+    colors[0],
+  ] as ExpressionSpecification;
 }
 
-function createTreeModels(map: Map, sourceFeatures: ReturnType<Map['querySourceFeatures']>) {
-  const features: TreeModelFeature[] = [];
-  const seen = new Set<string>();
+const DEFAULT_BUILDING_PALETTE = seededBuildingPalette([
+  '#e2e4e3', '#e4ded9', '#dedfe9', '#e2e8df',
+]);
+const DEFAULT_BUILDING_PALETTE_ALT = seededBuildingPalette([
+  '#eceeed', '#eee9e5', '#e9e9f0', '#ebf0e9',
+]);
+const RESIDENTIAL_BUILDING_PALETTE = seededBuildingPalette([
+  '#e8d9d3', '#e3dce8', '#e8dfca', '#dfe8e5',
+]);
+const RESIDENTIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
+  '#f0e5e0', '#ede8f0', '#f0e9dc', '#e8f0ed',
+]);
+const APARTMENT_BUILDING_PALETTE = seededBuildingPalette([
+  '#d9dce8', '#ded8e7', '#d8e5e8', '#e4d9e8',
+]);
+const APARTMENT_BUILDING_PALETTE_ALT = seededBuildingPalette([
+  '#e7e9f0', '#eae5ef', '#e6eef0', '#eee7f0',
+]);
+const COMMERCIAL_BUILDING_PALETTE = seededBuildingPalette([
+  '#d8e2eb', '#d9ddec', '#e2d9e8', '#d9e7e2',
+]);
+const COMMERCIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
+  '#e5edf3', '#e6e9f3', '#ede6f0', '#e7f0eb',
+]);
+const INDUSTRIAL_BUILDING_PALETTE = seededBuildingPalette([
+  '#d6dedc', '#d3dcda', '#dfe0d5', '#d3dce5',
+]);
+const INDUSTRIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
+  '#e1e7e5', '#dfe6e4', '#e9e8df', '#dfe7ed',
+]);
+const CIVIC_BUILDING_PALETTE = seededBuildingPalette([
+  '#eadfca', '#dddbea', '#e6ddd0', '#dce8e5',
+]);
+const CIVIC_BUILDING_PALETTE_ALT = seededBuildingPalette([
+  '#f0e8d8', '#e7e5ef', '#eee6dc', '#e6f0ed',
+]);
 
-  for (const feature of sourceFeatures) {
-    for (const coordinates of treeCoordinates(feature)) {
-      if (coordinates.length < 2 || seen.size >= 5000) continue;
-      const longitude = coordinates[0];
-      const latitude = coordinates[1];
-      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
-      const key = `${longitude.toFixed(6)}:${latitude.toFixed(6)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+const BUILDING_PALETTE: ExpressionSpecification = [
+  'match',
+  ['get', 'building'],
+  'apartments', APARTMENT_BUILDING_PALETTE,
+  'residential', RESIDENTIAL_BUILDING_PALETTE,
+  'house', RESIDENTIAL_BUILDING_PALETTE,
+  'detached', RESIDENTIAL_BUILDING_PALETTE,
+  'terrace', RESIDENTIAL_BUILDING_PALETTE,
+  'commercial', COMMERCIAL_BUILDING_PALETTE,
+  'office', COMMERCIAL_BUILDING_PALETTE,
+  'retail', COMMERCIAL_BUILDING_PALETTE,
+  'industrial', INDUSTRIAL_BUILDING_PALETTE,
+  'warehouse', INDUSTRIAL_BUILDING_PALETTE,
+  'school', CIVIC_BUILDING_PALETTE,
+  'public', CIVIC_BUILDING_PALETTE,
+  'civic', CIVIC_BUILDING_PALETTE,
+  'church', CIVIC_BUILDING_PALETTE,
+  DEFAULT_BUILDING_PALETTE,
+];
 
-      const properties = feature.properties ?? {};
-      const heightValue = Number(properties.height);
-      const height = Number.isFinite(heightValue) && heightValue > 2 ? Math.min(heightValue, 24) : 12;
-      const leafType = String(properties.leaf_type ?? 'broadleaved');
-      const terrainElevation = map.queryTerrainElevation([longitude, latitude], { exaggerated: false });
-      const ground = terrainElevation ?? 0;
-      const metersPerDegreeLat = 1 / 111320;
-      const metersPerDegreeLon = metersPerDegreeLat / Math.cos((latitude * Math.PI) / 180);
-      const polygon = (radius: number, sides: number, angleOffset: number) => Array.from({ length: sides + 1 }, (_, index) => {
-        const angle = angleOffset + (index / sides) * Math.PI * 2;
-        return [
-          longitude + Math.cos(angle) * radius * metersPerDegreeLon,
-          latitude + Math.sin(angle) * radius * metersPerDegreeLat,
+const BUILDING_PALETTE_ALT: ExpressionSpecification = [
+  'match',
+  ['get', 'building'],
+  'apartments', APARTMENT_BUILDING_PALETTE_ALT,
+  'residential', RESIDENTIAL_BUILDING_PALETTE_ALT,
+  'house', RESIDENTIAL_BUILDING_PALETTE_ALT,
+  'detached', RESIDENTIAL_BUILDING_PALETTE_ALT,
+  'terrace', RESIDENTIAL_BUILDING_PALETTE_ALT,
+  'commercial', COMMERCIAL_BUILDING_PALETTE_ALT,
+  'office', COMMERCIAL_BUILDING_PALETTE_ALT,
+  'retail', COMMERCIAL_BUILDING_PALETTE_ALT,
+  'industrial', INDUSTRIAL_BUILDING_PALETTE_ALT,
+  'warehouse', INDUSTRIAL_BUILDING_PALETTE_ALT,
+  'school', CIVIC_BUILDING_PALETTE_ALT,
+  'public', CIVIC_BUILDING_PALETTE_ALT,
+  'civic', CIVIC_BUILDING_PALETTE_ALT,
+  'church', CIVIC_BUILDING_PALETTE_ALT,
+  DEFAULT_BUILDING_PALETTE_ALT,
+];
+
+const BUILDING_COLOR: ExpressionSpecification = [
+  'coalesce',
+  ['get', 'building_color'],
+  BUILDING_PALETTE,
+];
+
+const BUILDING_COLOR_ALT: ExpressionSpecification = [
+  'coalesce',
+  ['get', 'building_color_alt'],
+  BUILDING_PALETTE_ALT,
+];
+
+const ROOF_COLOR: ExpressionSpecification = [
+  'coalesce',
+  ['get', 'roof_color'],
+  BUILDING_COLOR_ALT,
+];
+
+const HAS_PITCHED_ROOF: ExpressionSpecification = [
+  'all',
+  ['has', 'roof_height'],
+  ['has', 'roof_shape'],
+  ['>', ['get', 'roof_height'], 0],
+  ['match', ['get', 'roof_shape'], 'flat', false, 'none', false, true],
+];
+
+const BUILDING_BODY_HEIGHT: ExpressionSpecification = [
+  'case',
+  HAS_PITCHED_ROOF,
+  ['-', ['get', 'height'], ['get', 'roof_height']],
+  ['get', 'height'],
+];
+
+const BUILDING_STORY_HEIGHT: ExpressionSpecification = [
+  '/',
+  ['-', BUILDING_BODY_HEIGHT, ['get', 'base']],
+  ['max', 1, ['get', 'levels']],
+];
+
+function buildingStoryLayers(): FillExtrusionLayerSpecification[] {
+  return Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, storyIndex) => {
+    const isTopSlice = storyIndex === MAX_BUILDING_STORY_SLICES - 1;
+    const storyBase: ExpressionSpecification = [
+      '+',
+      ['get', 'base'],
+      ['*', BUILDING_STORY_HEIGHT, storyIndex],
+    ];
+    const storyTop: ExpressionSpecification = isTopSlice
+      ? BUILDING_BODY_HEIGHT
+      : [
+          'min',
+          BUILDING_BODY_HEIGHT,
+          [
+            '+',
+            ['get', 'base'],
+            ['*', BUILDING_STORY_HEIGHT, storyIndex + 1],
+          ],
         ];
-      });
 
-      features.push({
-        type: 'Feature',
-        properties: {
-          kind: 'trunk',
-          height: ground + Math.min(height * 0.42, 4),
-          base: ground,
-          leafType,
-        },
-        geometry: { type: 'Polygon', coordinates: [polygon(0.65, 4, Math.PI / 4)] },
-      });
-      features.push({
-        type: 'Feature',
-        properties: {
-          kind: 'canopy',
-          height: ground + height,
-          base: ground + Math.min(height * 0.28, 3),
-          leafType,
-        },
-        geometry: { type: 'Polygon', coordinates: [polygon(2.5, 6, Math.PI / 6)] },
-      });
-    }
-  }
-
-  return { type: 'FeatureCollection' as const, features };
+    return {
+      id: `building-story-${storyIndex + 1}`,
+      type: 'fill-extrusion',
+      source: 'tampere',
+      'source-layer': 'buildings',
+      minzoom: BUILDING_DETAIL_MIN_ZOOM,
+      filter: ['>', ['get', 'levels'], storyIndex],
+      paint: {
+        'fill-extrusion-color': storyIndex % 2 === 0 ? BUILDING_COLOR : BUILDING_COLOR_ALT,
+        'fill-extrusion-height': storyTop,
+        'fill-extrusion-base': storyBase,
+        'fill-extrusion-opacity': 0.96,
+      },
+    };
+  });
 }
 
 const TAMPERE_STYLE: StyleSpecification = {
@@ -100,13 +198,6 @@ const TAMPERE_STYLE: StyleSpecification = {
       maxzoom: 14,
       encoding: 'mapbox',
       attribution: 'National Land Survey of Finland, Elevation model 10 m',
-    },
-    'tree-models': {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-      maxzoom: 20,
-      tolerance: 0,
-      buffer: 256,
     },
   },
   layers: [
@@ -404,11 +495,31 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'buildings',
       minzoom: 12,
+      maxzoom: BUILDING_DETAIL_MIN_ZOOM,
       paint: {
-        'fill-extrusion-color': '#d7dade',
+        'fill-extrusion-color': BUILDING_COLOR,
         'fill-extrusion-height': ['get', 'height'],
         'fill-extrusion-base': ['get', 'base'],
         'fill-extrusion-opacity': 0.94,
+      },
+    },
+    ...buildingStoryLayers(),
+    {
+      id: 'building-roof-caps',
+      type: 'fill-extrusion',
+      source: 'tampere',
+      'source-layer': 'buildings',
+      minzoom: BUILDING_DETAIL_MIN_ZOOM,
+      filter: [
+        'all',
+        ['>', ['get', 'roof_height'], 0],
+        ['==', ['get', 'roof_shape'], 'flat'],
+      ],
+      paint: {
+        'fill-extrusion-color': ROOF_COLOR,
+        'fill-extrusion-height': ['+', ['get', 'height'], 0.04],
+        'fill-extrusion-base': ['-', ['get', 'height'], ['get', 'roof_height']],
+        'fill-extrusion-opacity': 0.98,
       },
     },
     {
@@ -416,44 +527,14 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'circle',
       source: 'tampere',
       'source-layer': 'trees',
-      minzoom: 13,
+      minzoom: 11,
+      maxzoom: 13,
       paint: {
         'circle-color': '#5d9951',
         'circle-radius': 2,
         'circle-opacity': 0.8,
         'circle-stroke-color': '#39713a',
         'circle-stroke-width': 0.5,
-      },
-    },
-    {
-      id: 'tree-trunks',
-      type: 'fill-extrusion',
-      source: 'tree-models',
-      minzoom: 13,
-      filter: ['==', ['get', 'kind'], 'trunk'],
-      paint: {
-        'fill-extrusion-color': '#76563b',
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': ['get', 'base'],
-        'fill-extrusion-opacity': 1,
-      },
-    },
-    {
-      id: 'tree-canopies',
-      type: 'fill-extrusion',
-      source: 'tree-models',
-      minzoom: 13,
-      filter: ['==', ['get', 'kind'], 'canopy'],
-      paint: {
-        'fill-extrusion-color': [
-          'match',
-          ['get', 'leafType'],
-          'needleleaved', '#39713a',
-          '#5d9951',
-        ],
-        'fill-extrusion-height': ['get', 'height'],
-        'fill-extrusion-base': ['get', 'base'],
-        'fill-extrusion-opacity': 1,
       },
     },
     {
@@ -524,6 +605,7 @@ const TAMPERE_STYLE: StyleSpecification = {
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
+  const treeRefreshRef = useRef<(() => void) | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [terrainEnabled, setTerrainEnabled] = useState(false);
@@ -543,36 +625,25 @@ export function MapView() {
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    let treeSignature = '';
+    const roofLayer = new BuildingRoofLayer();
+    const treeLayer = new TreeModelLayer();
     let treeUpdateTimer: number | undefined;
     const updateTreeModels = () => {
-      const source = map.getSource('tree-models') as GeoJSONSource | undefined;
-      if (!source) return;
-      if (map.getZoom() < 13) {
-        if (treeSignature !== '') {
-          treeSignature = '';
-          source.setData({ type: 'FeatureCollection', features: [] });
-        }
+      if (map.isMoving()) {
+        scheduleTreeUpdate();
         return;
       }
-
-      const loadedTrees = map.querySourceFeatures('tampere', { sourceLayer: 'trees' });
-      const coordinates = loadedTrees.flatMap((feature) => treeCoordinates(feature).map(
-        ([longitude, latitude]) => `${longitude.toFixed(6)}:${latitude.toFixed(6)}`,
-      ));
-      coordinates.sort();
-      const nextSignature = coordinates.join('|');
-      if (nextSignature === treeSignature) return;
-
-      treeSignature = nextSignature;
-      const treeModels = createTreeModels(map, loadedTrees);
-      source.setData(treeModels);
+      roofLayer.updateRoofs();
+      treeLayer.updateTrees();
     };
     const scheduleTreeUpdate = () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       treeUpdateTimer = window.setTimeout(updateTreeModels, 120);
     };
+    treeRefreshRef.current = scheduleTreeUpdate;
     map.once('load', () => {
+      map.addLayer(roofLayer, 'places-labels');
+      map.addLayer(treeLayer, 'places-labels');
       scheduleTreeUpdate();
       setMapLoaded(true);
     });
@@ -596,6 +667,7 @@ export function MapView() {
       map.off('sourcedata', scheduleTreeUpdate);
       map.remove();
       mapRef.current = null;
+      treeRefreshRef.current = null;
     };
   }, []);
 
@@ -620,6 +692,7 @@ export function MapView() {
             const nextEnabled = !terrainEnabled;
             map.setTerrain(nextEnabled ? { source: 'terrain', exaggeration: 1.0 } : null);
             map.setLayoutProperty('terrain-hillshade', 'visibility', nextEnabled ? 'visible' : 'none');
+            treeRefreshRef.current?.();
             setTerrainEnabled(nextEnabled);
           }}
         >
