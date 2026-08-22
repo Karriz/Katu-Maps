@@ -9,6 +9,32 @@ const ROOF_MIN_ZOOM = 14;
 const MAX_ROOF_FEATURES = 2200;
 const DEFAULT_ROOF_COLOR = '#c9b9ae';
 const REFERENCE = new maplibregl.LngLat(23.7609, 61.4981);
+const BUILDING_PALETTES: Record<string, [string[], string[]]> = {
+  default: [
+    ['#e2e4e3', '#e4ded9', '#dedfe9', '#e2e8df'],
+    ['#eceeed', '#eee9e5', '#e9e9f0', '#ebf0e9'],
+  ],
+  residential: [
+    ['#e8d9d3', '#e3dce8', '#e8dfca', '#dfe8e5'],
+    ['#f0e5e0', '#ede8f0', '#f0e9dc', '#e8f0ed'],
+  ],
+  apartments: [
+    ['#d9dce8', '#ded8e7', '#d8e5e8', '#e4d9e8'],
+    ['#e7e9f0', '#eae5ef', '#e6eef0', '#eee7f0'],
+  ],
+  commercial: [
+    ['#d8e2eb', '#d9ddec', '#e2d9e8', '#d9e7e2'],
+    ['#e5edf3', '#e6e9f3', '#ede6f0', '#e7f0eb'],
+  ],
+  industrial: [
+    ['#d6dedc', '#d3dcda', '#dfe0d5', '#d3dce5'],
+    ['#e1e7e5', '#dfe6e4', '#e9e8df', '#dfe7ed'],
+  ],
+  civic: [
+    ['#eadfca', '#dddbea', '#e6ddd0', '#dce8e5'],
+    ['#f0e8d8', '#e7e5ef', '#eee6dc', '#e6f0ed'],
+  ],
+};
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
 type MetricPoint = [number, number];
@@ -116,9 +142,53 @@ function axisFrame(ring: MetricPoint[], orientation: unknown): AxisFrame {
   return { center, longAxis, shortAxis, minLong, maxLong, minShort, maxShort };
 }
 
-function roofColor(properties: Record<string, unknown>) {
-  const value = properties.roof_color ?? properties.building_color_alt ?? properties.building_color;
-  return typeof value === 'string' && value ? value : DEFAULT_ROOF_COLOR;
+function paletteKind(building: string) {
+  if (building === 'apartments') return 'apartments';
+  if (['residential', 'house', 'detached', 'terrace'].includes(building)) return 'residential';
+  if (['commercial', 'office', 'retail'].includes(building)) return 'commercial';
+  if (['industrial', 'warehouse'].includes(building)) return 'industrial';
+  if (['school', 'public', 'civic'].includes(building)) return 'civic';
+  return 'default';
+}
+
+function featureSeed(id: SourceFeature['id']) {
+  if (typeof id === 'number' && Number.isFinite(id)) return Math.abs(Math.trunc(id));
+  const value = String(id ?? '0');
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (Math.imul(hash, 31) + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function isReligiousBuilding(properties: Record<string, unknown>) {
+  const building = String(properties.building ?? '').toLowerCase();
+  return ['church', 'chapel', 'religious', 'cathedral', 'bell_tower'].includes(building)
+    || String(properties.amenity ?? '').toLowerCase() === 'place_of_worship'
+    || isChurchTower(properties);
+}
+
+function topStoreyColor(properties: Record<string, unknown>, id: SourceFeature['id']) {
+  const levels = Math.max(1, Math.round(Number(properties.levels) || 1));
+  const useAlternate = (levels - 1) % 2 === 1;
+  const tagged = useAlternate
+    ? properties.building_color_alt ?? properties.building_color
+    : properties.building_color ?? properties.building_color_alt;
+  if (typeof tagged === 'string' && tagged) return tagged;
+  const palettes = BUILDING_PALETTES[paletteKind(String(properties.building ?? '').toLowerCase())];
+  const palette = palettes[useAlternate ? 1 : 0];
+  return palette[featureSeed(id) % palette.length];
+}
+
+function roofColor(properties: Record<string, unknown>, id: SourceFeature['id']) {
+  if (typeof properties.roof_color === 'string' && properties.roof_color) {
+    return properties.roof_color;
+  }
+  const levels = Number(properties.levels);
+  if (Number.isFinite(levels) && levels >= 10 && !isReligiousBuilding(properties)) {
+    return topStoreyColor(properties, id);
+  }
+  return DEFAULT_ROOF_COLOR;
 }
 
 function wallColor(properties: Record<string, unknown>) {
@@ -381,7 +451,7 @@ export class BuildingRoofLayer implements CustomLayerInterface {
       const shape = effectiveRoofShape(properties);
       const buildingHeight = Number(properties.height);
       if (!shape || shape === 'flat' || shape === 'none' || !Number.isFinite(buildingHeight)) continue;
-      roof.set(roofColor(properties));
+      roof.set(roofColor(properties, feature.id));
       wall.set(wallColor(properties));
 
       for (const sourcePolygon of polygons(feature)) {
