@@ -328,6 +328,24 @@ const PATH_WIDTH: ExpressionSpecification = [
   20, ['*', PATH_WIDTH_METERS, 28.074158],
 ];
 
+// Minor paths are useful close up but add a lot of visual noise at the first
+// zoom level where the paths layer is available.
+const PATH_DETAIL_OPACITY: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  12, 0,
+  13, 0.92,
+];
+const PATH_DETAIL_CASING_OPACITY: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  12, 0,
+  13, 0.9,
+];
+const PATH_EARTHWORK_OPACITY: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  12, 0,
+  13, 0.4,
+];
+
 const PATH_CASING_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
   12, ['+', ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]], 2.5],
@@ -1083,7 +1101,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: {
         'line-color': ['case', ['has', 'cutting'], '#b2aaa0', '#c3b79f'],
         'line-width': 3,
-        'line-opacity': 0.4,
+        'line-opacity': PATH_EARTHWORK_OPACITY,
       },
     },
     {
@@ -1100,7 +1118,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: {
         'line-color': '#e6dfd2',
         'line-width': PATH_CASING_WIDTH,
-        'line-opacity': 0.9,
+        'line-opacity': PATH_DETAIL_CASING_OPACITY,
       },
     },
     {
@@ -1117,7 +1135,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: {
         'line-color': SURFACE_PATH_COLOR,
         'line-width': PATH_WIDTH,
-        'line-opacity': 0.92,
+        'line-opacity': PATH_DETAIL_OPACITY,
       },
     },
     {
@@ -1408,6 +1426,7 @@ export function MapView() {
   const mapRef = useRef<Map | null>(null);
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
+  const infrastructureLayerRef = useRef<InfrastructureModelLayer | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
@@ -1449,6 +1468,7 @@ export function MapView() {
     const infrastructureLayer = new InfrastructureModelLayer();
     const treeLayer = new TreeModelLayer();
     treeLayerRef.current = treeLayer;
+    infrastructureLayerRef.current = infrastructureLayer;
     let treeUpdateTimer: number | undefined;
     const updateTreeModels = () => {
       if (map.isMoving()) {
@@ -1503,6 +1523,7 @@ export function MapView() {
       mapRef.current = null;
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
+      infrastructureLayerRef.current = null;
     };
   }, []);
 
@@ -1532,6 +1553,7 @@ export function MapView() {
       layerToggles.buildings && layerToggles.shadows,
     );
     setVisibility(INFRASTRUCTURE_SHADOW_LAYER_IDS, layerToggles.shadows);
+    infrastructureLayerRef.current?.setShadowsEnabled(layerToggles.shadows);
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees && layerToggles.shadows);
     setVisibility(WATER_EFFECT_LAYER_IDS, layerToggles.waterEffect);
     map.setTerrain(layerToggles.terrain ? { source: 'terrain', exaggeration: 1.0 } : null);

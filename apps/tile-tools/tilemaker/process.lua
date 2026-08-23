@@ -373,7 +373,10 @@ function way_function()
 
   local amenity = Find("amenity")
   local public_transport = Find("public_transport")
-  if amenity == "parking" then
+  -- Parking garages are commonly tagged with both amenity=parking and
+  -- building=garage. Let those continue through the building branch so they
+  -- receive 3D extrusion; standalone parking polygons remain flat surfaces.
+  if amenity == "parking" and Find("building") == "" and Find("building:part") == "" then
     Layer("parking", true)
     Attribute("class", "parking")
     add_surface()

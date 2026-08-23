@@ -36,6 +36,43 @@ type TunnelEntranceFeature = {
   geometry: { type: 'LineString'; coordinates: number[][] };
 };
 
+function createShadowTexture() {
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const normalizedX = (x + 0.5) / size * 2 - 1;
+      const normalizedY = (y + 0.5) / size * 2 - 1;
+      const distance = Math.hypot(normalizedX, normalizedY);
+      const value = Math.round(Math.max(0, Math.min(1, (1 - distance) / 0.48)) ** 2 * 255);
+      const offset = (y * size + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function addGroundShadow(
+  group: THREE.Group,
+  point: Point,
+  radius: number,
+  length: number,
+  geometry: THREE.CircleGeometry,
+  material: THREE.Material,
+) {
+  const shadow = new THREE.Mesh(geometry, material);
+  shadow.userData.isInfrastructureShadow = true;
+  shadow.position.set(point.x + 0.8 * length * 0.42, point.ground + 0.06, point.z + 0.6 * length * 0.42);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.scale.set(radius, length, 1);
+  group.add(shadow);
+}
+
 function sourceFeatures(map: MaplibreMap, sourceLayer: string): SourceFeature[] {
   try {
     return map.querySourceFeatures('tampere', { sourceLayer });
@@ -190,11 +227,16 @@ function addTransmissionTower(
   heightValue: unknown,
   material: THREE.Material,
   lineDirection?: Direction,
+  shadowGeometry?: THREE.CircleGeometry,
+  shadowMaterial?: THREE.Material,
 ) {
   const taggedHeight = Number(heightValue);
   const height = Number.isFinite(taggedHeight) && taggedHeight > 4
     ? Math.min(taggedHeight, 80)
     : 24;
+  if (shadowGeometry && shadowMaterial) {
+    addGroundShadow(group, point, 2.4, Math.max(5, height * 0.28), shadowGeometry, shadowMaterial);
+  }
   const orientation = lineDirection
     ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
         new THREE.Vector3(lineDirection.z, 0, -lineDirection.x),
@@ -295,6 +337,8 @@ function addLandmark(
   towerConstruction = '',
   latticeMaterial?: THREE.Material,
   accentMaterial?: THREE.Material,
+  shadowGeometry?: THREE.CircleGeometry,
+  shadowMaterial?: THREE.Material,
 ) {
   const taggedHeight = Number(heightValue);
   const isCommunicationTower = className === 'communications_tower'
@@ -303,6 +347,9 @@ function addLandmark(
     const height = Number.isFinite(taggedHeight) && taggedHeight >= 25
       ? Math.min(taggedHeight, 160)
       : towerConstruction === 'guyed_lattice' ? 55 : 42;
+    if (shadowGeometry && shadowMaterial) {
+      addGroundShadow(group, point, Math.max(2.4, height * 0.045), Math.max(7, height * 0.3), shadowGeometry, shadowMaterial);
+    }
     const towerHeight = height * 0.9;
     const baseRadius = Math.min(4.2, Math.max(2.4, height * 0.045));
     const lattice = new THREE.Mesh(
@@ -417,7 +464,17 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
   private origin = REFERENCE;
   private originElevation = 0;
   private group?: THREE.Group;
+  private shadowsEnabled = true;
+  private shadowTexture?: THREE.DataTexture;
   private tunnelEntranceDataKey = '[]';
+
+  setShadowsEnabled(enabled: boolean) {
+    this.shadowsEnabled = enabled;
+    this.group?.traverse((object) => {
+      if (object.userData.isInfrastructureShadow) object.visible = enabled;
+    });
+    this.map?.triggerRepaint();
+  }
 
   private setTunnelEntrances(features: TunnelEntranceFeature[]) {
     const dataKey = JSON.stringify(features);
@@ -446,6 +503,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
     if (!map) return;
     disposeGroup(this.group);
     if (this.group) this.scene.remove(this.group);
+    this.shadowTexture?.dispose();
+    this.shadowTexture = undefined;
     this.group = new THREE.Group();
     this.scene.add(this.group);
     if (map.getZoom() < MIN_ZOOM) {
@@ -457,6 +516,18 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
     this.originElevation = map.queryTerrainElevation(this.origin) ?? 0;
     const units = maplibregl.MercatorCoordinate.fromLngLat(this.origin).meterInMercatorCoordinateUnits();
     const powerMaterial = new THREE.MeshLambertMaterial({ color: 0x555b58, flatShading: true });
+    this.shadowTexture = createShadowTexture();
+    const shadowGeometry = new THREE.CircleGeometry(1, 16);
+    const shadowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x1d3028,
+      transparent: true,
+      opacity: 0.15,
+      alphaMap: this.shadowTexture,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
     const landmarkMaterial = new THREE.MeshLambertMaterial({ color: 0x9a9286, flatShading: true });
     const towerLatticeMaterial = new THREE.MeshLambertMaterial({ color: 0x666e6b, wireframe: true });
     const towerAccentMaterial = new THREE.MeshLambertMaterial({ color: 0xb85f51, flatShading: true });
@@ -506,6 +577,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
         candidate.height,
         powerMaterial,
         nearestLineDirection(candidate.point, lineSegments),
+        shadowGeometry,
+        shadowMaterial,
       ));
 
     if (map.getZoom() >= 12) {
@@ -577,10 +650,13 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
               candidate.towerConstruction,
               towerLatticeMaterial,
               towerAccentMaterial,
+              shadowGeometry,
+              shadowMaterial,
             );
           }
         });
     }
+    this.setShadowsEnabled(this.shadowsEnabled);
 
     const tunnelEntranceFeatures: TunnelEntranceFeature[] = [];
     if (map.getZoom() >= 13) {
@@ -712,6 +788,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
 
   onRemove() {
     disposeGroup(this.group);
+    this.shadowTexture?.dispose();
+    this.shadowTexture = undefined;
     this.scene.clear();
     this.renderer?.dispose();
     this.renderer = undefined;

@@ -48,6 +48,11 @@ type MetricBounds = {
   maxY: number;
 };
 
+type MetricPolygon = {
+  rings: MetricPoint[][];
+  bounds: MetricBounds;
+};
+
 type ProceduralTreeCandidate = TreeInstance & {
   priority: number;
 };
@@ -220,6 +225,22 @@ function polygonBounds(rings: MetricPoint[][]): MetricBounds | undefined {
   return bounds;
 }
 
+function collectMetricPolygons(features: SourceFeature[]): MetricPolygon[] {
+  return features.flatMap((feature) => featurePolygons(feature).flatMap((sourcePolygon) => {
+    const rings = metricPolygon(sourcePolygon);
+    const bounds = polygonBounds(rings);
+    return bounds ? [{ rings, bounds }] : [];
+  }));
+}
+
+function pointInAnyPolygon(point: MetricPoint, polygons: MetricPolygon[]) {
+  return polygons.some(({ rings, bounds }) => (
+    point[0] >= bounds.minX && point[0] <= bounds.maxX
+    && point[1] >= bounds.minY && point[1] <= bounds.maxY
+    && pointInPolygon(point, rings)
+  ));
+}
+
 function cellSeed(cellX: number, cellY: number, kindSalt: number) {
   return (
     Math.imul(cellX, 73_856_093)
@@ -290,6 +311,7 @@ function nearMappedTree(point: MetricPoint, index: Map<string, MetricPoint[]>) {
 
 function collectProceduralTrees(
   sourceFeatures: SourceFeature[],
+  waterFeatures: SourceFeature[],
   bounds: MetricBounds,
   mappedTrees: TreeInstance[],
   availableCount: number,
@@ -298,6 +320,9 @@ function collectProceduralTrees(
   if (availableCount <= 0) return [];
 
   const mappedIndex = mappedTreeIndex(mappedTrees);
+  // Water polygons are separate source layers from landuse. Keep them as an
+  // exclusion mask so a lake nested inside a park or forest stays treeless.
+  const waterPolygons = collectMetricPolygons(waterFeatures);
   const candidates = new Map<string, ProceduralTreeCandidate>();
 
   for (const feature of sourceFeatures) {
@@ -348,7 +373,9 @@ function collectProceduralTrees(
             (cellX + 0.5) * spacing + jitterX,
             (cellY + 0.5) * spacing + jitterY,
           ];
-          if (!pointInPolygon(point, polygon) || nearMappedTree(point, mappedIndex)) continue;
+          if (!pointInPolygon(point, polygon)
+            || pointInAnyPolygon(point, waterPolygons)
+            || nearMappedTree(point, mappedIndex)) continue;
 
           const location = fromMetricPoint(point);
           const leafType = seededUnit(seed, 89) < featureConiferChance
@@ -484,13 +511,24 @@ export class TreeModelLayer implements CustomLayerInterface {
     const mercatorUnitsPerMeter = originMercator.meterInMercatorCoordinateUnits();
     const budget = treeBudget(map.getZoom());
     const samplingBounds = visibleMetricBounds(map);
+    const waterFeatures = [
+      ...map.querySourceFeatures('tampere', { sourceLayer: 'water' }),
+      ...map.querySourceFeatures('tampere', { sourceLayer: 'water_detail' }),
+      ...map.querySourceFeatures('tampere', { sourceLayer: 'river_areas' }),
+    ];
+    const waterPolygons = collectMetricPolygons(waterFeatures);
     const mappedTreeFeatures = map.querySourceFeatures('tampere', { sourceLayer: 'trees' });
     const mappedTrees = collectTreeInstances(mappedTreeFeatures)
       .filter((tree) => withinTreeBounds(tree, samplingBounds))
+      .filter((tree) => {
+        const point = toMetricPoint([tree.longitude, tree.latitude]);
+        return point !== undefined && !pointInAnyPolygon(point, waterPolygons);
+      })
       .slice(0, budget.count);
     const landuseFeatures = map.querySourceFeatures('tampere', { sourceLayer: 'landuse' });
     const proceduralTrees = collectProceduralTrees(
       landuseFeatures,
+      waterFeatures,
       visibleMetricBounds(map),
       mappedTrees,
       Math.max(0, budget.count - mappedTrees.length),
