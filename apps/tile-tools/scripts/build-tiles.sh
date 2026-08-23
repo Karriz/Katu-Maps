@@ -54,4 +54,6 @@ tilemaker \
   --process "$PROCESS" \
   --skip-integrity
 
+"$PROJECT_ROOT/apps/tile-tools/scripts/build-transport-surfaces.sh" "$RENUMBERED"
+
 printf 'Generated %s\n' "$OUTPUT"

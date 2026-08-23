@@ -25,7 +25,9 @@ npm run build-all
 
 The default source is the Pirkanmaa regional extract. The script clips it to
 the Tampere bounding box in `data/sources/manifest.json`, then tilemaker
-creates `data/processed/tampere.mbtiles`.
+creates `data/processed/tampere.mbtiles`. GDAL then buffers transport
+centerlines in EPSG:3067 and writes the zoom 14–16 polygon layers to
+`data/processed/transport-surfaces.mbtiles`.
 
 To use another extract:
 
@@ -80,10 +82,24 @@ The tileset also includes parking and pedestrian areas, aeroways, power and
 barrier features, and named places/POIs for browser styling.
 
 Roads and paths retain numeric `width` values when mapped, with class-based
-fallbacks in the browser style. Road `lanes`, `oneway`, and `lane_markings`
-metadata controls the simplified center-line markings. Bridge-tagged transport
-lines are hidden in the flat style because the browser renders their decks as
-3D bridge models.
+fallbacks in the browser style. Road `lanes`, `oneway`, `lane_markings`,
+`sidewalk*`, and `cycleway*` metadata supports layered native vector styling.
+Road and path widths use line styling at normal map zooms, then crossfade to
+prebuilt metre-width polygon fills between zoom 14.25 and 15.5. The polygon
+archive is built through zoom 16 and overzooms cleanly at closer views. This
+keeps MapLibre's built-in terrain draping and avoids a dynamic road mesh.
+Bridge-tagged transport lines remain hidden in the flat style because the
+browser renders their decks as 3D bridge models. Nearby parallel road and path
+ways can share one deck envelope; road and path surfaces are retained as colored
+strips on top of that deck. Closed pedestrian areas tagged as bridges are not
+emitted as terrain-draped plazas. The polygon build intersects buffered bridge
+envelopes with mapped water before subtracting them from terrain-draped road,
+path, and pedestrian surfaces. This prevents surfaces from showing through
+water below an elevated deck without removing legitimate routes beneath land
+bridges. Road classes provide a minimum width when sparse lane tags would
+otherwise make a bridge narrower than its approaches, and nearby side-path
+strips are joined flush to the carriageway. At close zooms, pedestrian areas are
+also replaced by these water-only bridge-clipped copies.
 
 Transmission towers are available to the browser model layer. `power=tower`
 points become simple low-poly supports whose crossarms follow the nearest
@@ -112,11 +128,12 @@ development. After building the tiles, start it from this directory with:
 npm run serve
 ```
 
-Martin will serve the `tampere.mbtiles` source on port 3000. Its TileJSON
-endpoint is:
+Martin serves `tampere.mbtiles` and `transport-surfaces.mbtiles` on port 3000.
+Their TileJSON endpoints are:
 
 ```text
 http://localhost:3000/tampere
+http://localhost:3000/transport-surfaces
 ```
 
 The vector tile URL template exposed by that document can be used as the
@@ -169,6 +186,6 @@ docker compose --profile build run --rm tile-builder
 docker compose up martin
 ```
 
-The builder writes the generated `tampere.mbtiles` and `terrain.mbtiles` to
-`data/processed`, which is mounted into Martin. The API key is supplied only at
-runtime and is not copied into the image.
+The builder writes `tampere.mbtiles`, `transport-surfaces.mbtiles`, and
+`terrain.mbtiles` to `data/processed`, which is mounted into Martin. The API
+key is supplied only at runtime and is not copied into the image.

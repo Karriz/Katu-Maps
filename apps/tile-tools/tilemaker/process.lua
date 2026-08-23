@@ -9,7 +9,8 @@ way_keys = {
   "power", "barrier", "leaf_type", "leaf_cycle", "species", "genus",
   "height", "min_height", "building:levels", "building:colour", "building:color",
   "bridge", "bridge:structure", "bridge:name", "name:bridge", "layer", "tunnel", "covered", "embankment", "cutting", "surface",
-  "width", "lanes", "oneway", "lane_markings",
+  "width", "lanes", "oneway", "lane_markings", "sidewalk", "sidewalk:left", "sidewalk:right",
+  "cycleway", "cycleway:left", "cycleway:right",
   "water", "dock", "pier", "quay", "breakwater", "groyne",
   "generator:source", "generator:type",
   "public_transport", "roof:shape", "roof:height", "roof:levels", "roof:colour",
@@ -157,6 +158,15 @@ local function add_road_metadata()
   local lane_markings = Find("lane_markings")
   if lane_markings ~= "" then
     Attribute("lane_markings", lane_markings)
+  end
+  for _, key in ipairs({
+    "sidewalk", "sidewalk:left", "sidewalk:right",
+    "cycleway", "cycleway:left", "cycleway:right"
+  }) do
+    local value = Find(key)
+    if value ~= "" then
+      Attribute(key:gsub(":", "_"), value)
+    end
   end
 end
 
@@ -443,6 +453,13 @@ function way_function()
   local highway = Find("highway")
   if highway ~= "" then
     if highway == "pedestrian" and IsClosed() then
+      local bridge = Find("bridge")
+      if bridge ~= "" and bridge ~= "no" and bridge ~= "false" and bridge ~= "0" then
+        -- The corresponding bridge centerlines become an elevated browser
+        -- model. Emitting this area as a normal plaza drapes a duplicate slab
+        -- over the water beneath that model.
+        return
+      end
       Layer("pedestrian_areas", true)
       Attribute("class", highway)
       add_surface()

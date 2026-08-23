@@ -13,6 +13,7 @@ import { TreeModelLayer } from './TreeModelLayer';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
+const TRANSPORT_SURFACES_TILEJSON_URL = 'http://localhost:3000/transport-surfaces';
 const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
 const BUILDING_DETAIL_MIN_ZOOM = 14;
 const MAX_BUILDING_STORY_SLICES = 12;
@@ -142,48 +143,60 @@ const BUILDING_STORY_HEIGHT: ExpressionSpecification = [
   ['max', 1, ['get', 'levels']],
 ];
 
+const ROAD_CLASS_WIDTH_METERS: ExpressionSpecification = [
+  'match', ['get', 'class'],
+  'motorway', 12,
+  'trunk', 10,
+  'primary', 8,
+  'secondary', 7,
+  'tertiary', 6,
+  'residential', 5.5,
+  'service', 4,
+  5,
+];
+
 const ROAD_WIDTH_METERS: ExpressionSpecification = [
   'min', 30,
   [
     'case',
     ['has', 'width'], ['get', 'width'],
-    ['has', 'lanes'], ['max', 3, ['*', ['get', 'lanes'], 3.25]],
-    [
-      'match', ['get', 'class'],
-      'motorway', 12,
-      'trunk', 10,
-      'primary', 8,
-      'secondary', 7,
-      'tertiary', 6,
-      'residential', 5.5,
-      'service', 4,
-      5,
-    ],
+    ['has', 'lanes'], ['max', ROAD_CLASS_WIDTH_METERS, ['*', ['get', 'lanes'], 3.25]],
+    ROAD_CLASS_WIDTH_METERS,
   ],
+];
+
+const ROAD_WIDTH_CAP: ExpressionSpecification = [
+  'match', ['get', 'class'],
+  'motorway', 110,
+  'trunk', 100,
+  'primary', 90,
+  'secondary', 80,
+  'tertiary', 72,
+  'residential', 64,
+  'service', 48,
+  60,
 ];
 
 const ROAD_WIDTH: ExpressionSpecification = [
   // Pixels per metre at Tampere's latitude for MapLibre's 512px world scale.
   'interpolate', ['exponential', 2], ['zoom'],
-  10, ['max', 0.5, ['*', ROAD_WIDTH_METERS, 0.027416]],
-  12, ['max', 0.6, ['*', ROAD_WIDTH_METERS, 0.109664]],
-  14, ['*', ROAD_WIDTH_METERS, 0.438658],
-  16, ['*', ROAD_WIDTH_METERS, 1.754634],
-  18, ['*', ROAD_WIDTH_METERS, 7.01854],
-  20, ['*', ROAD_WIDTH_METERS, 28.074158],
+  10, ['min', ROAD_WIDTH_CAP, ['max', 0.5, ['*', ROAD_WIDTH_METERS, 0.027416]]],
+  12, ['min', ROAD_WIDTH_CAP, ['max', 0.6, ['*', ROAD_WIDTH_METERS, 0.109664]]],
+  14, ['min', ROAD_WIDTH_CAP, ['*', ROAD_WIDTH_METERS, 0.438658]],
+  16, ['min', ROAD_WIDTH_CAP, ['*', ROAD_WIDTH_METERS, 1.754634]],
+  18, ['min', ROAD_WIDTH_CAP, ['*', ROAD_WIDTH_METERS, 7.01854]],
+  20, ['min', ROAD_WIDTH_CAP, ['*', ROAD_WIDTH_METERS, 28.074158]],
 ];
 
-const ROAD_CASING_METERS: ExpressionSpecification = ['+', ROAD_WIDTH_METERS, 1];
+const ROAD_CASING_METERS: ExpressionSpecification = ['+', ROAD_WIDTH_METERS, 2.4];
 const ROAD_CASING_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
-  10, ['max', 0.8, ['*', ROAD_CASING_METERS, 0.027416]],
-  12, ['max', 1, ['*', ROAD_CASING_METERS, 0.109664]],
-  14, ['*', ROAD_CASING_METERS, 0.438658],
-  16, ['*', ROAD_CASING_METERS, 1.754634],
-  18, ['*', ROAD_CASING_METERS, 7.01854],
-  20, ['*', ROAD_CASING_METERS, 28.074158],
-  22, ['*', ROAD_CASING_METERS, 112.296632],
-  24, ['*', ROAD_CASING_METERS, 449.186528],
+  10, ['min', ['+', ROAD_WIDTH_CAP, 10], ['max', 0.8, ['*', ROAD_CASING_METERS, 0.027416]]],
+  12, ['min', ['+', ROAD_WIDTH_CAP, 10], ['max', 1, ['*', ROAD_CASING_METERS, 0.109664]]],
+  14, ['min', ['+', ROAD_WIDTH_CAP, 10], ['*', ROAD_CASING_METERS, 0.438658]],
+  16, ['min', ['+', ROAD_WIDTH_CAP, 10], ['*', ROAD_CASING_METERS, 1.754634]],
+  18, ['min', ['+', ROAD_WIDTH_CAP, 10], ['*', ROAD_CASING_METERS, 7.01854]],
+  20, ['min', ['+', ROAD_WIDTH_CAP, 10], ['*', ROAD_CASING_METERS, 28.074158]],
 ];
 
 const PATH_WIDTH_METERS: ExpressionSpecification = [
@@ -203,13 +216,32 @@ const PATH_WIDTH_METERS: ExpressionSpecification = [
   ],
 ];
 
+const PATH_WIDTH_CAP: ExpressionSpecification = [
+  'match', ['get', 'class'],
+  'cycleway', 26,
+  'pedestrian', 28,
+  'track', 24,
+  'footway', 18,
+  'path', 16,
+  18,
+];
+
 const PATH_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
-  12, ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]],
-  14, ['*', PATH_WIDTH_METERS, 0.438658],
-  16, ['*', PATH_WIDTH_METERS, 1.754634],
-  18, ['*', PATH_WIDTH_METERS, 7.01854],
-  20, ['*', PATH_WIDTH_METERS, 28.074158],
+  12, ['min', PATH_WIDTH_CAP, ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]]],
+  14, ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 0.438658]],
+  16, ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 1.754634]],
+  18, ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 7.01854]],
+  20, ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 28.074158]],
+];
+
+const PATH_CASING_WIDTH: ExpressionSpecification = [
+  'interpolate', ['exponential', 2], ['zoom'],
+  12, ['+', ['min', PATH_WIDTH_CAP, ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]]], 2.5],
+  14, ['+', ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 0.438658]], 2.5],
+  16, ['+', ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 1.754634]], 2.5],
+  18, ['+', ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 7.01854]], 2.5],
+  20, ['+', ['min', PATH_WIDTH_CAP, ['*', PATH_WIDTH_METERS, 28.074158]], 2.5],
 ];
 
 const RAILWAY_WIDTH_METERS: ExpressionSpecification = [
@@ -218,21 +250,21 @@ const RAILWAY_WIDTH_METERS: ExpressionSpecification = [
 
 const RAILWAY_BED_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
-  10, ['max', 0.5, ['*', RAILWAY_WIDTH_METERS, 0.027416]],
-  12, ['max', 0.6, ['*', RAILWAY_WIDTH_METERS, 0.109664]],
-  14, ['*', RAILWAY_WIDTH_METERS, 0.438658],
-  16, ['*', RAILWAY_WIDTH_METERS, 1.754634],
-  18, ['*', RAILWAY_WIDTH_METERS, 7.01854],
-  20, ['*', RAILWAY_WIDTH_METERS, 28.074158],
+  10, ['min', 34, ['max', 0.5, ['*', RAILWAY_WIDTH_METERS, 0.027416]]],
+  12, ['min', 34, ['max', 0.6, ['*', RAILWAY_WIDTH_METERS, 0.109664]]],
+  14, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 0.438658]],
+  16, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 1.754634]],
+  18, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 7.01854]],
+  20, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 28.074158]],
 ];
 
 const RAILWAY_SLEEPER_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
   12, 0.7,
-  14, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 0.438658],
-  16, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 1.754634],
-  18, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 7.01854],
-  20, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 28.074158],
+  14, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 0.438658]],
+  16, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 1.754634]],
+  18, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 7.01854]],
+  20, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 28.074158]],
 ];
 
 const SURFACE_ROAD_COLOR: ExpressionSpecification = [
@@ -243,10 +275,31 @@ const SURFACE_ROAD_COLOR: ExpressionSpecification = [
   'dirt', '#d4c09e',
   'ground', '#d4c09e',
   'sand', '#ead9ad',
-  'cobblestone', '#d9d9d4',
-  'paving_stones', '#e1e2dd',
-  'concrete', '#e4e7e7',
-  '#dfe4e5',
+  'cobblestone', '#7d8281',
+  'paving_stones', '#898e8c',
+  'concrete', '#aeb5b4',
+  '#697174',
+];
+
+const SURFACE_PATH_COLOR: ExpressionSpecification = [
+  'case',
+  ['==', ['get', 'class'], 'cycleway'], '#c97872',
+  [
+    'match',
+    ['get', 'surface'],
+    'asphalt', '#9ea7a6',
+    'gravel', '#c9b083',
+    'dirt', '#b59468',
+    'ground', '#b59468',
+    'sand', '#dfbf75',
+    '#b8aa89',
+  ],
+];
+
+const TRANSPORT_POLYGON_OPACITY: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  14.25, 0,
+  15.5, 0.98,
 ];
 
 function buildingStoryLayers(): FillExtrusionLayerSpecification[] {
@@ -315,7 +368,7 @@ function railwayRailLayers(): LineLayerSpecification[] {
         14, side * 0.334,
         16, side * 1.337,
         18, side * 5.348,
-        20, side * 21.39,
+        20, side * 12,
       ],
       'line-opacity': 0.95,
     },
@@ -330,6 +383,11 @@ const TAMPERE_STYLE: StyleSpecification = {
     tampere: {
       type: 'vector',
       url: TILEJSON_URL,
+      attribution: '© OpenStreetMap contributors',
+    },
+    'transport-surfaces': {
+      type: 'vector',
+      url: TRANSPORT_SURFACES_TILEJSON_URL,
       attribution: '© OpenStreetMap contributors',
     },
     terrain: {
@@ -534,7 +592,11 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: {
         'fill-color': '#f3ecdf',
         'fill-outline-color': '#ddd4c3',
-        'fill-opacity': 0.95,
+        'fill-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 0.95,
+          14.75, 0,
+        ],
       },
     },
     {
@@ -643,6 +705,70 @@ const TAMPERE_STYLE: StyleSpecification = {
     },
     ...railwayRailLayers(),
     {
+      id: 'transport-pedestrian-polygons',
+      type: 'fill',
+      source: 'transport-surfaces',
+      'source-layer': 'pedestrian_surfaces',
+      minzoom: 14,
+      paint: {
+        'fill-color': '#f3ecdf',
+        'fill-outline-color': '#ddd4c3',
+        'fill-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14, 0,
+          14.75, 0.95,
+        ],
+      },
+    },
+    {
+      id: 'transport-road-polygon-casings',
+      type: 'fill',
+      source: 'transport-surfaces',
+      'source-layer': 'transport_casings',
+      minzoom: 14,
+      filter: ['==', ['get', 'kind'], 'road'],
+      paint: {
+        'fill-color': '#d8d4ca',
+        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
+      },
+    },
+    {
+      id: 'transport-path-polygon-casings',
+      type: 'fill',
+      source: 'transport-surfaces',
+      'source-layer': 'transport_casings',
+      minzoom: 14,
+      filter: ['==', ['get', 'kind'], 'path'],
+      paint: {
+        'fill-color': '#e6dfd2',
+        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
+      },
+    },
+    {
+      id: 'transport-road-polygons',
+      type: 'fill',
+      source: 'transport-surfaces',
+      'source-layer': 'transport_surfaces',
+      minzoom: 14,
+      filter: ['==', ['get', 'kind'], 'road'],
+      paint: {
+        'fill-color': SURFACE_ROAD_COLOR,
+        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
+      },
+    },
+    {
+      id: 'transport-path-polygons',
+      type: 'fill',
+      source: 'transport-surfaces',
+      'source-layer': 'transport_surfaces',
+      minzoom: 14,
+      filter: ['==', ['get', 'kind'], 'path'],
+      paint: {
+        'fill-color': SURFACE_PATH_COLOR,
+        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
+      },
+    },
+    {
       id: 'road-earthworks',
       type: 'line',
       source: 'tampere',
@@ -675,10 +801,15 @@ const TAMPERE_STYLE: StyleSpecification = {
         ['!', ['has', 'covered']],
         ['!', ['has', 'bridge']],
       ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#c6ced0',
+        'line-color': '#d8d4ca',
         'line-width': ROAD_CASING_WIDTH,
-        'line-opacity': 0.9,
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14.25, 0.92,
+          15.5, 0,
+        ],
       },
     },
     {
@@ -692,10 +823,15 @@ const TAMPERE_STYLE: StyleSpecification = {
         ['!', ['has', 'covered']],
         ['!', ['has', 'bridge']],
       ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': SURFACE_ROAD_COLOR,
         'line-width': ROAD_WIDTH,
-        'line-opacity': 0.98,
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14.25, 0.98,
+          15.5, 0,
+        ],
       },
     },
     {
@@ -824,6 +960,28 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'path-casing',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'paths',
+      filter: [
+        'all',
+        ['!', ['has', 'tunnel']],
+        ['!', ['has', 'covered']],
+        ['!', ['has', 'bridge']],
+      ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#e6dfd2',
+        'line-width': PATH_CASING_WIDTH,
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14.25, 0.9,
+          15.5, 0,
+        ],
+      },
+    },
+    {
       id: 'paths',
       type: 'line',
       source: 'tampere',
@@ -834,24 +992,15 @@ const TAMPERE_STYLE: StyleSpecification = {
         ['!', ['has', 'covered']],
         ['!', ['has', 'bridge']],
       ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': [
-          'case',
-          ['==', ['get', 'class'], 'cycleway'], '#82cbbb',
-          [
-            'match',
-            ['get', 'surface'],
-            'asphalt', '#b2bec1',
-            'gravel', '#d8bf92',
-            'dirt', '#ca9f68',
-            'ground', '#ca9f68',
-            'sand', '#e5c374',
-            '#96bd8d',
-          ],
-        ],
+        'line-color': SURFACE_PATH_COLOR,
         'line-width': PATH_WIDTH,
-        'line-dasharray': [2, 2],
-        'line-opacity': 0.92,
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          14.25, 0.92,
+          15.5, 0,
+        ],
       },
     },
     {

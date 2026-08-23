@@ -16,12 +16,19 @@ const REFERENCE_UNITS_PER_METER = maplibregl.MercatorCoordinate
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
 type Point = { x: number; z: number; elevation: number; ground: number };
+type BridgeSurfaceStrip = {
+  sourceLayer: string;
+  offset: number;
+  width: number;
+  className: string;
+  surface: string;
+};
 
-function bridgeCoordinates(feature: SourceFeature): number[][] {
+function bridgeCoordinateParts(feature: SourceFeature): number[][][] {
   const geometry = feature.geometry;
-  if (geometry?.type === 'LineString') return geometry.coordinates as number[][];
+  if (geometry?.type === 'LineString') return [geometry.coordinates as number[][]];
   if (geometry?.type === 'MultiLineString') {
-    return geometry.coordinates.flat() as number[][];
+    return geometry.coordinates as number[][][];
   }
   return [];
 }
@@ -54,15 +61,19 @@ function widthFor(
     if (className === 'footway') return 2;
     return className === 'path' ? 1.5 : 2;
   }
+  const classWidth = className === 'motorway' ? 12
+    : className === 'trunk' ? 10
+      : className === 'primary' ? 8
+        : className === 'secondary' ? 7
+          : className === 'tertiary' ? 6
+            : className === 'residential' ? 5.5
+              : className === 'service' ? 4
+                : 5;
   const lanes = Number(lanesValue);
-  if (Number.isFinite(lanes) && lanes > 0) return Math.min(30, Math.max(3, lanes * 3.25));
-  if (className === 'motorway') return 12;
-  if (className === 'trunk') return 10;
-  if (className === 'primary') return 8;
-  if (className === 'secondary') return 7;
-  if (className === 'tertiary') return 6;
-  if (className === 'residential') return 5.5;
-  return className === 'service' ? 4 : 5;
+  if (Number.isFinite(lanes) && lanes > 0) {
+    return Math.min(30, Math.max(classWidth, lanes * 3.25));
+  }
+  return classWidth;
 }
 
 function clearanceFor(sourceLayer: string, className: string) {
@@ -77,20 +88,49 @@ function bridgeColor(sourceLayer: string) {
   return 0xdfe4e5;
 }
 
+function pathSurfaceColor(className: string, surface: string) {
+  if (className === 'cycleway') return 0xc97872;
+  if (surface === 'asphalt') return 0x9ea7a6;
+  if (surface === 'gravel') return 0xc9b083;
+  if (surface === 'dirt' || surface === 'ground') return 0xb59468;
+  if (surface === 'sand') return 0xdfbf75;
+  return 0xb8aa89;
+}
+
+function roadSurfaceColor(surface: string) {
+  if (surface === 'gravel') return 0xd8cfbd;
+  if (surface === 'unpaved') return 0xddd2bc;
+  if (surface === 'dirt' || surface === 'ground') return 0xd4c09e;
+  if (surface === 'sand') return 0xead9ad;
+  if (surface === 'cobblestone') return 0x7d8281;
+  if (surface === 'paving_stones') return 0x898e8c;
+  if (surface === 'concrete') return 0xaeb5b4;
+  return 0x697174;
+}
+
+function transportSurfaceColor(strip: BridgeSurfaceStrip) {
+  return strip.sourceLayer === 'roads'
+    ? roadSurfaceColor(strip.surface)
+    : pathSurfaceColor(strip.className, strip.surface);
+}
+
 type BridgeCandidate = {
   sourceLayer: string;
   className: string;
+  surface: string;
   bridgeName: string;
   points: Point[];
   width: number;
   structure: string;
   midpoint: Point;
   direction: [number, number];
+  surfaceStrips: BridgeSurfaceStrip[];
 };
 
 function bridgeCandidate(
   sourceLayer: string,
   className: string,
+  surface: string,
   bridgeName: string,
   points: Point[],
   width: number,
@@ -102,19 +142,21 @@ function bridgeCandidate(
   return {
     sourceLayer,
     className,
+    surface,
     bridgeName,
     points,
     width,
     structure,
     midpoint: points[Math.floor(points.length / 2)] ?? first,
     direction: [(last.x - first.x) / length, (last.z - first.z) / length],
+    surfaceStrips: sourceLayer === 'roads' || sourceLayer === 'paths'
+      ? [{ sourceLayer, offset: 0, width, className, surface }]
+      : [],
   };
 }
 
 function sameBridgeCorridor(first: BridgeCandidate, second: BridgeCandidate) {
-  if (first.bridgeName && second.bridgeName) {
-    return first.bridgeName === second.bridgeName;
-  }
+  if (first.bridgeName && second.bridgeName && first.bridgeName !== second.bridgeName) return false;
   const firstIsHeavyRail = first.sourceLayer === 'railways'
     && !['tram', 'light_rail', 'monorail'].includes(first.className);
   const secondIsHeavyRail = second.sourceLayer === 'railways'
@@ -126,11 +168,34 @@ function sameBridgeCorridor(first: BridgeCandidate, second: BridgeCandidate) {
   const directionAlignment = Math.abs(
     first.direction[0] * second.direction[0] + first.direction[1] * second.direction[1],
   );
-  if (directionAlignment < 0.97) return false;
-  return Math.hypot(
-    first.midpoint.x - second.midpoint.x,
-    first.midpoint.z - second.midpoint.z,
-  ) < (firstIsHeavyRail ? 10 : 18);
+  const sameName = Boolean(first.bridgeName && first.bridgeName === second.bridgeName);
+  if (directionAlignment < (sameName ? 0.94 : 0.97)) return false;
+
+  const directionX = first.direction[0];
+  const directionZ = first.direction[1];
+  const perpendicularX = -directionZ;
+  const perpendicularZ = directionX;
+  const extent = (candidate: BridgeCandidate, axisX: number, axisZ: number) => {
+    const projections = candidate.points.map((point) => point.x * axisX + point.z * axisZ);
+    return [Math.min(...projections), Math.max(...projections)] as const;
+  };
+  const intervalGap = (firstExtent: readonly [number, number], secondExtent: readonly [number, number]) => (
+    Math.max(0, Math.max(firstExtent[0], secondExtent[0]) - Math.min(firstExtent[1], secondExtent[1]))
+  );
+  const alongGap = intervalGap(
+    extent(first, directionX, directionZ),
+    extent(second, directionX, directionZ),
+  );
+  const acrossGap = intervalGap(
+    extent(first, perpendicularX, perpendicularZ),
+    extent(second, perpendicularX, perpendicularZ),
+  ) - (first.width + second.width) / 2;
+
+  // Matching names help fragmented ways reconnect, but geometry must still
+  // describe one nearby, parallel deck. This avoids merging separate spans
+  // merely because they share a bridge name.
+  return alongGap <= (sameName ? 20 : 8)
+    && acrossGap <= (firstIsHeavyRail ? 2.5 : 4);
 }
 
 function candidateLength(candidate: BridgeCandidate) {
@@ -202,6 +267,57 @@ function mergeBridgeGroup(group: BridgeCandidate[]) {
   const structure = group.find((candidate) => candidate.structure.includes('arch'))?.structure
     ?? group.find((candidate) => candidate.structure !== 'yes')?.structure
     ?? spine.structure;
+  const surfaceStrips: BridgeSurfaceStrip[] = [];
+  for (const candidate of group.filter((item) => (
+    item.sourceLayer === 'roads' || item.sourceLayer === 'paths'
+  ))) {
+    const offsetX = candidate.midpoint.x - origin.x;
+    const offsetZ = candidate.midpoint.z - origin.z;
+    const offset = offsetX * perpendicularX + offsetZ * perpendicularZ - centerAcross;
+    const existing = surfaceStrips.find((strip) => (
+      strip.sourceLayer === candidate.sourceLayer
+      && Math.abs(strip.offset - offset) <= Math.max(strip.width, candidate.width) * 0.6
+    ));
+    if (existing) {
+      existing.offset = (existing.offset + offset) / 2;
+      existing.width = Math.max(existing.width, candidate.width);
+      if (candidate.className === 'cycleway') {
+        existing.className = candidate.className;
+        existing.surface = candidate.surface;
+      }
+    } else {
+      surfaceStrips.push({
+        sourceLayer: candidate.sourceLayer,
+        offset,
+        width: candidate.width,
+        className: candidate.className,
+        surface: candidate.surface,
+      });
+    }
+  }
+
+  const roadStrip = surfaceStrips.find((strip) => strip.sourceLayer === 'roads');
+  if (roadStrip) {
+    const roadMin = roadStrip.offset - roadStrip.width / 2;
+    const roadMax = roadStrip.offset + roadStrip.width / 2;
+    for (const strip of surfaceStrips.filter((item) => item.sourceLayer === 'paths')) {
+      const stripMin = strip.offset - strip.width / 2;
+      const stripMax = strip.offset + strip.width / 2;
+      if (strip.offset >= roadStrip.offset) {
+        const gap = stripMin - roadMax;
+        if (gap > 0 && gap <= 3) {
+          strip.width = stripMax - roadMax;
+          strip.offset = (stripMax + roadMax) / 2;
+        }
+      } else {
+        const gap = roadMin - stripMax;
+        if (gap > 0 && gap <= 3) {
+          strip.width = roadMin - stripMin;
+          strip.offset = (roadMin + stripMin) / 2;
+        }
+      }
+    }
+  }
 
   return {
     ...spine,
@@ -210,6 +326,7 @@ function mergeBridgeGroup(group: BridgeCandidate[]) {
     width: Math.min(30, Math.max(spine.width, maxAcross - minAcross)),
     structure,
     midpoint: middle,
+    surfaceStrips,
   };
 }
 
@@ -228,7 +345,9 @@ function consolidateBridgeCandidates(candidates: BridgeCandidate[]) {
   });
   const groups: BridgeCandidate[][] = [];
   for (const candidate of filteredCandidates) {
-    const group = groups.find((existing) => sameBridgeCorridor(existing[0], candidate));
+    const group = groups.find((existing) => (
+      existing.some((member) => sameBridgeCorridor(member, candidate))
+    ));
     if (group) group.push(candidate);
     else groups.push([candidate]);
   }
@@ -289,7 +408,15 @@ function snapConnectingWalkways(candidates: BridgeCandidate[]) {
   return candidates;
 }
 
-function addDeck(group: THREE.Group, start: Point, end: Point, width: number, thickness: number, material: THREE.Material) {
+function addDeck(
+  group: THREE.Group,
+  start: Point,
+  end: Point,
+  width: number,
+  thickness: number,
+  material: THREE.Material,
+  verticalOffset = 0,
+) {
   const dx = end.x - start.x;
   const dz = end.z - start.z;
   const length = Math.hypot(dx, dz);
@@ -298,7 +425,11 @@ function addDeck(group: THREE.Group, start: Point, end: Point, width: number, th
   // segments meet, especially at a pier or a sharp mapped vertex.
   const geometry = new THREE.BoxGeometry(width, thickness, length + 0.3);
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set((start.x + end.x) / 2, (start.elevation + end.elevation) / 2, (start.z + end.z) / 2);
+  mesh.position.set(
+    (start.x + end.x) / 2,
+    (start.elevation + end.elevation) / 2 + verticalOffset,
+    (start.z + end.z) / 2,
+  );
   const forward = new THREE.Vector3(dx, end.elevation - start.elevation, dz).normalize();
   const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
   const up = new THREE.Vector3().crossVectors(forward, right).normalize();
@@ -447,7 +578,6 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.origin = map.getCenter();
     this.originElevation = map.queryTerrainElevation(this.origin) ?? 0;
     const units = maplibregl.MercatorCoordinate.fromLngLat(this.origin).meterInMercatorCoordinateUnits();
-    const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.origin);
     const seen = new Set<string>();
     const candidates: BridgeCandidate[] = [];
     let count = 0;
@@ -456,53 +586,64 @@ export class BridgeModelLayer implements CustomLayerInterface {
         if (count >= MAX_BRIDGES) break;
         const properties = feature.properties ?? {};
         if (!properties.bridge || properties.bridge === 'no') continue;
-        const coordinates = bridgeCoordinates(feature);
-        if (coordinates.length < 2) continue;
-        const featureKey = `${sourceLayer}:${feature.id ?? ''}:${coordinates[0].join(',')}:${coordinates[coordinates.length - 1].join(',')}`;
-        if (seen.has(featureKey)) continue;
-        seen.add(featureKey);
-        const first = metricPoint(coordinates[0], this.origin, units);
-        const last = metricPoint(coordinates[coordinates.length - 1], this.origin, units);
-        if (!first || !last) continue;
-        const className = String(properties.class ?? 'road');
-        const width = widthFor(sourceLayer, className, properties.width, properties.lanes);
-        const clearance = clearanceFor(sourceLayer, className);
-        const endpointA = map.queryTerrainElevation([coordinates[0][0], coordinates[0][1]]) ?? this.originElevation;
-        const endpointB = map.queryTerrainElevation([coordinates[coordinates.length - 1][0], coordinates[coordinates.length - 1][1]]) ?? this.originElevation;
-        const segmentDistances = coordinates.map((coordinatesAtPoint, index) => {
-          if (index === 0) return 0;
-          const previous = metricPoint(coordinates[index - 1], this.origin, units)!;
-          const current = metricPoint(coordinatesAtPoint, this.origin, units)!;
-          return Math.hypot(current.x - previous.x, current.z - previous.z);
-        });
-        const pathLength = Math.max(1, segmentDistances.reduce((total, distanceAtPoint) => total + distanceAtPoint, 0));
-        const middleRise = sourceLayer === 'railways' ? 1.4 : sourceLayer === 'paths' ? 0.7 : 1.1;
-        let travelled = 0;
-        const bridgePoints: Point[] = coordinates.map((coordinatesAtPoint, index) => {
-          const metric = metricPoint(coordinatesAtPoint, this.origin, units)!;
-          if (index > 0) travelled += segmentDistances[index];
-          const progress = Math.min(1, Math.max(0, travelled / pathLength));
-          const terrain = map.queryTerrainElevation([coordinatesAtPoint[0], coordinatesAtPoint[1]]) ?? this.originElevation;
-          const interpolated = endpointA + (endpointB - endpointA) * progress;
-          const crownedDeck = interpolated + clearance + Math.sin(progress * Math.PI) * middleRise;
-          return {
-            x: metric.x,
-            z: metric.z,
-            // The bridge profile is continuous and deliberately independent
-            // of noisy DEM samples beneath the span. It meets the approaches
-            // at both ends and has a modest raised crown at mid-span.
-            elevation: Math.max(terrain + clearance, crownedDeck) - this.originElevation,
-            ground: terrain - this.originElevation,
-          };
-        });
-        const structure = String(properties.bridge_structure ?? properties.bridge).toLowerCase();
-        const bridgeName = String(properties.bridge_name ?? '').trim().toLowerCase();
-        candidates.push(bridgeCandidate(sourceLayer, className, bridgeName, bridgePoints, width, structure));
-        count += 1;
+        for (const coordinates of bridgeCoordinateParts(feature)) {
+          if (coordinates.length < 2 || count >= MAX_BRIDGES) continue;
+          const featureKey = `${sourceLayer}:${feature.id ?? ''}:${coordinates[0].join(',')}:${coordinates[coordinates.length - 1].join(',')}`;
+          if (seen.has(featureKey)) continue;
+          seen.add(featureKey);
+          const first = metricPoint(coordinates[0], this.origin, units);
+          const last = metricPoint(coordinates[coordinates.length - 1], this.origin, units);
+          if (!first || !last) continue;
+          const className = String(properties.class ?? 'road');
+          const surface = String(properties.surface ?? '');
+          const width = widthFor(sourceLayer, className, properties.width, properties.lanes);
+          const clearance = clearanceFor(sourceLayer, className);
+          const endpointA = map.queryTerrainElevation([coordinates[0][0], coordinates[0][1]]) ?? this.originElevation;
+          const endpointB = map.queryTerrainElevation([coordinates[coordinates.length - 1][0], coordinates[coordinates.length - 1][1]]) ?? this.originElevation;
+          const segmentDistances = coordinates.map((coordinatesAtPoint, index) => {
+            if (index === 0) return 0;
+            const previous = metricPoint(coordinates[index - 1], this.origin, units)!;
+            const current = metricPoint(coordinatesAtPoint, this.origin, units)!;
+            return Math.hypot(current.x - previous.x, current.z - previous.z);
+          });
+          const pathLength = Math.max(1, segmentDistances.reduce((total, distanceAtPoint) => total + distanceAtPoint, 0));
+          const middleRise = sourceLayer === 'railways' ? 1.4 : sourceLayer === 'paths' ? 0.7 : 1.1;
+          let travelled = 0;
+          const bridgePoints: Point[] = coordinates.map((coordinatesAtPoint, index) => {
+            const metric = metricPoint(coordinatesAtPoint, this.origin, units)!;
+            if (index > 0) travelled += segmentDistances[index];
+            const progress = Math.min(1, Math.max(0, travelled / pathLength));
+            const terrain = map.queryTerrainElevation([coordinatesAtPoint[0], coordinatesAtPoint[1]]) ?? this.originElevation;
+            const interpolated = endpointA + (endpointB - endpointA) * progress;
+            const crownedDeck = interpolated + clearance + Math.sin(progress * Math.PI) * middleRise;
+            return {
+              x: metric.x,
+              z: metric.z,
+              // The bridge profile is continuous and deliberately independent
+              // of noisy DEM samples beneath the span. It meets the approaches
+              // at both ends and has a modest raised crown at mid-span.
+              elevation: Math.max(terrain + clearance, crownedDeck) - this.originElevation,
+              ground: terrain - this.originElevation,
+            };
+          });
+          const structure = String(properties.bridge_structure ?? properties.bridge).toLowerCase();
+          const bridgeName = String(properties.bridge_name ?? '').trim().toLowerCase();
+          candidates.push(bridgeCandidate(
+            sourceLayer,
+            className,
+            surface,
+            bridgeName,
+            bridgePoints,
+            width,
+            structure,
+          ));
+          count += 1;
+        }
       }
     }
 
-    for (const candidate of snapConnectingWalkways(consolidateBridgeCandidates(candidates))) {
+    const decks = snapConnectingWalkways(consolidateBridgeCandidates(candidates));
+    for (const candidate of decks) {
         const material = new THREE.MeshLambertMaterial({
           color: bridgeColor(candidate.sourceLayer),
           flatShading: true,
@@ -526,7 +667,31 @@ export class BridgeModelLayer implements CustomLayerInterface {
         } else if (candidate.points.length > 2) {
           addVerticalSupport(this.bridgeGroup, candidate.points[Math.floor(candidate.points.length / 2)], candidate.width, material);
         }
-    }
+        const perpendicularX = -candidate.direction[1];
+        const perpendicularZ = candidate.direction[0];
+        for (const strip of candidate.surfaceStrips) {
+          const stripMaterial = new THREE.MeshLambertMaterial({
+            color: transportSurfaceColor(strip),
+            flatShading: true,
+          });
+          const stripPoints = candidate.points.map((point) => ({
+            ...point,
+            x: point.x + perpendicularX * strip.offset,
+            z: point.z + perpendicularZ * strip.offset,
+          }));
+          for (let index = 1; index < stripPoints.length; index += 1) {
+            addDeck(
+              this.bridgeGroup,
+              stripPoints[index - 1],
+              stripPoints[index],
+              strip.width,
+              0.04,
+              stripMaterial,
+              0.195,
+            );
+          }
+        }
+      }
     this.scene.add(this.bridgeGroup);
     map.triggerRepaint();
   }
