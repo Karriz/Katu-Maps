@@ -7,7 +7,7 @@ node_keys = {
 }
 way_keys = {
   "building", "highway", "railway", "waterway", "natural", "landuse",
-  "leisure", "amenity", "name", "building:part", "man_made", "aeroway",
+  "leisure", "amenity", "place", "name", "building:part", "man_made", "aeroway",
   "power", "barrier", "leaf_type", "leaf_cycle", "species", "genus",
   "height", "min_height", "building:levels", "building:colour", "building:color",
   "bridge", "bridge:structure", "bridge:name", "name:bridge", "layer", "tunnel", "covered", "embankment", "cutting", "surface",
@@ -53,6 +53,7 @@ local amenity_land_classes = {
   clinic = "healthcare",
   place_of_worship = "religious",
   community_centre = "civic",
+  marketplace = "marketplace",
   social_facility = "civic",
   public_building = "civic",
   townhall = "civic"
@@ -372,6 +373,7 @@ function way_function()
   end
 
   local amenity = Find("amenity")
+  local place = Find("place")
   local public_transport = Find("public_transport")
   -- Parking garages are commonly tagged with both amenity=parking and
   -- building=garage. Let those continue through the building branch so they
@@ -385,9 +387,14 @@ function way_function()
   end
 
   local aeroway = Find("aeroway")
-  if aeroway ~= "" then
+  -- Terminal buildings are often tagged with both aeroway=terminal and
+  -- building=terminal. Let those continue through the building branch so
+  -- they receive the normal 3D building treatment.
+  if aeroway ~= "" and Find("building") == "" and Find("building:part") == "" then
     Layer("aeroway", aeroway ~= "runway" and aeroway ~= "taxiway")
     Attribute("class", aeroway)
+    add_transport_width()
+    add_surface()
     add_name()
     return
   end
@@ -602,11 +609,13 @@ function way_function()
     return
   end
 
-  if natural ~= "" or landuse ~= "" or leisure ~= "" or amenity_land_class ~= nil then
+  if natural ~= "" or landuse ~= "" or leisure ~= ""
+    or amenity_land_class ~= nil or place == "square" then
     Layer("landuse", true)
     local land_class = natural ~= "" and natural
       or (landuse ~= "" and landuse
-      or (leisure ~= "" and leisure or amenity_land_class))
+      or (leisure ~= "" and leisure
+      or (amenity_land_class ~= nil and amenity_land_class or place)))
     Attribute("class", land_class)
     local leaf_type = Find("leaf_type")
     local leaf_cycle = Find("leaf_cycle")

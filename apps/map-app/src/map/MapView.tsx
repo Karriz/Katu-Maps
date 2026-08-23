@@ -361,6 +361,15 @@ const RAILWAY_SLEEPER_WIDTH: ExpressionSpecification = [
   20, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 28.074158]],
 ];
 
+const AEROWAY_RUNWAY_WIDTH_METERS: ExpressionSpecification = [
+  'min', 90,
+  ['max', 18, ['case', ['has', 'width'], ['get', 'width'], 45]],
+];
+const AEROWAY_TAXIWAY_WIDTH_METERS: ExpressionSpecification = [
+  'min', 30,
+  ['max', 6, ['case', ['has', 'width'], ['get', 'width'], 15]],
+];
+
 const SURFACE_ROAD_COLOR: ExpressionSpecification = [
   'match',
   ['get', 'surface'],
@@ -556,6 +565,8 @@ const TAMPERE_STYLE: StyleSpecification = {
           'religious', '#d8dfca',
           'nature_reserve', '#9fc98d',
           'pitch', '#add38e',
+          'marketplace', '#d6c5ae',
+          'square', '#d8ccb9',
           'playground', '#d6df9d',
           'sports_centre', '#d7e9c1',
           'stadium', '#d2e7b9',
@@ -766,8 +777,8 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'parking',
       paint: {
-        'fill-color': '#e8ebeb',
-        'fill-outline-color': '#d1d7d7',
+        'fill-color': '#d6d1c6',
+        'fill-outline-color': '#bcb8ae',
         'fill-opacity': 0.94,
       },
     },
@@ -777,8 +788,8 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'pedestrian_areas',
       paint: {
-        'fill-color': '#f3ecdf',
-        'fill-outline-color': '#ddd4c3',
+        'fill-color': '#d8ccb9',
+        'fill-outline-color': '#bdb3a5',
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           14, 0.95,
@@ -796,14 +807,92 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'fill',
       source: 'tampere',
       'source-layer': 'aeroway',
-      paint: { 'fill-color': '#eaedef', 'fill-opacity': 0.92 },
+      paint: {
+        'fill-color': [
+          'match', ['get', 'class'],
+          'aerodrome', '#d2d8d0',
+          'terminal', '#d7d1c5',
+          'apron', '#d5d8d8',
+          'helipad', '#d0d3d2',
+          '#eaedef',
+        ],
+        'fill-opacity': 0.92,
+      },
     },
     {
-      id: 'aeroway-lines',
+      id: 'aeroway-taxiways',
       type: 'line',
       source: 'tampere',
       'source-layer': 'aeroway',
-      paint: { 'line-color': '#ccd2d5', 'line-width': 2, 'line-opacity': 0.9 },
+      filter: ['==', ['get', 'class'], 'taxiway'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'surface'],
+          'asphalt', '#aeb5b3',
+          'concrete', '#c0c3c0',
+          '#b8bebd',
+        ],
+        'line-width': [
+          'interpolate', ['exponential', 2], ['zoom'],
+          10, ['*', AEROWAY_TAXIWAY_WIDTH_METERS, 0.027416],
+          14, ['*', AEROWAY_TAXIWAY_WIDTH_METERS, 0.438658],
+          18, ['*', AEROWAY_TAXIWAY_WIDTH_METERS, 5.5],
+        ],
+        'line-opacity': 0.94,
+      },
+    },
+    {
+      id: 'aeroway-taxiway-markings',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'aeroway',
+      minzoom: 13,
+      filter: ['==', ['get', 'class'], 'taxiway'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#d9b94c',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.6, 17, 1.3],
+        'line-opacity': 0.82,
+      },
+    },
+    {
+      id: 'aeroway-runways',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'aeroway',
+      filter: ['==', ['get', 'class'], 'runway'],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'surface'],
+          'asphalt', '#969d9b',
+          'concrete', '#aaa9a2',
+          '#a6aaa5',
+        ],
+        'line-width': [
+          'interpolate', ['exponential', 2], ['zoom'],
+          10, ['*', AEROWAY_RUNWAY_WIDTH_METERS, 0.027416],
+          14, ['*', AEROWAY_RUNWAY_WIDTH_METERS, 0.438658],
+          18, ['*', AEROWAY_RUNWAY_WIDTH_METERS, 5.5],
+        ],
+        'line-opacity': 0.96,
+      },
+    },
+    {
+      id: 'aeroway-runway-markings',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'aeroway',
+      minzoom: 12,
+      filter: ['==', ['get', 'class'], 'runway'],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#f7f5ea',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 1.5, 18, 2.2],
+        'line-dasharray': [4, 5],
+        'line-opacity': 0.86,
+      },
     },
     {
       id: 'power-lines',
