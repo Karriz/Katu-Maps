@@ -14,7 +14,6 @@ import { TreeModelLayer } from './TreeModelLayer';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
-const TRANSPORT_SURFACES_TILEJSON_URL = 'http://localhost:3000/transport-surfaces';
 const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
 // Keep the metre-scaled transport polygons active at close zooms, but defer
 // expensive building detail until it is large enough to be readable.
@@ -29,11 +28,6 @@ const WATER_EFFECT_LAYER_IDS = [
   'water-detail-pattern',
   'river-area-pattern',
 ];
-const BRIDGE_SHADOW_LAYER_IDS = [
-  'bridge-road-shadows',
-  'bridge-path-shadows',
-  'bridge-railway-shadows',
-];
 const INFRASTRUCTURE_SHADOW_LAYER_IDS = [
   'power-point-shadows',
   'landmark-area-shadows',
@@ -43,18 +37,14 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'building-shadow-soft',
   'building-shadows',
 ];
-const SHADOW_TRANSLATE: ExpressionSpecification = [
-  'interpolate', ['exponential', 2], ['zoom'],
-  10, ['literal', [0.2, -0.15]],
-  12, ['literal', [0.8, -0.6]],
-  14, ['literal', [3.2, -2.4]],
-  16, ['literal', [12.8, -9.6]],
-  18, ['literal', [51.2, -38.4]],
+const BRIDGE_DECK_EFFECT_LAYER_IDS = [
+  'bridge-road-edge-shade',
+  'bridge-path-edge-shade',
+  'bridge-railway-edge-shade',
 ];
 
 type LayerToggleState = {
   bridges: boolean;
-  transportSurfaces: boolean;
   roofs: boolean;
   trees: boolean;
   buildings: boolean;
@@ -66,13 +56,6 @@ type LayerToggleState = {
 const BUILDING_LAYER_IDS = [
   ...Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, index) => `building-story-${index + 1}`),
   'building-roof-caps',
-];
-const TRANSPORT_SURFACE_LAYER_IDS = [
-  'transport-pedestrian-polygons',
-  'transport-road-polygon-casings',
-  'transport-path-polygon-casings',
-  'transport-road-polygons',
-  'transport-path-polygons',
 ];
 
 function createWaterPattern(size: number) {
@@ -407,12 +390,6 @@ const SURFACE_PATH_COLOR: ExpressionSpecification = [
   ],
 ];
 
-const TRANSPORT_POLYGON_OPACITY: ExpressionSpecification = [
-  'interpolate', ['linear'], ['zoom'],
-  14.25, 0,
-  15.5, 0.98,
-];
-
 function buildingStoryLayers(): FillExtrusionLayerSpecification[] {
   return Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, storyIndex) => {
     const isTopSlice = storyIndex === MAX_BUILDING_STORY_SLICES - 1;
@@ -504,11 +481,6 @@ const TAMPERE_STYLE: StyleSpecification = {
     tampere: {
       type: 'vector',
       url: TILEJSON_URL,
-      attribution: '© OpenStreetMap contributors',
-    },
-    'transport-surfaces': {
-      type: 'vector',
-      url: TRANSPORT_SURFACES_TILEJSON_URL,
       attribution: '© OpenStreetMap contributors',
     },
     terrain: {
@@ -619,11 +591,35 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'water-edge-shade',
+      type: 'fill',
+      source: 'tampere',
+      'source-layer': 'water',
+      paint: {
+        'fill-color': '#4f9fbd',
+        'fill-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
+        'fill-translate-anchor': 'map',
+        'fill-opacity': 0.14,
+      },
+    },
+    {
       id: 'water',
       type: 'fill',
       source: 'tampere',
       'source-layer': 'water',
       paint: { 'fill-color': WATER_COLOR },
+    },
+    {
+      id: 'water-detail-edge-shade',
+      type: 'fill',
+      source: 'tampere',
+      'source-layer': 'water_detail',
+      paint: {
+        'fill-color': '#4f9fbd',
+        'fill-translate': ['interpolate', ['linear'], ['zoom'], 13, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
+        'fill-translate-anchor': 'map',
+        'fill-opacity': 0.12,
+      },
     },
     {
       id: 'water-detail',
@@ -714,6 +710,41 @@ const TAMPERE_STYLE: StyleSpecification = {
           ['match', ['get', 'class'], 'dam', 8, 'breakwater', 6, 'groyne', 5, 4],
         ],
         'line-opacity': 0.9,
+      },
+    },
+    {
+      id: 'water-structure-edge-shade',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'water_structures',
+      minzoom: 12,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#6f685e',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          12,
+          ['match', ['get', 'class'], 'dam', 2.4, 'breakwater', 2, 'groyne', 1.8, 1.2],
+          16,
+          ['match', ['get', 'class'], 'dam', 8, 'breakwater', 6, 'groyne', 5, 4],
+        ],
+        'line-translate': ['interpolate', ['linear'], ['zoom'], 12, ['literal', [0.6, -0.6]], 18, ['literal', [2, -2]]],
+        'line-translate-anchor': 'map',
+        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 1.2],
+        'line-opacity': 0.18,
+      },
+    },
+    {
+      id: 'bridge-area-deck-shades',
+      type: 'fill',
+      source: 'tampere',
+      'source-layer': 'bridges',
+      minzoom: 10,
+      paint: {
+        'fill-color': '#59615d',
+        'fill-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.8, -0.8]], 18, ['literal', [3, -3]]],
+        'fill-translate-anchor': 'map',
+        'fill-opacity': 0.16,
       },
     },
     {
@@ -862,70 +893,6 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     ...railwayRailLayers(),
-    {
-      id: 'transport-pedestrian-polygons',
-      type: 'fill',
-      source: 'transport-surfaces',
-      'source-layer': 'pedestrian_surfaces',
-      minzoom: 14,
-      paint: {
-        'fill-color': '#f3ecdf',
-        'fill-outline-color': '#ddd4c3',
-        'fill-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          14, 0,
-          14.75, 0.95,
-        ],
-      },
-    },
-    {
-      id: 'transport-road-polygon-casings',
-      type: 'fill',
-      source: 'transport-surfaces',
-      'source-layer': 'transport_casings',
-      minzoom: 14,
-      filter: ['==', ['get', 'kind'], 'road'],
-      paint: {
-        'fill-color': '#d8d4ca',
-        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
-      },
-    },
-    {
-      id: 'transport-path-polygon-casings',
-      type: 'fill',
-      source: 'transport-surfaces',
-      'source-layer': 'transport_casings',
-      minzoom: 14,
-      filter: ['==', ['get', 'kind'], 'path'],
-      paint: {
-        'fill-color': '#e6dfd2',
-        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
-      },
-    },
-    {
-      id: 'transport-road-polygons',
-      type: 'fill',
-      source: 'transport-surfaces',
-      'source-layer': 'transport_surfaces',
-      minzoom: 14,
-      filter: ['==', ['get', 'kind'], 'road'],
-      paint: {
-        'fill-color': SURFACE_ROAD_COLOR,
-        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
-      },
-    },
-    {
-      id: 'transport-path-polygons',
-      type: 'fill',
-      source: 'transport-surfaces',
-      'source-layer': 'transport_surfaces',
-      minzoom: 14,
-      filter: ['==', ['get', 'kind'], 'path'],
-      paint: {
-        'fill-color': SURFACE_PATH_COLOR,
-        'fill-opacity': TRANSPORT_POLYGON_OPACITY,
-      },
-    },
     {
       id: 'road-earthworks',
       type: 'line',
@@ -1139,6 +1106,57 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'bridge-road-edge-shade',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'roads',
+      minzoom: 12,
+      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#59615d',
+        'line-width': ROAD_WIDTH,
+        'line-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.5, -0.5]], 18, ['literal', [2.5, -2.5]]],
+        'line-translate-anchor': 'map',
+        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 1.6],
+        'line-opacity': 0.1,
+      },
+    },
+    {
+      id: 'bridge-path-edge-shade',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'paths',
+      minzoom: 12,
+      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#59615d',
+        'line-width': PATH_WIDTH,
+        'line-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.5, -0.5]], 18, ['literal', [2.5, -2.5]]],
+        'line-translate-anchor': 'map',
+        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 1.6],
+        'line-opacity': 0.09,
+      },
+    },
+    {
+      id: 'bridge-railway-edge-shade',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'railways',
+      minzoom: 12,
+      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#59615d',
+        'line-width': RAILWAY_BED_WIDTH,
+        'line-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.5, -0.5]], 18, ['literal', [2.5, -2.5]]],
+        'line-translate-anchor': 'map',
+        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 1.6],
+        'line-opacity': 0.09,
+      },
+    },
+    {
       id: 'tunnel-entrance-casing',
       type: 'line',
       source: 'tunnel-entrances',
@@ -1160,8 +1178,6 @@ const TAMPERE_STYLE: StyleSpecification = {
         'line-opacity': 0.95,
       },
     },
-    // Lightweight terrain-draped shadows. Buildings and grounded landmarks
-    // use contact shading; only elevated bridge decks remain directional.
     {
       id: 'building-shadow-soft',
       type: 'line',
@@ -1222,57 +1238,6 @@ const TAMPERE_STYLE: StyleSpecification = {
           15, 0.24,
           18, 0.34,
         ],
-      },
-    },
-    {
-      id: 'bridge-road-shadows',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'roads',
-      minzoom: 12,
-      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#1f302d',
-        'line-width': ROAD_WIDTH,
-        'line-translate': SHADOW_TRANSLATE,
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 3],
-        'line-opacity': 0.13,
-      },
-    },
-    {
-      id: 'bridge-path-shadows',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'paths',
-      minzoom: 12,
-      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#1f302d',
-        'line-width': PATH_WIDTH,
-        'line-translate': SHADOW_TRANSLATE,
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.5],
-        'line-opacity': 0.12,
-      },
-    },
-    {
-      id: 'bridge-railway-shadows',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'railways',
-      minzoom: 12,
-      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#1f302d',
-        'line-width': RAILWAY_BED_WIDTH,
-        'line-translate': SHADOW_TRANSLATE,
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 3],
-        'line-opacity': 0.13,
       },
     },
     {
@@ -1433,7 +1398,6 @@ export function MapView() {
     bridges: false,
     // Prefer the MapLibre metre-scaled line layers for now. The custom
     // polygons remain available through the visibility control.
-    transportSurfaces: false,
     roofs: true,
     trees: true,
     buildings: true,
@@ -1540,11 +1504,6 @@ export function MapView() {
     };
 
     setVisibility(['bridge-models-3d'], layerToggles.bridges);
-    setVisibility(
-      BRIDGE_SHADOW_LAYER_IDS,
-      layerToggles.bridges && layerToggles.shadows,
-    );
-    setVisibility(TRANSPORT_SURFACE_LAYER_IDS, layerToggles.transportSurfaces);
     setVisibility(['building-roofs-3d', 'building-roof-caps'], layerToggles.roofs);
     setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
     setVisibility(BUILDING_LAYER_IDS, layerToggles.buildings);
@@ -1552,6 +1511,7 @@ export function MapView() {
       BUILDING_SHADOW_LAYER_IDS,
       layerToggles.buildings && layerToggles.shadows,
     );
+    setVisibility(BRIDGE_DECK_EFFECT_LAYER_IDS, layerToggles.shadows);
     setVisibility(INFRASTRUCTURE_SHADOW_LAYER_IDS, layerToggles.shadows);
     infrastructureLayerRef.current?.setShadowsEnabled(layerToggles.shadows);
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees && layerToggles.shadows);
@@ -1577,7 +1537,6 @@ export function MapView() {
             <span className="layer-toggles-title">3D layers</span>
             {([
               ['bridges', 'Bridges'],
-              ['transportSurfaces', 'Custom roads & paths'],
               ['roofs', 'Roofs'],
               ['trees', 'Trees'],
               ['buildings', 'Buildings'],

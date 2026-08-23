@@ -21,6 +21,5 @@ services:
       - ./data/processed:/data:ro
     command:
       - /data/tampere.mbtiles
-      - /data/transport-surfaces.mbtiles
       - /data/terrain.mbtiles
     restart: unless-stopped

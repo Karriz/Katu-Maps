@@ -25,9 +25,9 @@ npm run build-all
 
 The default source is the Pirkanmaa regional extract. The script clips it to
 the Tampere bounding box in `data/sources/manifest.json`, then tilemaker
-creates `data/processed/tampere.mbtiles`. GDAL then buffers transport
-centerlines in EPSG:3067 and writes the zoom 14–16 polygon layers to
-`data/processed/transport-surfaces.mbtiles`.
+creates `data/processed/tampere.mbtiles`. The optional GDAL transport-surface
+build can be run separately with `npm run build-transport`, but is not part of
+the normal build.
 
 To use another extract:
 
@@ -128,12 +128,10 @@ development. After building the tiles, start it from this directory with:
 npm run serve
 ```
 
-Martin serves `tampere.mbtiles` and `transport-surfaces.mbtiles` on port 3000.
-Their TileJSON endpoints are:
+Martin serves `tampere.mbtiles` on port 3000. Its TileJSON endpoint is:
 
 ```text
 http://localhost:3000/tampere
-http://localhost:3000/transport-surfaces
 ```
 
 The vector tile URL template exposed by that document can be used as the
@@ -186,6 +184,6 @@ docker compose --profile build run --rm tile-builder
 docker compose up martin
 ```
 
-The builder writes `tampere.mbtiles`, `transport-surfaces.mbtiles`, and
-`terrain.mbtiles` to `data/processed`, which is mounted into Martin. The API
+The builder writes `tampere.mbtiles` and `terrain.mbtiles` to `data/processed`,
+which is mounted into Martin. The API
 key is supplied only at runtime and is not copied into the image.
