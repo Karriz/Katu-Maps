@@ -36,12 +36,33 @@ function metricPoint(coordinates: number[], origin: maplibregl.LngLat, units: nu
   };
 }
 
-function widthFor(sourceLayer: string, className: string) {
-  if (sourceLayer === 'railways') return 4.8;
-  if (className === 'footway' || className === 'path') return 2.6;
-  if (className === 'cycleway') return 3.1;
-  if (className === 'pedestrian') return 4.2;
-  return 6.8;
+function widthFor(
+  sourceLayer: string,
+  className: string,
+  widthValue: unknown,
+  lanesValue: unknown,
+) {
+  const taggedWidth = Number(widthValue);
+  if (Number.isFinite(taggedWidth) && taggedWidth > 0) {
+    return Math.min(30, Math.max(sourceLayer === 'paths' ? 1 : 2.5, taggedWidth));
+  }
+  if (sourceLayer === 'railways') return 3.2;
+  if (sourceLayer === 'paths') {
+    if (className === 'track') return 3.5;
+    if (className === 'cycleway') return 3;
+    if (className === 'pedestrian') return 4;
+    if (className === 'footway') return 2;
+    return className === 'path' ? 1.5 : 2;
+  }
+  const lanes = Number(lanesValue);
+  if (Number.isFinite(lanes) && lanes > 0) return Math.min(30, Math.max(3, lanes * 3.25));
+  if (className === 'motorway') return 12;
+  if (className === 'trunk') return 10;
+  if (className === 'primary') return 8;
+  if (className === 'secondary') return 7;
+  if (className === 'tertiary') return 6;
+  if (className === 'residential') return 5.5;
+  return className === 'service' ? 4 : 5;
 }
 
 function clearanceFor(sourceLayer: string, className: string) {
@@ -51,9 +72,9 @@ function clearanceFor(sourceLayer: string, className: string) {
 }
 
 function bridgeColor(sourceLayer: string) {
-  if (sourceLayer === 'railways') return 0xc9c7d2;
-  if (sourceLayer === 'paths') return 0xd8d5cd;
-  return 0xd0d4d1;
+  if (sourceLayer === 'railways') return 0xaeb7bb;
+  if (sourceLayer === 'paths') return 0xcbd2d3;
+  return 0xdfe4e5;
 }
 
 type BridgeCandidate = {
@@ -444,7 +465,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
         const last = metricPoint(coordinates[coordinates.length - 1], this.origin, units);
         if (!first || !last) continue;
         const className = String(properties.class ?? 'road');
-        const width = widthFor(sourceLayer, className);
+        const width = widthFor(sourceLayer, className, properties.width, properties.lanes);
         const clearance = clearanceFor(sourceLayer, className);
         const endpointA = map.queryTerrainElevation([coordinates[0][0], coordinates[0][1]]) ?? this.originElevation;
         const endpointB = map.queryTerrainElevation([coordinates[coordinates.length - 1][0], coordinates[coordinates.length - 1][1]]) ?? this.originElevation;
@@ -482,7 +503,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     for (const candidate of snapConnectingWalkways(consolidateBridgeCandidates(candidates))) {
-        const material = new THREE.MeshLambertMaterial({ color: bridgeColor(candidate.sourceLayer), flatShading: true });
+        const material = new THREE.MeshLambertMaterial({
+          color: bridgeColor(candidate.sourceLayer),
+          flatShading: true,
+        });
         for (let index = 1; index < candidate.points.length; index += 1) {
           addDeck(this.bridgeGroup, candidate.points[index - 1], candidate.points[index], candidate.width, 0.35, material);
         }

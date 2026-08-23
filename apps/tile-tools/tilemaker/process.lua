@@ -9,6 +9,7 @@ way_keys = {
   "power", "barrier", "leaf_type", "leaf_cycle", "species", "genus",
   "height", "min_height", "building:levels", "building:colour", "building:color",
   "bridge", "bridge:structure", "bridge:name", "name:bridge", "layer", "tunnel", "covered", "embankment", "cutting", "surface",
+  "width", "lanes", "oneway", "lane_markings",
   "water", "dock", "pier", "quay", "breakwater", "groyne",
   "generator:source", "generator:type",
   "public_transport", "roof:shape", "roof:height", "roof:levels", "roof:colour",
@@ -133,6 +134,29 @@ local function add_terrain_metadata()
   local cutting = Find("cutting")
   if cutting ~= "" and cutting ~= "no" then
     Attribute("cutting", cutting)
+  end
+end
+
+local function add_transport_width()
+  local width = tonumber(Find("width"))
+  if width and width > 0 then
+    AttributeNumeric("width", width)
+  end
+end
+
+local function add_road_metadata()
+  add_transport_width()
+  local lanes = tonumber(Find("lanes"))
+  if lanes and lanes > 0 then
+    AttributeNumeric("lanes", lanes)
+  end
+  local oneway = Find("oneway")
+  if oneway ~= "" then
+    Attribute("oneway", oneway)
+  end
+  local lane_markings = Find("lane_markings")
+  if lane_markings ~= "" then
+    Attribute("lane_markings", lane_markings)
   end
 end
 
@@ -432,6 +456,7 @@ function way_function()
     end
     Attribute("class", highway)
     add_surface()
+    add_road_metadata()
     add_terrain_metadata()
     add_bridge_metadata()
     add_name()
@@ -442,6 +467,7 @@ function way_function()
   if railway ~= "" then
     Layer("railways", false)
     Attribute("class", railway)
+    add_transport_width()
     add_terrain_metadata()
     add_bridge_metadata()
     add_name()

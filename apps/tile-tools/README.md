@@ -79,6 +79,12 @@ features remain filled polygons.
 The tileset also includes parking and pedestrian areas, aeroways, power and
 barrier features, and named places/POIs for browser styling.
 
+Roads and paths retain numeric `width` values when mapped, with class-based
+fallbacks in the browser style. Road `lanes`, `oneway`, and `lane_markings`
+metadata controls the simplified center-line markings. Bridge-tagged transport
+lines are hidden in the flat style because the browser renders their decks as
+3D bridge models.
+
 Transmission towers are available to the browser model layer. `power=tower`
 points become simple low-poly supports whose crossarms follow the nearest
 mapped `power=line` direction. `man_made=pier|dock|quay|breakwater|groyne` and
