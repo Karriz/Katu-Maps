@@ -5,34 +5,36 @@ import maplibregl, {
 } from 'maplibre-gl';
 import * as THREE from 'three';
 
-const ROOF_MIN_ZOOM = 14;
+// Roof meshes are deliberately a close-range detail. The ordinary building
+// extrusion remains visible below this zoom.
+const ROOF_MIN_ZOOM = 16;
 const MAX_ROOF_FEATURES = 2200;
 const DEFAULT_ROOF_COLOR = '#c9b9ae';
 const REFERENCE = new maplibregl.LngLat(23.7609, 61.4981);
 const BUILDING_PALETTES: Record<string, [string[], string[]]> = {
   default: [
-    ['#e2e4e3', '#e4ded9', '#dedfe9', '#e2e8df'],
-    ['#eceeed', '#eee9e5', '#e9e9f0', '#ebf0e9'],
+    ['#d4d8d6', '#d9d0ca', '#d1d2df', '#d4ddd2'],
+    ['#e3e7e5', '#e7dfda', '#e1e1e9', '#e2e9df'],
   ],
   residential: [
-    ['#e8d9d3', '#e3dce8', '#e8dfca', '#dfe8e5'],
-    ['#f0e5e0', '#ede8f0', '#f0e9dc', '#e8f0ed'],
+    ['#dfc8bf', '#d5ccdf', '#dfd2b7', '#cddeda'],
+    ['#e9d8d1', '#e4dce9', '#e9dfc9', '#d9e8e4'],
   ],
   apartments: [
-    ['#d9dce8', '#ded8e7', '#d8e5e8', '#e4d9e8'],
-    ['#e7e9f0', '#eae5ef', '#e6eef0', '#eee7f0'],
+    ['#cbd0df', '#d3cade', '#cbdade', '#d9cddd'],
+    ['#dce0e9', '#e0d9e7', '#dbe6e9', '#e5dce9'],
   ],
   commercial: [
-    ['#d8e2eb', '#d9ddec', '#e2d9e8', '#d9e7e2'],
-    ['#e5edf3', '#e6e9f3', '#ede6f0', '#e7f0eb'],
+    ['#c9d8e3', '#cbd1e3', '#d9ccdf', '#cbe0d8'],
+    ['#dae5ec', '#dce0ec', '#e4dbe8', '#dce9e3'],
   ],
   industrial: [
-    ['#d6dedc', '#d3dcda', '#dfe0d5', '#d3dce5'],
-    ['#e1e7e5', '#dfe6e4', '#e9e8df', '#dfe7ed'],
+    ['#c8d4d1', '#c5d2ce', '#d4d5c8', '#c5d1dd'],
+    ['#d6dfdc', '#d4dedb', '#e1e1d6', '#d4dfe6'],
   ],
   civic: [
-    ['#eadfca', '#dddbea', '#e6ddd0', '#dce8e5'],
-    ['#f0e8d8', '#e7e5ef', '#eee6dc', '#e6f0ed'],
+    ['#e0d1b5', '#d1cede', '#dccfbb', '#cedfdb'],
+    ['#e8ddc9', '#dedbe8', '#e6dccd', '#d9e8e4'],
   ],
 };
 

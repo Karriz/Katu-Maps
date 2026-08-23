@@ -36,6 +36,10 @@ h1 { font-size: clamp(1.4rem, 3vw, 2rem); margin: 0; }
 .terrain-toggle { background: #f4fbff; border: 1px solid #86aac2; border-radius: 8px; color: #163047; cursor: pointer; font: inherit; font-size: 0.8rem; padding: 8px 10px; position: absolute; right: 16px; top: 84px; z-index: 1; }
 .terrain-toggle:hover { background: #dff3ff; }
 .terrain-toggle[aria-pressed='true'] { background: #b9e6ff; border-color: #4f9ac5; }
+.layer-toggles { background: rgb(14 23 38 / 90%); border: 1px solid #41627f; border-radius: 10px; color: #d6e5f5; display: grid; gap: 7px; padding: 10px 12px; position: absolute; right: 16px; top: 16px; z-index: 1; }
+.layer-toggles-title { color: #8ec8e8; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 2px; text-transform: uppercase; }
+.layer-toggle { align-items: center; cursor: pointer; display: flex; font-size: 0.8rem; gap: 8px; white-space: nowrap; }
+.layer-toggle input { accent-color: #58a9d4; margin: 0; }
 
 @media (max-width: 640px) {
   .app-shell { padding: 12px; }

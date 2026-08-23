@@ -5,14 +5,23 @@ import maplibregl, {
 } from 'maplibre-gl';
 import * as THREE from 'three';
 
-const TREE_MIN_ZOOM = 13;
+const TREE_MIN_ZOOM = 12;
 const MAX_TREE_COUNT = 5000;
+const TREE_BUDGETS = [
+  { maxZoom: 14, count: 900 },
+  { maxZoom: 15, count: 1600 },
+  { maxZoom: 16, count: 2800 },
+  { maxZoom: Number.POSITIVE_INFINITY, count: MAX_TREE_COUNT },
+] as const;
 const FOREST_TREE_SPACING_METERS = 32;
 const PARK_TREE_SPACING_METERS = 44;
 const MAPPED_TREE_CLEARANCE_METERS = 9;
 const TRUNK_CANOPY_OVERLAP_METERS = 0.25;
 const SAMPLING_BOUNDS_PADDING_METERS = 80;
 const MAX_GRID_CELLS_PER_POLYGON = 100_000;
+const SHADOW_DIRECTION_X = 0.8;
+const SHADOW_DIRECTION_Z = 0.6;
+const SHADOW_ANGLE = Math.atan2(SHADOW_DIRECTION_X, SHADOW_DIRECTION_Z);
 const TAMPERE_REFERENCE = new maplibregl.LngLat(23.7609, 61.4981);
 const REFERENCE_MERCATOR_UNITS_PER_METER = maplibregl.MercatorCoordinate
   .fromLngLat(TAMPERE_REFERENCE)
@@ -150,6 +159,17 @@ function visibleMetricBounds(map: MaplibreMap): MetricBounds {
   };
 }
 
+function treeBudget(zoom: number) {
+  return TREE_BUDGETS.find((entry) => zoom < entry.maxZoom) ?? TREE_BUDGETS.at(-1)!;
+}
+
+function withinTreeBounds(tree: TreeInstance, bounds: MetricBounds) {
+  const point = toMetricPoint([tree.longitude, tree.latitude]);
+  if (!point) return false;
+  return point[0] >= bounds.minX && point[0] <= bounds.maxX
+    && point[1] >= bounds.minY && point[1] <= bounds.maxY;
+}
+
 function featurePolygons(feature: SourceFeature): number[][][][] {
   const geometry = feature.geometry;
   if (geometry?.type === 'Polygon') return [geometry.coordinates as number[][][]];
@@ -214,6 +234,28 @@ function coniferChance(leafType: unknown, fallback: number) {
   if (normalizedLeafType.includes('broad')) return 0;
   if (normalizedLeafType.includes('mixed')) return 0.5;
   return fallback;
+}
+
+function createShadowTexture() {
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const normalizedX = (x + 0.5) / size * 2 - 1;
+      const normalizedY = (y + 0.5) / size * 2 - 1;
+      const distance = Math.hypot(normalizedX, normalizedY);
+      const strength = Math.max(0, Math.min(1, (1 - distance) / 0.48));
+      const offset = (y * size + x) * 4;
+      const value = Math.round(strength * strength * 255);
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function mappedTreeIndex(trees: TreeInstance[]) {
@@ -344,9 +386,19 @@ export class TreeModelLayer implements CustomLayerInterface {
   private readonly color = new THREE.Color();
   private sceneOrigin = new maplibregl.LngLat(23.7609, 61.4981);
   private sceneOriginElevation = 0;
+  private readonly elevationCache = new Map<string, number>();
   private trunkMesh?: THREE.InstancedMesh;
   private broadleafMesh?: THREE.InstancedMesh;
   private coniferMesh?: THREE.InstancedMesh;
+  private shadowMesh?: THREE.InstancedMesh;
+  private shadowTexture?: THREE.DataTexture;
+  private shadowsEnabled = true;
+
+  setShadowsEnabled(enabled: boolean) {
+    this.shadowsEnabled = enabled;
+    if (this.shadowMesh) this.shadowMesh.visible = enabled;
+    this.map?.triggerRepaint();
+  }
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
     this.map = map;
@@ -366,16 +418,31 @@ export class TreeModelLayer implements CustomLayerInterface {
     trunkGeometry.translate(0, 0.5, 0);
     const broadleafGeometry = new THREE.IcosahedronGeometry(1, 1);
     const coniferGeometry = new THREE.ConeGeometry(1, 1, 7, 2);
+    const shadowGeometry = new THREE.CircleGeometry(1, 12);
+    shadowGeometry.rotateX(-Math.PI / 2);
 
     const trunkMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const broadleafMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const coniferMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    this.shadowTexture = createShadowTexture();
+    const shadowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x1d3028,
+      transparent: true,
+      opacity: 0.15,
+      alphaMap: this.shadowTexture,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
 
     this.trunkMesh = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, MAX_TREE_COUNT);
     this.broadleafMesh = new THREE.InstancedMesh(broadleafGeometry, broadleafMaterial, MAX_TREE_COUNT);
     this.coniferMesh = new THREE.InstancedMesh(coniferGeometry, coniferMaterial, MAX_TREE_COUNT);
+    this.shadowMesh = new THREE.InstancedMesh(shadowGeometry, shadowMaterial, MAX_TREE_COUNT);
+    this.shadowMesh.visible = this.shadowsEnabled;
 
-    for (const mesh of [this.trunkMesh, this.broadleafMesh, this.coniferMesh]) {
+    for (const mesh of [this.shadowMesh, this.trunkMesh, this.broadleafMesh, this.coniferMesh]) {
       mesh.count = 0;
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       // The loaded vector-tile set already limits instances to the current map
@@ -399,12 +466,14 @@ export class TreeModelLayer implements CustomLayerInterface {
     const trunkMesh = this.trunkMesh;
     const broadleafMesh = this.broadleafMesh;
     const coniferMesh = this.coniferMesh;
-    if (!map || !trunkMesh || !broadleafMesh || !coniferMesh) return;
+    const shadowMesh = this.shadowMesh;
+    if (!map || !trunkMesh || !broadleafMesh || !coniferMesh || !shadowMesh) return;
 
     if (map.getZoom() < TREE_MIN_ZOOM) {
       trunkMesh.count = 0;
       broadleafMesh.count = 0;
       coniferMesh.count = 0;
+      shadowMesh.count = 0;
       map.triggerRepaint();
       return;
     }
@@ -413,17 +482,21 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
     const mercatorUnitsPerMeter = originMercator.meterInMercatorCoordinateUnits();
+    const budget = treeBudget(map.getZoom());
+    const samplingBounds = visibleMetricBounds(map);
     const mappedTreeFeatures = map.querySourceFeatures('tampere', { sourceLayer: 'trees' });
-    const mappedTrees = collectTreeInstances(mappedTreeFeatures);
+    const mappedTrees = collectTreeInstances(mappedTreeFeatures)
+      .filter((tree) => withinTreeBounds(tree, samplingBounds))
+      .slice(0, budget.count);
     const landuseFeatures = map.querySourceFeatures('tampere', { sourceLayer: 'landuse' });
     const proceduralTrees = collectProceduralTrees(
       landuseFeatures,
       visibleMetricBounds(map),
       mappedTrees,
-      MAX_TREE_COUNT - mappedTrees.length,
+      Math.max(0, budget.count - mappedTrees.length),
       map.getZoom(),
-    );
-    const trees = [...mappedTrees, ...proceduralTrees];
+    ).filter((tree) => withinTreeBounds(tree, samplingBounds));
+    const trees = [...mappedTrees, ...proceduralTrees].slice(0, budget.count);
 
     let broadleafCount = 0;
     let coniferCount = 0;
@@ -433,7 +506,18 @@ export class TreeModelLayer implements CustomLayerInterface {
       const treeMercator = maplibregl.MercatorCoordinate.fromLngLat(location);
       const east = (treeMercator.x - originMercator.x) / mercatorUnitsPerMeter;
       const north = (originMercator.y - treeMercator.y) / mercatorUnitsPerMeter;
-      const elevation = map.queryTerrainElevation(location) ?? this.sceneOriginElevation;
+      // Terrain queries are relatively expensive. Elevation changes slowly at
+      // tree scale, so reuse samples from a small geographic grid between
+      // model rebuilds.
+      const elevationKey = `${tree.longitude.toFixed(4)}:${tree.latitude.toFixed(4)}`;
+      let elevation = this.elevationCache.get(elevationKey);
+      if (elevation === undefined) {
+        const sampledElevation = map.queryTerrainElevation(location);
+        elevation = sampledElevation ?? this.sceneOriginElevation;
+        // Do not cache a fallback value: terrain tiles may still be loading and
+        // a later idle update should be able to replace it with real terrain.
+        if (sampledElevation !== undefined) this.elevationCache.set(elevationKey, elevation);
+      }
       const up = elevation - this.sceneOriginElevation;
       const isConifer = tree.leafType.toLowerCase().includes('needle');
       const canopyBase = tree.height * (isConifer ? 0.18 : 0.3);
@@ -450,6 +534,22 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       const canopyHeight = tree.height - canopyBase;
       const canopyRadius = tree.height * (isConifer ? 0.18 : 0.21) * tree.widthScale;
+
+      const shadowLength = tree.height * 0.82;
+      this.transformHelper.position.set(
+        east + SHADOW_DIRECTION_X * shadowLength * 0.42,
+        up + 0.06,
+        north + SHADOW_DIRECTION_Z * shadowLength * 0.42,
+      );
+      this.transformHelper.rotation.set(0, SHADOW_ANGLE, 0);
+      this.transformHelper.scale.set(
+        canopyRadius * 0.82,
+        1,
+        shadowLength * 0.5 + canopyRadius * 0.45,
+      );
+      this.transformHelper.updateMatrix();
+      shadowMesh.setMatrixAt(index, this.transformHelper.matrix);
+
       this.transformHelper.position.set(east, up + canopyBase + canopyHeight / 2, north);
       this.transformHelper.rotation.set(0, tree.rotation, 0);
       this.transformHelper.scale.set(
@@ -475,9 +575,11 @@ export class TreeModelLayer implements CustomLayerInterface {
     trunkMesh.count = trees.length;
     broadleafMesh.count = broadleafCount;
     coniferMesh.count = coniferCount;
+    shadowMesh.count = trees.length;
     trunkMesh.instanceMatrix.needsUpdate = true;
     broadleafMesh.instanceMatrix.needsUpdate = true;
     coniferMesh.instanceMatrix.needsUpdate = true;
+    shadowMesh.instanceMatrix.needsUpdate = true;
     if (trunkMesh.instanceColor) trunkMesh.instanceColor.needsUpdate = true;
     if (broadleafMesh.instanceColor) broadleafMesh.instanceColor.needsUpdate = true;
     if (coniferMesh.instanceColor) coniferMesh.instanceColor.needsUpdate = true;
@@ -507,12 +609,14 @@ export class TreeModelLayer implements CustomLayerInterface {
   }
 
   onRemove() {
-    for (const mesh of [this.trunkMesh, this.broadleafMesh, this.coniferMesh]) {
+    for (const mesh of [this.shadowMesh, this.trunkMesh, this.broadleafMesh, this.coniferMesh]) {
       mesh?.geometry.dispose();
       const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
       materials.forEach((material) => material?.dispose());
     }
     this.scene.clear();
+    this.shadowTexture?.dispose();
+    this.shadowTexture = undefined;
     this.renderer?.dispose();
     this.renderer = undefined;
     this.map = undefined;

@@ -4,6 +4,9 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SOURCE="${1:-$PROJECT_ROOT/data/sources/tampere-renumbered.osm.pbf}"
 OUTPUT="${2:-$PROJECT_ROOT/data/processed/transport-surfaces.mbtiles}"
+# Keep the bridge/water clipping implementation available for later, but do
+# not apply it by default while evaluating the native MapLibre road layers.
+ENABLE_BRIDGE_WATER_CLIPPING="${ENABLE_BRIDGE_WATER_CLIPPING:-false}"
 
 if ! command -v ogr2ogr >/dev/null 2>&1; then
   echo "ogr2ogr is required; install GDAL" >&2
@@ -127,40 +130,60 @@ clean_layer() {
   if [ -f "$CLEANED" ]; then
     output_mode=(-update -append)
   fi
-  ogr2ogr "${output_mode[@]}" "$CLEANED" "$STAGING" \
-    -dialect SQLite \
-    -sql "SELECT clipped.osm_id, clipped.class, clipped.kind, clipped.surface,
-      clipped.sidewalk, clipped.cycleway, clipped.width, clipped.geometry
-      FROM (
-        SELECT t.osm_id, t.class, t.kind, t.surface, t.sidewalk, t.cycleway, t.width,
-          CASE WHEN ST_Intersects(t.geometry, bridge_mask.geometry)
-            THEN ST_Difference(t.geometry, bridge_mask.geometry)
-            ELSE t.geometry END AS geometry
-        FROM $source_layer t
-        CROSS JOIN (SELECT geometry FROM bridge_water_mask LIMIT 1) bridge_mask
-      ) clipped
-      WHERE NOT ST_IsEmpty(clipped.geometry)" \
-    -nln "$source_layer" \
-    -nlt MULTIPOLYGON
+  if [ "$ENABLE_BRIDGE_WATER_CLIPPING" = "true" ]; then
+    ogr2ogr "${output_mode[@]}" "$CLEANED" "$STAGING" \
+      -dialect SQLite \
+      -sql "SELECT clipped.osm_id, clipped.class, clipped.kind, clipped.surface,
+        clipped.sidewalk, clipped.cycleway, clipped.width, clipped.geometry
+        FROM (
+          SELECT t.osm_id, t.class, t.kind, t.surface, t.sidewalk, t.cycleway, t.width,
+            CASE WHEN ST_Intersects(t.geometry, bridge_mask.geometry)
+              THEN ST_Difference(t.geometry, bridge_mask.geometry)
+              ELSE t.geometry END AS geometry
+          FROM $source_layer t
+          CROSS JOIN (SELECT geometry FROM bridge_water_mask LIMIT 1) bridge_mask
+        ) clipped
+        WHERE NOT ST_IsEmpty(clipped.geometry)" \
+      -nln "$source_layer" \
+      -nlt MULTIPOLYGON
+  else
+    ogr2ogr "${output_mode[@]}" "$CLEANED" "$STAGING" \
+      -dialect SQLite \
+      -sql "SELECT osm_id, class, kind, surface, sidewalk, cycleway, width, geometry
+        FROM $source_layer
+        WHERE NOT ST_IsEmpty(geometry)" \
+      -nln "$source_layer" \
+      -nlt MULTIPOLYGON
+  fi
 }
 
 clean_layer transport_casings
 clean_layer transport_surfaces
 
-ogr2ogr -update -append "$CLEANED" "$STAGING" \
-  -dialect SQLite \
-  -sql "SELECT clipped.osm_id, clipped.class, clipped.surface, clipped.geometry
-    FROM (
-      SELECT t.osm_id, t.class, t.surface,
-        CASE WHEN ST_Intersects(t.geometry, bridge_mask.geometry)
-          THEN ST_CollectionExtract(ST_Difference(t.geometry, bridge_mask.geometry), 3)
-          ELSE t.geometry END AS geometry
-      FROM pedestrian_surfaces t
-      CROSS JOIN (SELECT geometry FROM bridge_water_mask LIMIT 1) bridge_mask
-    ) clipped
-    WHERE NOT ST_IsEmpty(clipped.geometry)" \
-  -nln pedestrian_surfaces \
-  -nlt MULTIPOLYGON
+if [ "$ENABLE_BRIDGE_WATER_CLIPPING" = "true" ]; then
+  ogr2ogr -update -append "$CLEANED" "$STAGING" \
+    -dialect SQLite \
+    -sql "SELECT clipped.osm_id, clipped.class, clipped.surface, clipped.geometry
+      FROM (
+        SELECT t.osm_id, t.class, t.surface,
+          CASE WHEN ST_Intersects(t.geometry, bridge_mask.geometry)
+            THEN ST_CollectionExtract(ST_Difference(t.geometry, bridge_mask.geometry), 3)
+            ELSE t.geometry END AS geometry
+        FROM pedestrian_surfaces t
+        CROSS JOIN (SELECT geometry FROM bridge_water_mask LIMIT 1) bridge_mask
+      ) clipped
+      WHERE NOT ST_IsEmpty(clipped.geometry)" \
+    -nln pedestrian_surfaces \
+    -nlt MULTIPOLYGON
+else
+  ogr2ogr -update -append "$CLEANED" "$STAGING" \
+    -dialect SQLite \
+    -sql "SELECT osm_id, class, surface, geometry
+      FROM pedestrian_surfaces
+      WHERE NOT ST_IsEmpty(geometry)" \
+    -nln pedestrian_surfaces \
+    -nlt MULTIPOLYGON
+fi
 
 ogr2ogr -f MBTiles "$OUTPUT" "$CLEANED" \
   -dsco NAME="Tampere transport surfaces" \

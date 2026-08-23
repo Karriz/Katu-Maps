@@ -77,9 +77,13 @@ function featurePoint(coordinate: number[], map: MaplibreMap, origin: maplibregl
 
 function disposeGroup(group: THREE.Group | undefined) {
   group?.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
+    if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
       object.geometry.dispose();
-      if (object.material instanceof THREE.Material) object.material.dispose();
+      if (Array.isArray(object.material)) {
+        object.material.forEach((material) => material.dispose());
+      } else {
+        object.material.dispose();
+      }
     }
   });
 }
@@ -287,8 +291,66 @@ function addLandmark(
   className: string,
   heightValue: unknown,
   material: THREE.Material,
+  towerType = '',
+  towerConstruction = '',
+  latticeMaterial?: THREE.Material,
+  accentMaterial?: THREE.Material,
 ) {
   const taggedHeight = Number(heightValue);
+  const isCommunicationTower = className === 'communications_tower'
+    || (towerType === 'communication' && (className === 'mast' || className === 'tower'));
+  if (isCommunicationTower && (!Number.isFinite(taggedHeight) || taggedHeight >= 25)) {
+    const height = Number.isFinite(taggedHeight) && taggedHeight >= 25
+      ? Math.min(taggedHeight, 160)
+      : towerConstruction === 'guyed_lattice' ? 55 : 42;
+    const towerHeight = height * 0.9;
+    const baseRadius = Math.min(4.2, Math.max(2.4, height * 0.045));
+    const lattice = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, baseRadius, towerHeight, 3, 9, true),
+      latticeMaterial ?? material,
+    );
+    lattice.position.set(point.x, point.ground + towerHeight / 2, point.z);
+    group.add(lattice);
+
+    for (const level of [0.42, 0.68, 0.88]) {
+      const radius = baseRadius + (0.45 - baseRadius) * level;
+      const platform = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 1.28, radius * 1.28, 0.28, 8),
+        material,
+      );
+      platform.position.set(point.x, point.ground + towerHeight * level, point.z);
+      group.add(platform);
+    }
+
+    const antennaHeight = height - towerHeight;
+    const antenna = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.18, antennaHeight, 6),
+      accentMaterial ?? material,
+    );
+    antenna.position.set(point.x, point.ground + towerHeight + antennaHeight / 2, point.z);
+    group.add(antenna);
+
+    if (towerConstruction === 'guyed_lattice') {
+      const guyRadius = Math.max(12, height * 0.32);
+      const guyTop = point.ground + towerHeight * 0.72;
+      const positions: number[] = [];
+      for (let index = 0; index < 3; index += 1) {
+        const angle = index * Math.PI * 2 / 3;
+        positions.push(
+          point.x, guyTop, point.z,
+          point.x + Math.cos(angle) * guyRadius, point.ground + 0.1, point.z + Math.sin(angle) * guyRadius,
+        );
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const wires = new THREE.LineSegments(
+        geometry,
+        new THREE.LineBasicMaterial({ color: 0x747b78, transparent: true, opacity: 0.62 }),
+      );
+      group.add(wires);
+    }
+    return;
+  }
   const defaultHeight = className === 'chimney' ? 8.75
     : className === 'tower' || className === 'communications_tower' ? 15
       : className === 'water_tower' ? 12 : 7;
@@ -396,6 +458,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
     const units = maplibregl.MercatorCoordinate.fromLngLat(this.origin).meterInMercatorCoordinateUnits();
     const powerMaterial = new THREE.MeshLambertMaterial({ color: 0x555b58, flatShading: true });
     const landmarkMaterial = new THREE.MeshLambertMaterial({ color: 0x9a9286, flatShading: true });
+    const towerLatticeMaterial = new THREE.MeshLambertMaterial({ color: 0x666e6b, wireframe: true });
+    const towerAccentMaterial = new THREE.MeshLambertMaterial({ color: 0xb85f51, flatShading: true });
     const chimneyMaterial = new THREE.MeshLambertMaterial({ color: 0xb8b2a8, flatShading: true });
     const turbineMaterial = new THREE.MeshLambertMaterial({ color: 0xd8d9d5, flatShading: true });
     const powerFeatures = sourceFeatures(map, 'power');
@@ -450,6 +514,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
         point: Point;
         className: string;
         height: unknown;
+        towerType: string;
+        towerConstruction: string;
         isWindTurbine: boolean;
         distance: number;
       }> = [];
@@ -467,6 +533,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
             point,
             className: 'wind_turbine',
             height: properties.height,
+            towerType: '',
+            towerConstruction: '',
             isWindTurbine: true,
             distance: Math.hypot(point.x, point.z),
           });
@@ -485,6 +553,8 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
             point,
             className,
             height: properties.height,
+            towerType: String(properties.tower_type ?? '').toLowerCase(),
+            towerConstruction: String(properties.tower_construction ?? '').toLowerCase(),
             isWindTurbine: false,
             distance: Math.hypot(point.x, point.z),
           });
@@ -503,6 +573,10 @@ export class InfrastructureModelLayer implements CustomLayerInterface {
               candidate.className,
               candidate.height,
               candidate.className === 'chimney' ? chimneyMaterial : landmarkMaterial,
+              candidate.towerType,
+              candidate.towerConstruction,
+              towerLatticeMaterial,
+              towerAccentMaterial,
             );
           }
         });

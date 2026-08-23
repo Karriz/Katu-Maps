@@ -1,6 +1,8 @@
 node_keys = {
   "place", "name", "amenity", "shop", "tourism", "natural", "power", "barrier",
-  "man_made", "height", "tower:type", "generator:source", "generator:type",
+  "man_made", "height", "tower:type", "tower:construction",
+  "communication:radio", "communication:television",
+  "generator:source", "generator:type",
   "leaf_type", "leaf_cycle", "species", "genus"
 }
 way_keys = {
@@ -15,6 +17,7 @@ way_keys = {
   "generator:source", "generator:type",
   "public_transport", "roof:shape", "roof:height", "roof:levels", "roof:colour",
   "roof:color", "roof:material", "roof:orientation", "roof:direction", "tower:type",
+  "tower:construction", "communication:radio", "communication:television",
   "religion", "denomination"
 }
 
@@ -35,6 +38,24 @@ local named_building_colours = {
   silver = "c0c0c0",
   white = "ffffff",
   yellow = "e5c34b"
+}
+
+-- OSM commonly maps campuses and graveyards as amenity polygons without a
+-- separate landuse tag. Treat the area-like amenities as land use so they do
+-- not fall through to the neutral map background.
+local amenity_land_classes = {
+  grave_yard = "cemetery",
+  school = "education",
+  college = "education",
+  university = "education",
+  kindergarten = "education",
+  hospital = "healthcare",
+  clinic = "healthcare",
+  place_of_worship = "religious",
+  community_centre = "civic",
+  social_facility = "civic",
+  public_building = "civic",
+  townhall = "civic"
 }
 
 local function parse_building_colour(value)
@@ -62,11 +83,21 @@ local function pastel_building_colour(value, blend)
   local function mix(channel, target)
     return math.floor(channel * (1 - blend) + target * blend + 0.5)
   end
+  -- OSM colour tags are often vivid or inconsistently named. Keep their
+  -- general hue as a cue, but reduce chroma so one tagged building cannot
+  -- dominate the otherwise quiet map palette.
+  local mixed_red = mix(red, target_red)
+  local mixed_green = mix(green, target_green)
+  local mixed_blue = mix(blue, target_blue)
+  local average = (mixed_red + mixed_green + mixed_blue) / 3
+  local function mute(channel)
+    return math.floor(average + (channel - average) * 0.42 + 0.5)
+  end
   return string.format(
     "#%02x%02x%02x",
-    mix(red, target_red),
-    mix(green, target_green),
-    mix(blue, target_blue)
+    mute(mixed_red),
+    mute(mixed_green),
+    mute(mixed_blue)
   )
 end
 
@@ -109,12 +140,31 @@ local function is_landmark(man_made)
     or man_made == "communications_tower"
 end
 
+-- Most communication masts in the extract are ordinary mobile-phone poles.
+-- Keep the landmark layer focused on structures that should be visible in a
+-- city-scale 3D view: tall tagged masts, radio/TV masts, and guyed lattice
+-- masts (which are typically the large long-range installations).
+local function is_large_communication_mast(man_made)
+  if man_made ~= "mast" or Find("tower:type") ~= "communication" then
+    return false
+  end
+  local height = tonumber(Find("height"))
+  return (height and height >= 30)
+    or Find("tower:construction") == "guyed_lattice"
+    or Find("communication:radio") == "yes"
+    or Find("communication:television") == "yes"
+end
+
 local function add_landmark_metadata(man_made)
   Attribute("class", man_made)
   add_optional_height()
   local tower_type = Find("tower:type")
   if tower_type ~= "" then
     Attribute("tower_type", tower_type)
+  end
+  local tower_construction = Find("tower:construction")
+  if tower_construction ~= "" then
+    Attribute("tower_construction", tower_construction)
   end
   add_name()
 end
@@ -285,7 +335,7 @@ function node_function()
   end
 
   local man_made = Find("man_made")
-  if is_landmark(man_made) then
+  if is_landmark(man_made) or is_large_communication_mast(man_made) then
     Layer("landmarks", false)
     add_landmark_metadata(man_made)
     return
@@ -354,7 +404,18 @@ function way_function()
   if barrier ~= "" then
     Layer("barriers", false)
     Attribute("class", barrier)
-    return
+    -- Closed boundaries often carry a second area meaning, for example
+    -- Kalevankangas is both barrier=wall and landuse=cemetery. Keep processing
+    -- those ways so the boundary and its filled land-use polygon are emitted.
+    local has_area_classification = IsClosed() and (
+      Find("natural") ~= ""
+      or Find("landuse") ~= ""
+      or Find("leisure") ~= ""
+      or amenity_land_classes[amenity] ~= nil
+    )
+    if not has_area_classification then
+      return
+    end
   end
 
   local building = Find("building")
@@ -444,7 +505,7 @@ function way_function()
     return
   end
 
-  if is_landmark(man_made) then
+  if is_landmark(man_made) or is_large_communication_mast(man_made) then
     Layer("landmarks", IsClosed())
     add_landmark_metadata(man_made)
     return
@@ -453,16 +514,14 @@ function way_function()
   local highway = Find("highway")
   if highway ~= "" then
     if highway == "pedestrian" and IsClosed() then
-      local bridge = Find("bridge")
-      if bridge ~= "" and bridge ~= "no" and bridge ~= "false" and bridge ~= "0" then
-        -- The corresponding bridge centerlines become an elevated browser
-        -- model. Emitting this area as a normal plaza drapes a duplicate slab
-        -- over the water beneath that model.
-        return
-      end
       Layer("pedestrian_areas", true)
       Attribute("class", highway)
       add_surface()
+      -- Preserve OSM bridge decks in the basemap even when the optional 3D
+      -- bridge model is disabled. The style keeps these polygons visible at
+      -- close zoom while ordinary pedestrian plazas transition to custom
+      -- transport surfaces.
+      add_bridge_metadata()
       add_name()
       return
     end
@@ -494,6 +553,7 @@ function way_function()
   local natural = Find("natural")
   local landuse = Find("landuse")
   local leisure = Find("leisure")
+  local amenity_land_class = amenity_land_classes[amenity]
   if natural == "water" or landuse == "basin" or landuse == "reservoir" then
     local water = Find("water")
     -- Some OSM imports represent rivers as long, narrow water polygons.
@@ -539,9 +599,11 @@ function way_function()
     return
   end
 
-  if natural ~= "" or landuse ~= "" or leisure ~= "" then
+  if natural ~= "" or landuse ~= "" or leisure ~= "" or amenity_land_class ~= nil then
     Layer("landuse", true)
-    local land_class = natural ~= "" and natural or (landuse ~= "" and landuse or leisure)
+    local land_class = natural ~= "" and natural
+      or (landuse ~= "" and landuse
+      or (leisure ~= "" and leisure or amenity_land_class))
     Attribute("class", land_class)
     local leaf_type = Find("leaf_type")
     local leaf_cycle = Find("leaf_cycle")
