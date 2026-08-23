@@ -1,5 +1,6 @@
 node_keys = {
   "place", "name", "amenity", "shop", "tourism", "natural", "power", "barrier",
+  "man_made", "height", "tower:type", "generator:source", "generator:type",
   "leaf_type", "leaf_cycle", "species", "genus"
 }
 way_keys = {
@@ -7,6 +8,9 @@ way_keys = {
   "leisure", "amenity", "name", "building:part", "man_made", "aeroway",
   "power", "barrier", "leaf_type", "leaf_cycle", "species", "genus",
   "height", "min_height", "building:levels", "building:colour", "building:color",
+  "bridge", "bridge:structure", "bridge:name", "name:bridge", "layer", "tunnel", "covered", "embankment", "cutting", "surface",
+  "water", "dock", "pier", "quay", "breakwater", "groyne",
+  "generator:source", "generator:type",
   "public_transport", "roof:shape", "roof:height", "roof:levels", "roof:colour",
   "roof:color", "roof:material", "roof:orientation", "roof:direction", "tower:type",
   "religion", "denomination"
@@ -76,6 +80,84 @@ local function add_surface()
   if surface ~= "" then
     Attribute("surface", surface)
   end
+end
+
+local function add_optional_height()
+  local height = tonumber(Find("height"))
+  if height and height > 0 then
+    AttributeNumeric("height", height)
+  end
+end
+
+local function add_generator_metadata()
+  local source = Find("generator:source")
+  if source ~= "" then
+    Attribute("generator_source", source)
+  end
+  local generator_type = Find("generator:type")
+  if generator_type ~= "" then
+    Attribute("generator_type", generator_type)
+  end
+end
+
+local function is_landmark(man_made)
+  return man_made == "chimney" or man_made == "water_tower"
+    or man_made == "silo" or man_made == "storage_tank"
+    or man_made == "gasometer" or man_made == "tower"
+    or man_made == "communications_tower"
+end
+
+local function add_landmark_metadata(man_made)
+  Attribute("class", man_made)
+  add_optional_height()
+  local tower_type = Find("tower:type")
+  if tower_type ~= "" then
+    Attribute("tower_type", tower_type)
+  end
+  add_name()
+end
+
+local function add_terrain_metadata()
+  local tunnel = Find("tunnel")
+  if tunnel ~= "" and tunnel ~= "no" then
+    Attribute("tunnel", tunnel)
+  end
+  local covered = Find("covered")
+  if covered ~= "" and covered ~= "no" then
+    Attribute("covered", covered)
+  end
+  local embankment = Find("embankment")
+  if embankment ~= "" and embankment ~= "no" then
+    Attribute("embankment", embankment)
+  end
+  local cutting = Find("cutting")
+  if cutting ~= "" and cutting ~= "no" then
+    Attribute("cutting", cutting)
+  end
+end
+
+local function add_bridge_metadata()
+  local bridge = Find("bridge")
+  if bridge == "" then
+    return false
+  end
+  Attribute("bridge", bridge)
+  local structure = Find("bridge:structure")
+  if structure ~= "" then
+    Attribute("bridge_structure", structure)
+  end
+  local bridge_name = Find("name:bridge")
+  if bridge_name == "" then
+    bridge_name = Find("bridge:name")
+  end
+  if bridge_name ~= "" then
+    Attribute("bridge_name", bridge_name)
+  end
+  local layer = tonumber(Find("layer"))
+  if layer then
+    AttributeNumeric("layer", layer)
+  end
+  return true
 end
 
 local function building_height()
@@ -160,7 +242,18 @@ function node_function()
   if power ~= "" then
     Layer("power", false)
     Attribute("class", power)
+    add_optional_height()
+    if power == "generator" then
+      add_generator_metadata()
+    end
     add_name()
+    return
+  end
+
+  local man_made = Find("man_made")
+  if is_landmark(man_made) then
+    Layer("landmarks", false)
+    add_landmark_metadata(man_made)
     return
   end
 
@@ -168,6 +261,10 @@ function node_function()
   if barrier ~= "" then
     Layer("barriers", false)
     Attribute("class", barrier)
+    local height = tonumber(Find("height"))
+    if height and height > 0 then
+      AttributeNumeric("height", height)
+    end
     return
   end
 end
@@ -177,6 +274,15 @@ function way_function()
   if man_made == "bridge" then
     Layer("bridges", true)
     Attribute("class", "bridge")
+    add_name()
+    return
+  end
+
+  if man_made == "pier" or man_made == "dock" or man_made == "quay"
+    or man_made == "breakwater" or man_made == "groyne" then
+    Layer("water_structures", IsClosed())
+    Attribute("class", man_made)
+    add_surface()
     add_name()
     return
   end
@@ -203,6 +309,10 @@ function way_function()
   if power ~= "" then
     Layer("power", false)
     Attribute("class", power)
+    add_optional_height()
+    if power == "generator" then
+      add_generator_metadata()
+    end
     return
   end
 
@@ -300,6 +410,12 @@ function way_function()
     return
   end
 
+  if is_landmark(man_made) then
+    Layer("landmarks", IsClosed())
+    add_landmark_metadata(man_made)
+    return
+  end
+
   local highway = Find("highway")
   if highway ~= "" then
     if highway == "pedestrian" and IsClosed() then
@@ -316,6 +432,8 @@ function way_function()
     end
     Attribute("class", highway)
     add_surface()
+    add_terrain_metadata()
+    add_bridge_metadata()
     add_name()
     return
   end
@@ -324,6 +442,8 @@ function way_function()
   if railway ~= "" then
     Layer("railways", false)
     Attribute("class", railway)
+    add_terrain_metadata()
+    add_bridge_metadata()
     add_name()
     return
   end
@@ -364,6 +484,12 @@ function way_function()
 
   local waterway = Find("waterway")
   if waterway ~= "" then
+    if waterway == "dam" then
+      Layer("water_structures", false)
+      Attribute("class", "dam")
+      add_name()
+      return
+    end
     Layer("waterways", false)
     Attribute("class", waterway)
     add_name()

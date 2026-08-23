@@ -6,6 +6,8 @@ import maplibregl, {
   type StyleSpecification,
 } from 'maplibre-gl';
 import { BuildingRoofLayer } from './BuildingRoofLayer';
+import { BridgeModelLayer } from './BridgeModelLayer';
+import { InfrastructureModelLayer } from './InfrastructureModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
@@ -199,6 +201,10 @@ const TAMPERE_STYLE: StyleSpecification = {
       encoding: 'mapbox',
       attribution: 'National Land Survey of Finland, Elevation model 10 m',
     },
+    'tunnel-entrances': {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    },
   },
   layers: [
     { id: 'background', type: 'background', paint: { 'background-color': '#f4f6f2' } },
@@ -300,10 +306,65 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'water-structure-areas',
+      type: 'fill',
+      source: 'tampere',
+      'source-layer': 'water_structures',
+      minzoom: 12,
+      paint: {
+        'fill-color': [
+          'match',
+          ['get', 'class'],
+          'dock', '#b9dfef',
+          'pier', '#d9d0bd',
+          'quay', '#d2ccc1',
+          'breakwater', '#c8c5bd',
+          'groyne', '#c8c5bd',
+          '#d2cec5',
+        ],
+        'fill-opacity': 0.88,
+      },
+    },
+    {
+      id: 'water-structures',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'water_structures',
+      minzoom: 12,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match',
+          ['get', 'class'],
+          'dam', '#96938a',
+          'dock', '#94c3d7',
+          'pier', '#aaa088',
+          'quay', '#a59f94',
+          'breakwater', '#9e9e97',
+          'groyne', '#9e9e97',
+          '#aaa69c',
+        ],
+        'line-width': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          12,
+          ['match', ['get', 'class'], 'dam', 2.4, 'breakwater', 2, 'groyne', 1.8, 1.2],
+          16,
+          ['match', ['get', 'class'], 'dam', 8, 'breakwater', 6, 'groyne', 5, 4],
+        ],
+        'line-opacity': 0.9,
+      },
+    },
+    {
       id: 'bridges',
       type: 'fill',
       source: 'tampere',
       'source-layer': 'bridges',
+      // Transport-tagged bridge ways are rendered by BridgeModelLayer below.
+      // The old man_made=bridge polygons are often broad footprints and can
+      // duplicate the physical deck, especially at multi-modal bridges.
+      layout: { visibility: 'none' },
       paint: {
         'fill-color': '#d7d1c5',
         'fill-outline-color': '#b9b2a6',
@@ -361,10 +422,23 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: { 'circle-color': '#c1c0b8', 'circle-radius': 1.5, 'circle-opacity': 0.55 },
     },
     {
+      id: 'retaining-walls',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'barriers',
+      filter: ['==', ['get', 'class'], 'retaining_wall'],
+      paint: {
+        'line-color': '#82796b',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.2, 14, 3.5, 17, 5],
+        'line-opacity': 0.9,
+      },
+    },
+    {
       id: 'barriers',
       type: 'line',
       source: 'tampere',
       'source-layer': 'barriers',
+      filter: ['!=', ['get', 'class'], 'retaining_wall'],
       paint: { 'line-color': '#a9a28d', 'line-width': 1, 'line-dasharray': [2, 2], 'line-opacity': 0.75 },
     },
     {
@@ -372,13 +446,53 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'line',
       source: 'tampere',
       'source-layer': 'railways',
+      filter: ['all', ['!', ['has', 'tunnel']], ['!', ['has', 'covered']]],
       paint: { 'line-color': '#a99aa8', 'line-width': 2, 'line-opacity': 0.8 },
+    },
+    {
+      id: 'railway-earthworks',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'railways',
+      filter: [
+        'all',
+        ['any', ['has', 'embankment'], ['has', 'cutting']],
+        ['!', ['has', 'tunnel']],
+        ['!', ['has', 'covered']],
+      ],
+      paint: {
+        'line-color': ['case', ['has', 'cutting'], '#938675', '#a89572'],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 9, 17, 14],
+        'line-opacity': 0.4,
+      },
+    },
+    {
+      id: 'road-earthworks',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'roads',
+      filter: [
+        'all',
+        ['any', ['has', 'embankment'], ['has', 'cutting']],
+        ['!', ['has', 'tunnel']],
+        ['!', ['has', 'covered']],
+      ],
+      paint: {
+        'line-color': [
+          'case',
+          ['has', 'cutting'], '#938675',
+          '#a89572',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2.4, 14, 10, 17, 16],
+        'line-opacity': 0.38,
+      },
     },
     {
       id: 'road-casing',
       type: 'line',
       source: 'tampere',
       'source-layer': 'roads',
+      filter: ['all', ['!', ['has', 'tunnel']], ['!', ['has', 'covered']]],
       paint: {
         'line-color': '#d3d8d5',
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.8, 14, 10],
@@ -390,6 +504,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'line',
       source: 'tampere',
       'source-layer': 'roads',
+      filter: ['all', ['!', ['has', 'tunnel']], ['!', ['has', 'covered']]],
       paint: {
         'line-color': [
           'match',
@@ -414,7 +529,12 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'roads',
       minzoom: 13,
-      filter: ['has', 'name'],
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['!', ['has', 'tunnel']],
+        ['!', ['has', 'covered']],
+      ],
       layout: {
         'symbol-placement': 'line',
         'text-field': ['get', 'name'],
@@ -470,10 +590,28 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'path-earthworks',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'paths',
+      filter: [
+        'all',
+        ['any', ['has', 'embankment'], ['has', 'cutting']],
+        ['!', ['has', 'tunnel']],
+        ['!', ['has', 'covered']],
+      ],
+      paint: {
+        'line-color': ['case', ['has', 'cutting'], '#938675', '#a89572'],
+        'line-width': 3,
+        'line-opacity': 0.4,
+      },
+    },
+    {
       id: 'paths',
       type: 'line',
       source: 'tampere',
       'source-layer': 'paths',
+      filter: ['all', ['!', ['has', 'tunnel']], ['!', ['has', 'covered']]],
       paint: {
         'line-color': [
           'match',
@@ -487,6 +625,28 @@ const TAMPERE_STYLE: StyleSpecification = {
         ],
         'line-width': 1.4,
         'line-dasharray': [2, 2],
+      },
+    },
+    {
+      id: 'tunnel-entrance-casing',
+      type: 'line',
+      source: 'tunnel-entrances',
+      minzoom: 13,
+      paint: {
+        'line-color': '#d5d0c6',
+        'line-width': ['match', ['get', 'transport'], 'railway', 7, 9],
+        'line-opacity': 0.95,
+      },
+    },
+    {
+      id: 'tunnel-entrances',
+      type: 'line',
+      source: 'tunnel-entrances',
+      minzoom: 13,
+      paint: {
+        'line-color': '#4d5150',
+        'line-width': ['match', ['get', 'transport'], 'railway', 2.2, 3],
+        'line-opacity': 0.95,
       },
     },
     {
@@ -626,6 +786,8 @@ export function MapView() {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     const roofLayer = new BuildingRoofLayer();
+    const bridgeLayer = new BridgeModelLayer();
+    const infrastructureLayer = new InfrastructureModelLayer();
     const treeLayer = new TreeModelLayer();
     let treeUpdateTimer: number | undefined;
     const updateTreeModels = () => {
@@ -634,6 +796,8 @@ export function MapView() {
         return;
       }
       roofLayer.updateRoofs();
+      bridgeLayer.updateBridges();
+      infrastructureLayer.updateInfrastructure();
       treeLayer.updateTrees();
     };
     const scheduleTreeUpdate = () => {
@@ -643,6 +807,8 @@ export function MapView() {
     treeRefreshRef.current = scheduleTreeUpdate;
     map.once('load', () => {
       map.addLayer(roofLayer, 'places-labels');
+      map.addLayer(bridgeLayer, 'places-labels');
+      map.addLayer(infrastructureLayer, 'places-labels');
       map.addLayer(treeLayer, 'places-labels');
       scheduleTreeUpdate();
       setMapLoaded(true);

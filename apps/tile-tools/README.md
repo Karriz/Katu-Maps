@@ -57,6 +57,20 @@ Closed `man_made=bridge` ways are emitted as bridge-deck polygons beneath the
 transport lines, preventing mapped roads, rails, and paths from appearing to
 float separately over the water.
 
+Transport ways tagged with `bridge=*` retain their bridge value, transport
+class, optional `bridge:structure`, and numeric `layer` tags. The browser uses
+these line features to build approximate 3D bridge decks from terrain height:
+roads, paths, and railways receive different widths and clearances, while
+`bridge:structure=arch` produces simple curved ribs. These elevations are
+visual approximations because OSM generally does not provide surveyed deck
+heights.
+
+Terrain-sensitive transport tags are retained on road, path, and railway line
+features. `tunnel=*` and `covered=*` are used for dark underground/covered
+segments, while `embankment=*` and `cutting=*` add earthwork styling that stays
+draped over the active DEM. `barrier=retaining_wall` is emitted in the barriers
+layer and receives a stronger map treatment.
+
 Linear waterways are rendered as blue line features. Their long, narrow
 `natural=water` polygon counterparts are omitted because clipping those
 polygons can produce malformed triangular fills; lakes and other area water
@@ -64,6 +78,23 @@ features remain filled polygons.
 
 The tileset also includes parking and pedestrian areas, aeroways, power and
 barrier features, and named places/POIs for browser styling.
+
+Transmission towers are available to the browser model layer. `power=tower`
+points become simple low-poly supports whose crossarms follow the nearest
+mapped `power=line` direction. `man_made=pier|dock|quay|breakwater|groyne` and
+`waterway=dam` are emitted in the `water_structures` layer and use flat map
+fills and outlines rather than 3D models.
+
+Non-building landmarks are emitted in a separate `landmarks` layer. This
+currently covers chimneys, water towers, silos, storage tanks, gasometers, and
+generic or communications towers. Wind generators retain their generator type,
+source, and height metadata so the browser can render simple turbines where the
+extract contains `generator:source=wind` features.
+
+Road and railway tunnel tags are retained, but their underground linework is
+hidden in the browser. Validated endpoints that connect to a surface route and
+enter rising terrain receive a small 2D entrance marker. Paths, covered
+passages, culverts, and building passages are excluded.
 
 ## Serving the result
 
