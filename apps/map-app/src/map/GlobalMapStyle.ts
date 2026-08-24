@@ -8,7 +8,6 @@ import {
   CARTOON_MAP_LIGHT_POSITION,
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
-  CARTOON_SUN_COLOR,
 } from './CartoonLighting';
 
 export const OPENFREEMAP_SOURCE_ID = 'openfreemap';
@@ -72,16 +71,16 @@ const PIER_LINE_FILTER: ExpressionSpecification = [
 
 const ROAD_COLOR: ExpressionSpecification = [
   'case',
-  ['==', ['get', 'surface'], 'unpaved'], '#9f9b91',
+  ['==', ['get', 'surface'], 'unpaved'], '#c6bca9',
   [
     'match', ['get', 'class'],
-    'motorway', '#858e90',
-    'trunk', '#899294',
-    'primary', '#8e9797',
-    'secondary', '#949c9a',
-    'tertiary', '#99a09d',
-    'service', '#a2a8a5',
-    '#9ba3a1',
+    'motorway', '#aaaead',
+    'trunk', '#adb0af',
+    'primary', '#b0b2af',
+    'secondary', '#b4b5b0',
+    'tertiary', '#b7b7b1',
+    'service', '#bdbdb7',
+    '#b8b8b2',
   ],
 ] as ExpressionSpecification;
 
@@ -133,13 +132,21 @@ const GLOBAL_BUILDING_DETAIL_FULL_ZOOM = 17.5;
 const GLOBAL_BUILDING_STORY_SLICES = 34;
 const GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES = 6;
 const GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES = 100;
-const GLOBAL_BUILDING_ROOF_RIM_HEIGHT_METRES = 0.12;
-const GLOBAL_BUILDING_ROOF_CAP_HEIGHT_METRES = 0.45;
+const GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES = [1, 4] as const;
+const GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES = 0.4;
+const GLOBAL_BUILDING_ROOF_RIM_HEIGHT_METRES = 0.08;
+const GLOBAL_BUILDING_ROOF_CAP_HEIGHT_METRES = 0.32;
+const GLOBAL_MAP_SUN_COLOR = '#fff9ed';
 
 export const GLOBAL_BUILDING_STORY_LAYER_IDS = Array.from(
   { length: GLOBAL_BUILDING_STORY_SLICES },
   (_, index) => `global-building-story-${index + 1}`,
 );
+
+export const GLOBAL_BUILDING_DETAIL_BAND_LAYER_IDS =
+  GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES.map(
+    (storyIndex) => `global-building-detail-band-${storyIndex + 1}`,
+  );
 
 export const GLOBAL_BUILDING_ROOF_LAYER_IDS = [
   'global-building-roof-rims',
@@ -150,104 +157,49 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
   'global-building-footprints',
   'global-buildings',
   ...GLOBAL_BUILDING_STORY_LAYER_IDS,
+  ...GLOBAL_BUILDING_DETAIL_BAND_LAYER_IDS,
   ...GLOBAL_BUILDING_ROOF_LAYER_IDS,
 ];
 
-function seededBuildingPalette(colors: string[]): ExpressionSpecification {
-  return [
-    'match',
-    [
-      '%',
-      // OpenFreeMap does not expose a parent-building ID. Dropping the final
-      // source-ID digit groups parts commonly created together, while keeping
-      // deterministic material variation between groups of buildings.
-      [
-        'floor',
-        ['/', ['coalesce', ['id'], ['get', 'render_height'], 0], 100],
-      ],
-      colors.length,
-    ],
-    ...colors.flatMap((color, index) => [index, color]),
-    colors[0],
-  ] as unknown as ExpressionSpecification;
-}
-
-const GLOBAL_UNTAGGED_BUILDING_COLOR = seededBuildingPalette([
-  '#c8c1b3',
-  '#d7d4cc',
-  '#aeb6b5',
-  '#d0c59f',
-  '#b7a99a',
-  '#a8b6ba',
-]);
-
-const GLOBAL_UNTAGGED_BUILDING_COLOR_ALT = seededBuildingPalette([
-  '#d7d1c6',
-  '#e4e2dc',
-  '#c1c8c6',
-  '#ddd4b5',
-  '#c8beb3',
-  '#bdc8ca',
-]);
-
 const TAGGED_BUILDING_COLOR: ExpressionSpecification = [
   'match', ['downcase', ['to-string', ['get', 'colour']]],
-  'red', '#c98678',
-  'green', '#8da589',
-  'blue', '#88a5b5',
-  'yellow', '#d9c985',
-  'white', '#e4e6e1',
-  'grey', '#aeb5b1',
-  'gray', '#aeb5b1',
-  ['to-color', ['get', 'colour'], '#d0d5d1'],
+  'red', '#dc9f92',
+  'green', '#acd0aa',
+  'blue', '#a9c8d8',
+  'yellow', '#eadb9d',
+  'white', '#f1f2ed',
+  'grey', '#d0d5d2',
+  'gray', '#d0d5d2',
+  ['to-color', ['get', 'colour'], '#e1e5e0'],
 ] as ExpressionSpecification;
 
 const GLOBAL_BUILDING_COLOR: ExpressionSpecification = [
   'case',
   ['has', 'colour'],
-  // OpenStreetMap building colours can be quite saturated. Blending them
-  // toward the map's neutral facade colour keeps the data visible without
-  // turning the city into a patchwork of primary colours.
-  [
-    'interpolate', ['linear'], 0.72,
-    0, '#d8ddd8',
-    1, TAGGED_BUILDING_COLOR,
-  ],
-  // Feature IDs keep the restrained fallback palette stable while panning.
-  GLOBAL_UNTAGGED_BUILDING_COLOR,
+  TAGGED_BUILDING_COLOR,
+  '#efefeb',
 ] as ExpressionSpecification;
 
 const GLOBAL_BUILDING_COLOR_ALT: ExpressionSpecification = [
   'case',
   ['has', 'colour'],
+  TAGGED_BUILDING_COLOR,
+  '#dedfda',
+] as ExpressionSpecification;
+
+const GLOBAL_BUILDING_DETAIL_BAND_COLOR: ExpressionSpecification = [
+  'case',
+  ['has', 'colour'],
   [
-    'interpolate', ['linear'], 0.56,
-    0, '#e5e9e4',
-    1, TAGGED_BUILDING_COLOR,
+    'interpolate', ['linear'], 0.16,
+    0, TAGGED_BUILDING_COLOR,
+    1, '#87918e',
   ],
-  GLOBAL_UNTAGGED_BUILDING_COLOR_ALT,
+  '#d1d5d2',
 ] as ExpressionSpecification;
 
-const GLOBAL_UNTAGGED_ROOF_COLOR = seededBuildingPalette([
-  '#d8d2c5',
-  '#c4c8c4',
-  '#b9b4aa',
-  '#d8c9ae',
-  '#aeb7b6',
-  '#c8b8a5',
-]);
-
-const GLOBAL_BUILDING_ROOF_COLOR: ExpressionSpecification = [
-  'interpolate', ['linear'], 0.82,
-  0, '#ece9df',
-  1, GLOBAL_UNTAGGED_ROOF_COLOR,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_ROOF_RIM_COLOR: ExpressionSpecification = [
-  'interpolate', ['linear'], 0.35,
-  0, '#59645f',
-  1, GLOBAL_BUILDING_ROOF_COLOR,
-] as ExpressionSpecification;
+const GLOBAL_BUILDING_ROOF_COLOR = '#858f93';
+const GLOBAL_BUILDING_ROOF_RIM_COLOR = '#6f7a7e';
 
 const GLOBAL_BUILDING_BASE: ExpressionSpecification = [
   'coalesce', ['get', 'render_min_height'], 0,
@@ -295,13 +247,22 @@ function globalBuildingStoryLayers(): FillExtrusionLayerSpecification[] {
         ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex + 1],
       ],
     ];
-    const storyColor: ExpressionSpecification = storyIndex % 2 === 0
-      ? GLOBAL_BUILDING_COLOR
-      : [
+    const hasDetailBand = (GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES as readonly number[])
+      .includes(storyIndex);
+    const visibleStoryTop: ExpressionSpecification = hasDetailBand
+      ? [
+          'max',
+          storyBase,
+          ['-', storyTop, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
+        ]
+      : storyTop;
+    const storyColor: ExpressionSpecification = storyIndex === 0
+      ? [
           'interpolate', ['linear'], ['zoom'],
           GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
           GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_COLOR_ALT,
-        ];
+        ]
+      : GLOBAL_BUILDING_COLOR;
 
     return {
       id,
@@ -321,7 +282,7 @@ function globalBuildingStoryLayers(): FillExtrusionLayerSpecification[] {
         'fill-extrusion-height': [
           'interpolate', ['linear'], ['zoom'],
           13, GLOBAL_BUILDING_BASE,
-          13.6, storyTop,
+          13.6, visibleStoryTop,
         ],
         'fill-extrusion-base': [
           'interpolate', ['linear'], ['zoom'],
@@ -334,8 +295,73 @@ function globalBuildingStoryLayers(): FillExtrusionLayerSpecification[] {
           13.45, 0.96,
           18, 1,
         ],
-        // Alternating colours provide the storey cue. Resetting MapLibre's
-        // vertical gradient on every slice would make the bands too strong.
+        // The ordinary slices tile the facade. Two selected slices stop just
+        // short of their top so the narrow detail layers below can occupy the
+        // remaining space without coplanar overlap or uniform storey striping.
+        'fill-extrusion-vertical-gradient': false,
+      },
+    };
+  });
+}
+
+function globalBuildingDetailBandLayers(): FillExtrusionLayerSpecification[] {
+  return GLOBAL_BUILDING_DETAIL_BAND_LAYER_IDS.map((id, bandIndex) => {
+    const storyIndex = GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES[bandIndex];
+    const storyBase: ExpressionSpecification = [
+      '+',
+      GLOBAL_BUILDING_BASE,
+      ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex],
+    ];
+    const storyTop: ExpressionSpecification = [
+      'min',
+      GLOBAL_BUILDING_HEIGHT,
+      [
+        '+',
+        GLOBAL_BUILDING_BASE,
+        ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex + 1],
+      ],
+    ];
+    const bandBase: ExpressionSpecification = [
+      'max',
+      storyBase,
+      ['-', storyTop, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
+    ];
+
+    return {
+      id,
+      type: 'fill-extrusion',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'building',
+      minzoom: 13,
+      filter: [
+        'all',
+        ['!', ['==', ['get', 'hide_3d'], true]],
+        ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES],
+        ['<=', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES],
+        ['>', GLOBAL_ESTIMATED_BUILDING_STORIES, storyIndex],
+      ],
+      paint: {
+        'fill-extrusion-color': [
+          'interpolate', ['linear'], ['zoom'],
+          GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
+          GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_DETAIL_BAND_COLOR,
+        ],
+        'fill-extrusion-height': [
+          'interpolate', ['linear'], ['zoom'],
+          13, GLOBAL_BUILDING_BASE,
+          13.6, storyTop,
+        ],
+        'fill-extrusion-base': [
+          'interpolate', ['linear'], ['zoom'],
+          13, GLOBAL_BUILDING_BASE,
+          13.6, bandBase,
+        ],
+        'fill-extrusion-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          13, 0,
+          13.45, 0.96,
+          18, 1,
+        ],
         'fill-extrusion-vertical-gradient': false,
       },
     };
@@ -389,7 +415,7 @@ export function roadWidthExpression(
   casing = false,
 ): ExpressionSpecification {
   const widthMetres: ExpressionSpecification = casing
-    ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1.8]
+    ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1.4]
     : ESTIMATED_ROAD_WIDTH_METRES;
 
   return [
@@ -422,8 +448,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     // constants, keeping low-poly facets and building walls coherent.
     anchor: 'map',
     position: CARTOON_MAP_LIGHT_POSITION,
-    color: CARTOON_SUN_COLOR,
-    intensity: 0.36,
+    color: GLOBAL_MAP_SUN_COLOR,
+    intensity: 0.24,
   },
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
   sources: {
@@ -464,6 +490,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'fill-color': [
           'case',
+          ['==', ['get', 'subclass'], 'park'], '#9dce78',
           ['in', ['get', 'subclass'], ['literal', ['scrub', 'shrubbery', 'heath']]], '#a8c98c',
           ['in', ['get', 'subclass'], ['literal', ['orchard', 'plant_nursery']]], '#c5d79a',
           ['==', ['get', 'subclass'], 'vineyard'], '#d4d5a2',
@@ -471,7 +498,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           ['in', ['get', 'subclass'], ['literal', ['meadow', 'grassland', 'village_green']]], '#c8dea8',
           [
             'match', ['get', 'class'],
-            'wood', '#91c582',
+            'wood', '#86b978',
             'grass', '#b8d99f',
             'farmland', '#edf0bb',
             'wetland', '#c6d9ad',
@@ -497,11 +524,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'retail', '#d8d1bc',
           'industrial', '#b8c7c7',
           'cemetery', '#c2d9b5',
-          'school', '#e4e8d7',
-          'education', '#e4e8d7',
+          'school', '#eadfbd',
+          'kindergarten', '#eadfbd',
+          'education', '#eadfbd',
+          'university', '#d9dfc6',
+          'college', '#d9dfc6',
           'hospital', '#d9ddd6',
-          'park', '#a9d394',
-          'garden', '#b8dca0',
+          'parking', '#dad8d2',
+          'park', '#9dce78',
+          'garden', '#aad68a',
           'allotments', '#c8dca9',
           'orchard', '#c5d79a',
           'vineyard', '#d4d5a2',
@@ -511,7 +542,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'pitch', '#add38e',
           'playground', '#d6df9d',
           'stadium', '#d2e7b9',
-          'railway', '#deddd6',
+          'railway', '#c9d0cf',
           '#e8ece5',
         ],
         'fill-opacity': 0.96,
@@ -522,7 +553,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
-      paint: { 'fill-color': '#a9d394', 'fill-opacity': 0.96 },
+      paint: { 'fill-color': '#9dce78', 'fill-opacity': 0.96 },
     },
     {
       id: 'global-aeroway-areas',
@@ -580,12 +611,22 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'global-waterway',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'waterway',
+      paint: {
+        'line-color': '#5faec8',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 16, 3],
+      },
+    },
+    {
       id: 'global-water-edge-shade',
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
       paint: {
-        'fill-color': '#4f9fbd',
+        'fill-color': '#285f82',
         'fill-translate': [
           'interpolate', ['linear'], ['zoom'],
           0, ['literal', [0.4, -0.4]],
@@ -600,7 +641,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
-      paint: { 'fill-color': '#78c4df' },
+      paint: { 'fill-color': '#397da6' },
     },
     {
       id: 'global-pedestrian-areas',
@@ -612,7 +653,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['==', ['geometry-type'], 'Polygon'],
         ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]],
       ],
-      paint: { 'fill-color': '#d9d5c9', 'fill-opacity': 0.9 },
+      paint: { 'fill-color': '#ddd8cf', 'fill-opacity': 0.84 },
     },
     {
       id: 'global-pier-area-shadow',
@@ -779,8 +820,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        'line-color': '#aeb5b1',
+        'line-color': '#969e9b',
         'line-width': roadWidthExpression(61.4981, true),
+        'line-opacity': 0.72,
       },
     },
     {
@@ -882,8 +924,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           15, 0,
-          15.8, 0.5,
-          18, 0.62,
+          15.8, 0.4,
+          18, 0.52,
         ],
       },
     },
@@ -932,8 +974,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#d8d4ca',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.6, 18, 4.8],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.74],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.3, 18, 4.1],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.52],
       },
     },
     {
@@ -953,7 +995,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.65, 18, 3],
         'line-dasharray': [2.5, 1.4],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.8],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.68],
       },
     },
     {
@@ -969,9 +1011,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#aa8277',
+        'line-color': '#b4867e',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.65, 18, 3.2],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.82],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.68],
       },
     },
     {
@@ -994,7 +1036,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           '#a99c86',
         ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.65],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.8],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.66],
       },
     },
     {
@@ -1030,7 +1072,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': '#a99c86',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.5],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.78],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.64],
       },
     },
     {
@@ -1044,7 +1086,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': '#b5a997',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.55, 18, 2.5],
         'line-dasharray': [1.5, 1.5],
-        'line-opacity': 0.55,
+        'line-opacity': 0.46,
       },
     },
     {
@@ -1056,9 +1098,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: BRIDGE_AREA_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#58635e',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1, 18, 2.6],
-        'line-opacity': 0.96,
+        'line-color': '#8b928e',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.75, 18, 1.8],
+        'line-opacity': 0.68,
       },
     },
     {
@@ -1111,9 +1153,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#9aa7ad',
+        'line-color': '#adb3b1',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 14, 2.4, 18, 8],
-        'line-opacity': 0.9,
+        'line-opacity': 0.72,
       },
     },
     {
@@ -1121,7 +1163,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
-      minzoom: 11,
+      minzoom: 15,
       filter: [
         'all',
         ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
@@ -1129,9 +1171,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#edf2ef',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.7, 18, 9],
+        'line-color': '#e7ebe7',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 15, 2.4, 18, 9],
         'line-dasharray': [0.18, 1.15],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          16.5, 0.56,
+          18, 0.7,
+        ],
       },
     },
     {
@@ -1146,8 +1194,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
       ],
       paint: {
-        'line-color': '#66747b',
+        'line-color': '#747e80',
         'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 18, 1.4],
+        'line-opacity': 0.8,
       },
     },
     {
@@ -1205,16 +1254,6 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
-      id: 'global-waterway',
-      type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'waterway',
-      paint: {
-        'line-color': '#5faec8',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 16, 3],
-      },
-    },
-    {
       id: 'global-boundaries',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1252,9 +1291,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     },
     {
       id: 'global-building-shadow',
-      // A second translated extrusion overlaps the real building in screen
-      // space and depth-fights with it at a pitched camera. Keep the shadow on
-      // the footprint boundary so each roof and wall is rendered exactly once.
+      // Keep the shadow on the footprint boundary so it reads as ambient
+      // occlusion without overlapping the real extrusion at a pitched camera.
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'building',
@@ -1266,21 +1304,21 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
           13, 2,
-          15, 5,
-          18, 12,
+          15, 4.5,
+          18, 9,
         ],
         'line-translate': CARTOON_BUILDING_SHADOW_TRANSLATE,
         'line-translate-anchor': 'map',
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1,
-          18, 2.5,
+          13, 0.9,
+          18, 2,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.5, 0.08,
-          18, 0.16,
+          13.5, 0.07,
+          18, 0.13,
         ],
       },
     },
@@ -1302,20 +1340,20 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1.1,
+          13, 1,
           15, 2.2,
-          18, 5.2,
+          18, 4.2,
         ],
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.45,
-          18, 1.1,
+          13, 0.4,
+          18, 0.9,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.45, 0.14,
-          18, 0.28,
+          13.45, 0.12,
+          18, 0.23,
         ],
       },
     },
@@ -1355,6 +1393,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     ...globalBuildingStoryLayers(),
+    ...globalBuildingDetailBandLayers(),
     {
       id: 'global-building-roof-rims',
       type: 'fill-extrusion',
@@ -1488,8 +1527,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-font': ['Noto Sans Regular'],
       },
       paint: {
-        'text-color': '#3f91b4',
-        'text-halo-color': '#78c4df',
+        'text-color': '#8fc1d7',
+        'text-halo-color': '#397da6',
         'text-halo-width': 1.25,
       },
     },

@@ -31,9 +31,6 @@ const SAMPLING_BOUNDS_PADDING_METERS = 80;
 const MAX_GRID_CELLS_PER_POLYGON = 100_000;
 const SUN_AZIMUTH_RADIANS = CARTOON_SUN_AZIMUTH_DEGREES * Math.PI / 180;
 const SUN_POLAR_RADIANS = CARTOON_SUN_POLAR_DEGREES * Math.PI / 180;
-const SHADOW_DIRECTION_X = -Math.sin(SUN_AZIMUTH_RADIANS);
-const SHADOW_DIRECTION_Z = -Math.cos(SUN_AZIMUTH_RADIANS);
-const SHADOW_ANGLE = Math.atan2(SHADOW_DIRECTION_X, SHADOW_DIRECTION_Z);
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
@@ -55,7 +52,7 @@ const LOCAL_TREE_SOURCES: TreeSourceConfig = {
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
 
-type VegetationType = 'broadleaf' | 'conifer' | 'columnar' | 'shrub';
+type VegetationType = 'broadleaf' | 'conifer' | 'shrub';
 
 type TreeInstance = {
   longitude: number;
@@ -128,7 +125,7 @@ function treeInstance(
     vegetationType: vegetationType ?? (
       normalizedLeafType.includes('needle')
         ? 'conifer'
-        : seededUnit(seed, 61) < 0.18 ? 'columnar' : 'broadleaf'
+        : 'broadleaf'
     ),
     rotation: seededUnit(seed, 23) * Math.PI * 2,
     widthScale: 0.82 + seededUnit(seed, 37) * 0.36,
@@ -484,8 +481,7 @@ function collectProceduralTrees(
             : leafType === 'needleleaved' ? 'conifer'
               : isOrchard ? 'broadleaf'
                 : isPark && seededUnit(seed, 113) < 0.12 ? 'shrub'
-                  : seededUnit(seed, 127) < (isPark ? 0.24 : 0.08)
-                    ? 'columnar' : 'broadleaf';
+                  : 'broadleaf';
           const height = vegetationType === 'shrub'
             ? 1.4 + seededUnit(seed, 97) * 2.2
             : isOrchard ? 4.5 + seededUnit(seed, 97) * 3
@@ -533,7 +529,6 @@ export class TreeModelLayer implements CustomLayerInterface {
   private trunkMesh?: THREE.InstancedMesh;
   private broadleafMesh?: THREE.InstancedMesh;
   private coniferMesh?: THREE.InstancedMesh;
-  private columnarMesh?: THREE.InstancedMesh;
   private shrubMesh?: THREE.InstancedMesh;
   private shadowMesh?: THREE.InstancedMesh;
   private shadowTexture?: THREE.DataTexture;
@@ -579,7 +574,6 @@ export class TreeModelLayer implements CustomLayerInterface {
     trunkGeometry.translate(0, 0.5, 0);
     const broadleafGeometry = new THREE.IcosahedronGeometry(1, 1);
     const coniferGeometry = new THREE.ConeGeometry(1, 1, 7, 2);
-    const columnarGeometry = new THREE.CylinderGeometry(0.72, 1, 1, 7, 2);
     const shrubGeometry = new THREE.DodecahedronGeometry(1, 0);
     const shadowGeometry = new THREE.CircleGeometry(1, 12);
     shadowGeometry.rotateX(-Math.PI / 2);
@@ -587,13 +581,12 @@ export class TreeModelLayer implements CustomLayerInterface {
     const trunkMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const broadleafMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const coniferMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
-    const columnarMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     const shrubMaterial = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
     this.shadowTexture = createShadowTexture();
     const shadowMaterial = new THREE.MeshBasicMaterial({
       color: CARTOON_SHADOW_COLOR,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.17,
       alphaMap: this.shadowTexture,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -604,7 +597,6 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.trunkMesh = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, MAX_TREE_COUNT);
     this.broadleafMesh = new THREE.InstancedMesh(broadleafGeometry, broadleafMaterial, MAX_TREE_COUNT);
     this.coniferMesh = new THREE.InstancedMesh(coniferGeometry, coniferMaterial, MAX_TREE_COUNT);
-    this.columnarMesh = new THREE.InstancedMesh(columnarGeometry, columnarMaterial, MAX_TREE_COUNT);
     this.shrubMesh = new THREE.InstancedMesh(shrubGeometry, shrubMaterial, MAX_TREE_COUNT);
     this.shadowMesh = new THREE.InstancedMesh(shadowGeometry, shadowMaterial, MAX_TREE_COUNT);
     this.shadowMesh.visible = this.shadowsEnabled;
@@ -614,7 +606,6 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.trunkMesh,
       this.broadleafMesh,
       this.coniferMesh,
-      this.columnarMesh,
       this.shrubMesh,
     ]) {
       mesh.count = 0;
@@ -640,17 +631,15 @@ export class TreeModelLayer implements CustomLayerInterface {
     const trunkMesh = this.trunkMesh;
     const broadleafMesh = this.broadleafMesh;
     const coniferMesh = this.coniferMesh;
-    const columnarMesh = this.columnarMesh;
     const shrubMesh = this.shrubMesh;
     const shadowMesh = this.shadowMesh;
     if (!map || !trunkMesh || !broadleafMesh || !coniferMesh
-      || !columnarMesh || !shrubMesh || !shadowMesh) return;
+      || !shrubMesh || !shadowMesh) return;
 
     if (map.getZoom() < TREE_MIN_ZOOM) {
       trunkMesh.count = 0;
       broadleafMesh.count = 0;
       coniferMesh.count = 0;
-      columnarMesh.count = 0;
       shrubMesh.count = 0;
       shadowMesh.count = 0;
       map.triggerRepaint();
@@ -692,7 +681,6 @@ export class TreeModelLayer implements CustomLayerInterface {
 
     let broadleafCount = 0;
     let coniferCount = 0;
-    let columnarCount = 0;
     let shrubCount = 0;
     let trunkCount = 0;
 
@@ -715,9 +703,8 @@ export class TreeModelLayer implements CustomLayerInterface {
       }
       const up = elevation - this.sceneOriginElevation;
       const isConifer = tree.vegetationType === 'conifer';
-      const isColumnar = tree.vegetationType === 'columnar';
       const isShrub = tree.vegetationType === 'shrub';
-      const canopyBase = tree.height * (isShrub ? 0.06 : isConifer ? 0.18 : isColumnar ? 0.22 : 0.3);
+      const canopyBase = tree.height * (isShrub ? 0.06 : isConifer ? 0.18 : 0.3);
       const trunkHeight = canopyBase + TRUNK_CANOPY_OVERLAP_METERS;
       const trunkWidth = tree.widthScale * (0.82 + tree.height / 60);
 
@@ -734,20 +721,20 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       const canopyHeight = tree.height - canopyBase;
       const canopyRadius = tree.height
-        * (isShrub ? 0.52 : isConifer ? 0.18 : isColumnar ? 0.12 : 0.21)
+        // Slightly broader crowns create fuller parks without adding another
+        // instance or increasing the existing per-zoom tree budgets.
+        * (isShrub ? 0.56 : isConifer ? 0.19 : 0.235)
         * tree.widthScale;
 
-      const shadowLength = tree.height * 0.82;
-      this.transformHelper.position.set(
-        east + SHADOW_DIRECTION_X * shadowLength * 0.42,
-        up + 0.06,
-        north + SHADOW_DIRECTION_Z * shadowLength * 0.42,
-      );
-      this.transformHelper.rotation.set(0, SHADOW_ANGLE, 0);
+      // A compact shadow under each crown acts as fake ambient occlusion. It
+      // is deliberately independent of tree height and sun direction so it
+      // matches the centered building-footprint treatment.
+      this.transformHelper.position.set(east, up + 0.06, north);
+      this.transformHelper.rotation.set(0, 0, 0);
       this.transformHelper.scale.set(
-        canopyRadius * 0.82,
+        canopyRadius * 0.96,
         1,
-        shadowLength * 0.5 + canopyRadius * 0.45,
+        canopyRadius * 0.96,
       );
       this.transformHelper.updateMatrix();
       shadowMesh.setMatrixAt(index, this.transformHelper.matrix);
@@ -756,7 +743,7 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.transformHelper.rotation.set(0, tree.rotation, 0);
       this.transformHelper.scale.set(
         canopyRadius,
-        isConifer || isColumnar ? canopyHeight : canopyHeight / 2,
+        isConifer ? canopyHeight : canopyHeight / 2,
         canopyRadius,
       );
       this.transformHelper.updateMatrix();
@@ -766,11 +753,6 @@ export class TreeModelLayer implements CustomLayerInterface {
         this.color.setHSL(0.31, 0.42, 0.27 + tree.colorVariation * 0.08);
         coniferMesh.setColorAt(coniferCount, this.color);
         coniferCount += 1;
-      } else if (isColumnar) {
-        columnarMesh.setMatrixAt(columnarCount, this.transformHelper.matrix);
-        this.color.setHSL(0.27 + tree.colorVariation * 0.025, 0.43, 0.32 + tree.colorVariation * 0.09);
-        columnarMesh.setColorAt(columnarCount, this.color);
-        columnarCount += 1;
       } else if (isShrub) {
         shrubMesh.setMatrixAt(shrubCount, this.transformHelper.matrix);
         this.color.setHSL(0.24 + tree.colorVariation * 0.04, 0.38, 0.31 + tree.colorVariation * 0.1);
@@ -787,19 +769,16 @@ export class TreeModelLayer implements CustomLayerInterface {
     trunkMesh.count = trunkCount;
     broadleafMesh.count = broadleafCount;
     coniferMesh.count = coniferCount;
-    columnarMesh.count = columnarCount;
     shrubMesh.count = shrubCount;
     shadowMesh.count = trees.length;
     trunkMesh.instanceMatrix.needsUpdate = true;
     broadleafMesh.instanceMatrix.needsUpdate = true;
     coniferMesh.instanceMatrix.needsUpdate = true;
-    columnarMesh.instanceMatrix.needsUpdate = true;
     shrubMesh.instanceMatrix.needsUpdate = true;
     shadowMesh.instanceMatrix.needsUpdate = true;
     if (trunkMesh.instanceColor) trunkMesh.instanceColor.needsUpdate = true;
     if (broadleafMesh.instanceColor) broadleafMesh.instanceColor.needsUpdate = true;
     if (coniferMesh.instanceColor) coniferMesh.instanceColor.needsUpdate = true;
-    if (columnarMesh.instanceColor) columnarMesh.instanceColor.needsUpdate = true;
     if (shrubMesh.instanceColor) shrubMesh.instanceColor.needsUpdate = true;
     map.triggerRepaint();
   }
@@ -832,7 +811,6 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.trunkMesh,
       this.broadleafMesh,
       this.coniferMesh,
-      this.columnarMesh,
       this.shrubMesh,
     ]) {
       mesh?.geometry.dispose();

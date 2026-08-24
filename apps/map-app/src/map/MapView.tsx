@@ -45,8 +45,8 @@ const USE_LOCAL_MAP_DATA = import.meta.env.VITE_MAP_DATA_PROVIDER === 'local';
 const BUILDING_DETAIL_MIN_ZOOM = 17;
 const MAX_BUILDING_STORY_SLICES = 25;
 const GROUND_COLOR = '#e8ece5';
-const WATER_COLOR = '#78c4df';
-const WATER_EDGE_COLOR = '#5faec8';
+const WATER_COLOR = '#397da6';
+const WATER_EDGE_COLOR = '#285f82';
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = [
   'water-pattern',
@@ -96,8 +96,8 @@ const BUILDING_LAYER_IDS = [
 
 function createWaterPattern(size: number) {
   const data = new Uint8ClampedArray(size * size * 4);
-  const shadow = [18, 92, 145];
-  const highlight = [181, 232, 245];
+  const shadow = [25, 67, 104];
+  const highlight = [83, 148, 180];
   const tau = Math.PI * 2;
 
   for (let y = 0; y < size; y += 1) {
@@ -179,40 +179,44 @@ function seededBuildingPalette(colors: string[]): ExpressionSpecification {
 }
 
 const DEFAULT_BUILDING_PALETTE = seededBuildingPalette([
-  '#c9cecc', '#d1d0c8', '#c6ced1', '#d0d5cc',
+  '#f1eee7', '#e8eef1', '#eee8f1', '#e8f0e7',
 ]);
 const DEFAULT_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#dde2df', '#e1e0d8', '#dbe1e3', '#e0e5dc',
+  '#dfe5df', '#dce4e8', '#e4dce6', '#e4e1d8',
 ]);
 const RESIDENTIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#d1d0c5', '#c9d0cc', '#d7d0bf', '#c8d1d0',
+  '#f2d9ce', '#e5e9f3', '#f3e4bd', '#d8ebe4',
 ]);
 const RESIDENTIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#e2e1d8', '#dfe5e1', '#e8e2d4', '#dee6e5',
+  '#e3c8bd', '#d6dde9', '#e4d4ab', '#c9ded6',
 ]);
 const APARTMENT_BUILDING_PALETTE = seededBuildingPalette([
-  '#c3cbd0', '#c9c7c0', '#c4ced0', '#d0ccc3',
+  '#e6ebf2', '#eee7e2', '#e2edf0', '#f0e8d8',
 ]);
 const APARTMENT_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#dbe0e3', '#e0ded7', '#dce4e5', '#e4e1da',
+  '#d5dde7', '#dfd6d1', '#d1e0e3', '#e1d8c8',
 ]);
 const COMMERCIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#c4ced1', '#c7c9c5', '#c9d0c8', '#c2cdd0',
+  '#e1edf2', '#e7e9e5', '#e7efe5', '#e3e8f1',
 ]);
 const COMMERCIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#dce4e6', '#dfe1dc', '#e0e5df', '#dbe3e5',
+  '#d1e0e6', '#d8dbd6', '#d7e2d4', '#d4dbe6',
 ]);
 const INDUSTRIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#bac5c3', '#c0c9c5', '#c8c8bd', '#bcc7cc',
+  '#e4e9e6', '#e0e7e3', '#ecebdd', '#dfe7eb',
 ]);
 const INDUSTRIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#d5ddda', '#d9e0dc', '#e0e0d6', '#d6dfe2',
+  '#d3dbd7', '#d0dad5', '#dddccd', '#d0dbe0',
 ]);
 const CIVIC_BUILDING_PALETTE = seededBuildingPalette([
-  '#d1cbbd', '#c8c9c6', '#d4cfbf', '#c2cfcb',
+  '#f1e7d3', '#e8e7ed', '#f0e4d6', '#dcece8',
 ]);
 const CIVIC_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#e2ddcf', '#dedfdb', '#e6e1d4', '#d9e4e1',
+  '#e1d5c1', '#d8d7df', '#e1d3c6', '#cce0db',
+]);
+
+const DEFAULT_ROOF_PALETTE = seededBuildingPalette([
+  '#c2c6c6', '#b5bcc0', '#cccbc7', '#aeb7ba',
 ]);
 
 const BUILDING_PALETTE: ExpressionSpecification = [
@@ -270,7 +274,7 @@ const BUILDING_COLOR_ALT: ExpressionSpecification = [
 const ROOF_COLOR: ExpressionSpecification = [
   'coalesce',
   ['get', 'roof_color'],
-  BUILDING_COLOR_ALT,
+  DEFAULT_ROOF_PALETTE,
 ];
 
 const HAS_PITCHED_ROOF: ExpressionSpecification = [
@@ -329,7 +333,7 @@ const ROAD_WIDTH: ExpressionSpecification = [
   20, ['*', ROAD_WIDTH_METERS, 28.074158],
 ];
 
-const ROAD_CASING_METERS: ExpressionSpecification = ['+', ROAD_WIDTH_METERS, 2.4];
+const ROAD_CASING_METERS: ExpressionSpecification = ['+', ROAD_WIDTH_METERS, 1.7];
 const ROAD_CASING_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
   10, ['max', 0.8, ['*', ROAD_CASING_METERS, 0.027416]],
@@ -371,26 +375,26 @@ const PATH_WIDTH: ExpressionSpecification = [
 const PATH_DETAIL_OPACITY: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
   12, 0,
-  13, 0.92,
+  13, 0.74,
 ];
 const PATH_DETAIL_CASING_OPACITY: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
   12, 0,
-  13, 0.9,
+  13, 0.52,
 ];
 const PATH_EARTHWORK_OPACITY: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
   12, 0,
-  13, 0.4,
+  13, 0.24,
 ];
 
 const PATH_CASING_WIDTH: ExpressionSpecification = [
   'interpolate', ['exponential', 2], ['zoom'],
-  12, ['+', ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]], 2.5],
-  14, ['+', ['*', PATH_WIDTH_METERS, 0.438658], 2.5],
-  16, ['+', ['*', PATH_WIDTH_METERS, 1.754634], 2.5],
-  18, ['+', ['*', PATH_WIDTH_METERS, 5.5], 2.5],
-  20, ['+', ['*', PATH_WIDTH_METERS, 28.074158], 2.5],
+  12, ['+', ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]], 1.6],
+  14, ['+', ['*', PATH_WIDTH_METERS, 0.438658], 1.6],
+  16, ['+', ['*', PATH_WIDTH_METERS, 1.754634], 1.6],
+  18, ['+', ['*', PATH_WIDTH_METERS, 5.5], 1.6],
+  20, ['+', ['*', PATH_WIDTH_METERS, 28.074158], 1.6],
 ];
 
 const RAILWAY_WIDTH_METERS: ExpressionSpecification = [
@@ -428,29 +432,29 @@ const AEROWAY_TAXIWAY_WIDTH_METERS: ExpressionSpecification = [
 const SURFACE_ROAD_COLOR: ExpressionSpecification = [
   'match',
   ['get', 'surface'],
-  'gravel', '#d8cfbd',
-  'unpaved', '#ddd2bc',
-  'dirt', '#d4c09e',
-  'ground', '#d4c09e',
-  'sand', '#ead9ad',
-  'cobblestone', '#7d8281',
-  'paving_stones', '#898e8c',
-  'concrete', '#aeb5b4',
-  '#697174',
+  'gravel', '#c9c1b1',
+  'unpaved', '#d0c5b0',
+  'dirt', '#c8b494',
+  'ground', '#c8b494',
+  'sand', '#ddcc9f',
+  'cobblestone', '#a4a5a1',
+  'paving_stones', '#aaaba6',
+  'concrete', '#bcbdb8',
+  '#b2b3ae',
 ];
 
 const SURFACE_PATH_COLOR: ExpressionSpecification = [
   'case',
-  ['==', ['get', 'class'], 'cycleway'], '#c97872',
+  ['==', ['get', 'class'], 'cycleway'], '#b9867e',
   [
     'match',
     ['get', 'surface'],
-    'asphalt', '#9ea7a6',
-    'gravel', '#c9b083',
-    'dirt', '#b59468',
-    'ground', '#b59468',
-    'sand', '#dfbf75',
-    '#b8aa89',
+    'asphalt', '#a8aeaa',
+    'gravel', '#c5b38f',
+    'dirt', '#b79d77',
+    'ground', '#b79d77',
+    'sand', '#d5bd84',
+    '#b9ac90',
   ],
 ];
 
@@ -472,15 +476,15 @@ function buildingStoryLayers(): FillExtrusionLayerSpecification[] {
     const storyTop: ExpressionSpecification = isTopSlice
       ? BUILDING_BODY_HEIGHT
       : ['min', BUILDING_BODY_HEIGHT, nextStoryBoundary];
-    const storyColor: ExpressionSpecification = storyIndex % 2 === 0
-      ? BUILDING_COLOR
-      : [
+    const storyColor: ExpressionSpecification = storyIndex === 0
+      ? [
           'step',
           ['zoom'],
           BUILDING_COLOR,
           BUILDING_DETAIL_MIN_ZOOM,
           BUILDING_COLOR_ALT,
-        ];
+        ]
+      : BUILDING_COLOR;
 
     return {
       id: `building-story-${storyIndex + 1}`,
@@ -490,9 +494,8 @@ function buildingStoryLayers(): FillExtrusionLayerSpecification[] {
       minzoom: 12,
       filter: ['>', ['get', 'levels'], storyIndex],
       paint: {
-        // Use one continuous set of geometry at every building zoom. Alternate
-        // colors appear only at close zoom, without swapping whole layers at a
-        // fractional zoom boundary.
+        // Keep the sliced geometry stable, but reserve the subtle alternate
+        // material for the street-level storey instead of striping every floor.
         'fill-extrusion-color': storyColor,
         'fill-extrusion-height': storyTop,
         'fill-extrusion-base': storyBase,
@@ -516,7 +519,7 @@ function railwayRailLayers(): LineLayerSpecification[] {
     ],
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#66747b',
+      'line-color': '#747e80',
       'line-width': [
         'interpolate', ['exponential', 2], ['zoom'],
         12, 0.6,
@@ -532,7 +535,7 @@ function railwayRailLayers(): LineLayerSpecification[] {
         18, side * 5.348,
         20, side * 12,
       ],
-      'line-opacity': 0.95,
+      'line-opacity': 0.8,
     },
   }));
 }
@@ -544,7 +547,7 @@ const TAMPERE_STYLE: StyleSpecification = {
     anchor: 'map',
     position: CARTOON_MAP_LIGHT_POSITION,
     color: CARTOON_SUN_COLOR,
-    intensity: 0.36,
+    intensity: 0.44,
   },
   glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
   sources: {
@@ -585,8 +588,8 @@ const TAMPERE_STYLE: StyleSpecification = {
         'fill-color': [
           'match',
           ['get', 'class'],
-          'forest', '#83b878',
-          'wood', '#91c582',
+          'forest', '#7eae70',
+          'wood', '#86b978',
           'scrub', '#b8d58f',
           'shrubbery', '#a8cb91',
           'heath', '#e9e5b6',
@@ -612,22 +615,22 @@ const TAMPERE_STYLE: StyleSpecification = {
           'vineyard', '#e2ebc0',
           'plant_nursery', '#c9dda9',
           'greenhouse_horticulture', '#dbe4c5',
-          'park', '#a9d394',
-          'recreation_ground', '#b6d99b',
-          'meadow', '#c1dfa2',
-          'grass', '#b8d99f',
-          'grassland', '#b6d79e',
-          'garden', '#b9d5a4',
-          'dog_park', '#b3d09d',
-          'village_green', '#afd197',
+          'park', '#9dce78',
+          'recreation_ground', '#a0d77a',
+          'meadow', '#b5dd8e',
+          'grass', '#a8d882',
+          'grassland', '#a6d47f',
+          'garden', '#aad68a',
+          'dog_park', '#9fd275',
+          'village_green', '#9dd273',
           'allotments', '#c9dc9f',
           'cemetery', '#c2d9b5',
           'churchyard', '#c7d9ba',
           'religious', '#d8dfca',
           'nature_reserve', '#9fc98d',
           'pitch', '#add38e',
-          'marketplace', '#d6c5ae',
-          'square', '#d8ccb9',
+          'marketplace', '#ddd3c5',
+          'square', '#ddd6ca',
           'playground', '#d6df9d',
           'sports_centre', '#d7e9c1',
           'stadium', '#d2e7b9',
@@ -642,7 +645,7 @@ const TAMPERE_STYLE: StyleSpecification = {
           'commercial', '#c7d0ce',
           'retail', '#d8d1bc',
           'industrial', '#b8c7c7',
-          'railway', '#deddd6',
+          'railway', '#e1e1dc',
           'construction', '#ded8c8',
           'quarry', '#d9d6cf',
           'greenfield', '#d8e5c1',
@@ -663,12 +666,32 @@ const TAMPERE_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'waterways',
+      type: 'line',
+      source: 'tampere',
+      'source-layer': 'waterways',
+      paint: {
+        'line-color': '#4b91b7',
+        'line-opacity': 0.9,
+        'line-width': [
+          'match',
+          ['get', 'class'],
+          'river', 2.4,
+          'canal', 2,
+          'stream', 1.3,
+          'ditch', 0.9,
+          'drain', 0.9,
+          1,
+        ],
+      },
+    },
+    {
       id: 'water-edge-shade',
       type: 'fill',
       source: 'tampere',
       'source-layer': 'water',
       paint: {
-        'fill-color': '#4f9fbd',
+        'fill-color': WATER_EDGE_COLOR,
         'fill-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
         'fill-translate-anchor': 'map',
         'fill-opacity': 0.14,
@@ -687,7 +710,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'water_detail',
       paint: {
-        'fill-color': '#4f9fbd',
+        'fill-color': WATER_EDGE_COLOR,
         'fill-translate': ['interpolate', ['linear'], ['zoom'], 13, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
         'fill-translate-anchor': 'map',
         'fill-opacity': 0.12,
@@ -700,28 +723,6 @@ const TAMPERE_STYLE: StyleSpecification = {
       'source-layer': 'water_detail',
       paint: { 'fill-color': WATER_COLOR },
     },
-    {
-      id: 'waterways',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'waterways',
-      paint: {
-        'line-color': '#69c3e8',
-        'line-opacity': 0.9,
-        'line-width': [
-          'match',
-          ['get', 'class'],
-          'river', 2.4,
-          'canal', 2,
-          'stream', 1.3,
-          'ditch', 0.9,
-          'drain', 0.9,
-          1,
-        ],
-      },
-    },
-    // Draw area water after centerlines so large river/lake polygons hide the
-    // duplicated OSM waterway line underneath them.
     {
       id: 'river-area-cover',
       type: 'fill',
@@ -828,7 +829,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       // when the optional elevated 3D bridge models are disabled.
       paint: {
         'fill-color': '#d7d1c5',
-        'fill-outline-color': '#b9b2a6',
+        'fill-outline-color': '#c7c1b7',
         'fill-opacity': 0.98,
       },
     },
@@ -838,9 +839,8 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'parking',
       paint: {
-        'fill-color': '#d6d1c6',
-        'fill-outline-color': '#bcb8ae',
-        'fill-opacity': 0.94,
+        'fill-color': '#dad8d2',
+        'fill-opacity': 0.86,
       },
     },
     {
@@ -849,15 +849,14 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'pedestrian_areas',
       paint: {
-        'fill-color': '#d8ccb9',
-        'fill-outline-color': '#bdb3a5',
+        'fill-color': '#ddd6ca',
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          14, 0.95,
+          14, 0.88,
           14.75, [
             'case',
             ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-            0.95,
+            0.88,
             0,
           ],
         ],
@@ -1003,7 +1002,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: {
         'line-color': ['case', ['has', 'cutting'], '#b2aaa0', '#c3b79f'],
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 9, 17, 14],
-        'line-opacity': 0.4,
+        'line-opacity': 0.26,
       },
     },
     {
@@ -1018,9 +1017,9 @@ const TAMPERE_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#9aa7ad',
+        'line-color': '#adb3b1',
         'line-width': RAILWAY_BED_WIDTH,
-        'line-opacity': 0.9,
+        'line-opacity': 0.72,
       },
     },
     {
@@ -1028,7 +1027,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'line',
       source: 'tampere',
       'source-layer': 'railways',
-      minzoom: 12,
+      minzoom: 15.5,
       filter: [
         'all',
         ['!', ['has', 'tunnel']],
@@ -1036,10 +1035,15 @@ const TAMPERE_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#edf2ef',
+        'line-color': '#e7ebe7',
         'line-width': RAILWAY_SLEEPER_WIDTH,
         'line-dasharray': [0.18, 1.15],
-        'line-opacity': 0.96,
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15.5, 0,
+          17, 0.56,
+          18, 0.7,
+        ],
       },
     },
     ...railwayRailLayers(),
@@ -1076,9 +1080,9 @@ const TAMPERE_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#d8d4ca',
+        'line-color': '#969e9b',
         'line-width': ROAD_CASING_WIDTH,
-        'line-opacity': 0.92,
+        'line-opacity': 0.72,
       },
     },
     {
@@ -1095,7 +1099,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       paint: {
         'line-color': SURFACE_ROAD_COLOR,
         'line-width': ROAD_WIDTH,
-        'line-opacity': 0.98,
+        'line-opacity': 0.96,
       },
     },
     {
@@ -1134,7 +1138,7 @@ const TAMPERE_STYLE: StyleSpecification = {
         'line-color': '#ffffff',
         'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.7, 17, 1.2],
         'line-dasharray': [3, 4],
-        'line-opacity': 0.94,
+        'line-opacity': 0.66,
       },
     },
     {
@@ -1177,8 +1181,8 @@ const TAMPERE_STYLE: StyleSpecification = {
         'text-allow-overlap': false,
       },
       paint: {
-        'text-color': '#3f91b4',
-        'text-halo-color': '#78c4df',
+        'text-color': '#8fc1d7',
+        'text-halo-color': WATER_COLOR,
         'text-halo-width': 1.25,
       },
     },
@@ -1198,8 +1202,8 @@ const TAMPERE_STYLE: StyleSpecification = {
         'text-padding': 16,
       },
       paint: {
-        'text-color': '#3f91b4',
-        'text-halo-color': '#78c4df',
+        'text-color': '#8fc1d7',
+        'text-halo-color': WATER_COLOR,
         'text-halo-width': 1.25,
         'text-opacity': 0.82,
       },
@@ -1340,22 +1344,20 @@ const TAMPERE_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 2.5,
-          15, 6.5,
-          17, 12,
-          18, 16,
+          13, 2,
+          15, 4.5,
+          18, 9,
         ],
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1.2,
-          16, 2.2,
-          18, 3,
+          13, 0.9,
+          18, 2,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.08,
-          15, 0.12,
-          18, 0.18,
+          13, 0.06,
+          15, 0.09,
+          18, 0.13,
         ],
       },
     },
@@ -1371,22 +1373,20 @@ const TAMPERE_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1.2,
-          15, 2.8,
-          17, 4.8,
-          18, 6,
+          13, 1,
+          15, 2.2,
+          18, 4.2,
         ],
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.35,
-          16, 0.6,
+          13, 0.4,
           18, 0.9,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.16,
-          15, 0.24,
-          18, 0.34,
+          13, 0.12,
+          15, 0.17,
+          18, 0.23,
         ],
       },
     },

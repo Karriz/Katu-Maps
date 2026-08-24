@@ -9,7 +9,7 @@ import * as THREE from 'three';
 // extrusion remains visible below this zoom.
 const ROOF_MIN_ZOOM = 16;
 const MAX_ROOF_FEATURES = 2200;
-const DEFAULT_ROOF_COLOR = '#c9b9ae';
+const DEFAULT_ROOF_COLOR = '#b9bec0';
 const REFERENCE = new maplibregl.LngLat(23.7609, 61.4981);
 const BUILDING_PALETTES: Record<string, [string[], string[]]> = {
   default: [
@@ -195,7 +195,7 @@ function roofColor(properties: Record<string, unknown>, id: SourceFeature['id'])
 
 function wallColor(properties: Record<string, unknown>) {
   const value = properties.building_color_alt ?? properties.building_color;
-  return typeof value === 'string' && value ? value : '#dedbd4';
+  return typeof value === 'string' && value ? value : '#ece9e3';
 }
 
 function isChurchTower(properties: Record<string, unknown>) {
