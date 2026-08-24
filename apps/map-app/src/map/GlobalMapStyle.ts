@@ -129,24 +129,22 @@ export const GLOBAL_ROAD_LAYER_IDS = [
 
 const GLOBAL_BUILDING_DETAIL_START_ZOOM = 16.5;
 const GLOBAL_BUILDING_DETAIL_FULL_ZOOM = 17.5;
-const GLOBAL_BUILDING_STORY_SLICES = 34;
+const GLOBAL_BUILDING_MAX_ESTIMATED_STORIES = 34;
 const GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES = 6;
 const GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES = 100;
-const GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES = [1, 4] as const;
 const GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES = 0.4;
 const GLOBAL_BUILDING_ROOF_RIM_HEIGHT_METRES = 0.08;
 const GLOBAL_BUILDING_ROOF_CAP_HEIGHT_METRES = 0.32;
 const GLOBAL_MAP_SUN_COLOR = '#fff9ed';
 
-export const GLOBAL_BUILDING_STORY_LAYER_IDS = Array.from(
-  { length: GLOBAL_BUILDING_STORY_SLICES },
-  (_, index) => `global-building-story-${index + 1}`,
-);
-
-export const GLOBAL_BUILDING_DETAIL_BAND_LAYER_IDS =
-  GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES.map(
-    (storyIndex) => `global-building-detail-band-${storyIndex + 1}`,
-  );
+export const GLOBAL_BUILDING_FACADE_LAYER_IDS = [
+  'global-building-ground-storeys',
+  'global-building-lower-facades',
+  'global-building-lower-detail-bands',
+  'global-building-middle-facades',
+  'global-building-upper-detail-bands',
+  'global-building-upper-facades',
+];
 
 export const GLOBAL_BUILDING_ROOF_LAYER_IDS = [
   'global-building-roof-rims',
@@ -156,8 +154,7 @@ export const GLOBAL_BUILDING_ROOF_LAYER_IDS = [
 export const GLOBAL_BUILDING_LAYER_IDS = [
   'global-building-footprints',
   'global-buildings',
-  ...GLOBAL_BUILDING_STORY_LAYER_IDS,
-  ...GLOBAL_BUILDING_DETAIL_BAND_LAYER_IDS,
+  ...GLOBAL_BUILDING_FACADE_LAYER_IDS,
   ...GLOBAL_BUILDING_ROOF_LAYER_IDS,
 ];
 
@@ -223,7 +220,7 @@ function animatedBuildingHeight(height: ExpressionSpecification): ExpressionSpec
 
 const GLOBAL_ESTIMATED_BUILDING_STORIES: ExpressionSpecification = [
   'min',
-  GLOBAL_BUILDING_STORY_SLICES,
+  GLOBAL_BUILDING_MAX_ESTIMATED_STORIES,
   ['max', 1, ['round', ['/', GLOBAL_BUILDING_BODY_HEIGHT, 3]]],
 ] as ExpressionSpecification;
 
@@ -231,141 +228,131 @@ const GLOBAL_BUILDING_STORY_HEIGHT: ExpressionSpecification = [
   '/', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_ESTIMATED_BUILDING_STORIES,
 ] as ExpressionSpecification;
 
-function globalBuildingStoryLayers(): FillExtrusionLayerSpecification[] {
-  return GLOBAL_BUILDING_STORY_LAYER_IDS.map((id, storyIndex) => {
-    const storyBase: ExpressionSpecification = [
+function buildingStoryTop(storyCount: number): ExpressionSpecification {
+  return [
+    'min',
+    GLOBAL_BUILDING_HEIGHT,
+    [
       '+',
       GLOBAL_BUILDING_BASE,
-      ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex],
-    ];
-    const storyTop: ExpressionSpecification = [
-      'min',
-      GLOBAL_BUILDING_HEIGHT,
-      [
-        '+',
-        GLOBAL_BUILDING_BASE,
-        ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex + 1],
-      ],
-    ];
-    const hasDetailBand = (GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES as readonly number[])
-      .includes(storyIndex);
-    const visibleStoryTop: ExpressionSpecification = hasDetailBand
-      ? [
-          'max',
-          storyBase,
-          ['-', storyTop, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
-        ]
-      : storyTop;
-    const storyColor: ExpressionSpecification = storyIndex === 0
-      ? [
-          'interpolate', ['linear'], ['zoom'],
-          GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
-          GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_COLOR_ALT,
-        ]
-      : GLOBAL_BUILDING_COLOR;
-
-    return {
-      id,
-      type: 'fill-extrusion',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'building',
-      minzoom: 13,
-      filter: [
-        'all',
-        ['!', ['==', ['get', 'hide_3d'], true]],
-        ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES],
-        ['<=', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES],
-        ['>', GLOBAL_ESTIMATED_BUILDING_STORIES, storyIndex],
-      ],
-      paint: {
-        'fill-extrusion-color': storyColor,
-        'fill-extrusion-height': [
-          'interpolate', ['linear'], ['zoom'],
-          13, GLOBAL_BUILDING_BASE,
-          13.6, visibleStoryTop,
-        ],
-        'fill-extrusion-base': [
-          'interpolate', ['linear'], ['zoom'],
-          13, GLOBAL_BUILDING_BASE,
-          13.6, storyBase,
-        ],
-        'fill-extrusion-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          13.45, 0.96,
-          18, 1,
-        ],
-        // The ordinary slices tile the facade. Two selected slices stop just
-        // short of their top so the narrow detail layers below can occupy the
-        // remaining space without coplanar overlap or uniform storey striping.
-        'fill-extrusion-vertical-gradient': false,
-      },
-    };
-  });
+      ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyCount],
+    ],
+  ] as ExpressionSpecification;
 }
 
-function globalBuildingDetailBandLayers(): FillExtrusionLayerSpecification[] {
-  return GLOBAL_BUILDING_DETAIL_BAND_LAYER_IDS.map((id, bandIndex) => {
-    const storyIndex = GLOBAL_BUILDING_DETAIL_BAND_STORY_INDEXES[bandIndex];
-    const storyBase: ExpressionSpecification = [
-      '+',
-      GLOBAL_BUILDING_BASE,
-      ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex],
-    ];
-    const storyTop: ExpressionSpecification = [
-      'min',
-      GLOBAL_BUILDING_HEIGHT,
-      [
-        '+',
-        GLOBAL_BUILDING_BASE,
-        ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyIndex + 1],
-      ],
-    ];
-    const bandBase: ExpressionSpecification = [
-      'max',
-      storyBase,
-      ['-', storyTop, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
-    ];
+const GLOBAL_BUILDING_FIRST_STORY_TOP = buildingStoryTop(1);
+const GLOBAL_BUILDING_SECOND_STORY_TOP = buildingStoryTop(2);
+const GLOBAL_BUILDING_FIFTH_STORY_TOP = buildingStoryTop(5);
+const GLOBAL_BUILDING_LOWER_BAND_BASE: ExpressionSpecification = [
+  'max',
+  GLOBAL_BUILDING_FIRST_STORY_TOP,
+  ['-', GLOBAL_BUILDING_SECOND_STORY_TOP, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
+] as ExpressionSpecification;
+const GLOBAL_BUILDING_UPPER_BAND_BASE: ExpressionSpecification = [
+  'max',
+  buildingStoryTop(4),
+  ['-', GLOBAL_BUILDING_FIFTH_STORY_TOP, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
+] as ExpressionSpecification;
 
-    return {
-      id,
-      type: 'fill-extrusion',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'building',
-      minzoom: 13,
-      filter: [
-        'all',
-        ['!', ['==', ['get', 'hide_3d'], true]],
-        ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES],
-        ['<=', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES],
-        ['>', GLOBAL_ESTIMATED_BUILDING_STORIES, storyIndex],
+const GLOBAL_BUILDING_GROUND_COLOR: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
+  GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_COLOR_ALT,
+] as ExpressionSpecification;
+
+const GLOBAL_BUILDING_BAND_COLOR: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
+  GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_DETAIL_BAND_COLOR,
+] as ExpressionSpecification;
+
+function globalBuildingFacadeLayer(
+  id: string,
+  base: ExpressionSpecification,
+  height: ExpressionSpecification,
+  color: ExpressionSpecification,
+  minimumStories: number,
+): FillExtrusionLayerSpecification {
+  return {
+    id,
+    type: 'fill-extrusion',
+    source: OPENFREEMAP_SOURCE_ID,
+    'source-layer': 'building',
+    minzoom: 13,
+    filter: [
+      'all',
+      ['!', ['==', ['get', 'hide_3d'], true]],
+      ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES],
+      ['<=', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES],
+      ['>=', GLOBAL_ESTIMATED_BUILDING_STORIES, minimumStories],
+    ],
+    paint: {
+      'fill-extrusion-color': color,
+      'fill-extrusion-height': animatedBuildingHeight(height),
+      'fill-extrusion-base': animatedBuildingHeight(base),
+      'fill-extrusion-opacity': [
+        'interpolate', ['linear'], ['zoom'],
+        13, 0,
+        13.45, 0.96,
+        18, 1,
       ],
-      paint: {
-        'fill-extrusion-color': [
-          'interpolate', ['linear'], ['zoom'],
-          GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
-          GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_DETAIL_BAND_COLOR,
-        ],
-        'fill-extrusion-height': [
-          'interpolate', ['linear'], ['zoom'],
-          13, GLOBAL_BUILDING_BASE,
-          13.6, storyTop,
-        ],
-        'fill-extrusion-base': [
-          'interpolate', ['linear'], ['zoom'],
-          13, GLOBAL_BUILDING_BASE,
-          13.6, bandBase,
-        ],
-        'fill-extrusion-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          13.45, 0.96,
-          18, 1,
-        ],
-        'fill-extrusion-vertical-gradient': false,
-      },
-    };
-  });
+      'fill-extrusion-vertical-gradient': false,
+    },
+  };
+}
+
+function globalBuildingFacadeLayers(): FillExtrusionLayerSpecification[] {
+  const middleFacadeTop: ExpressionSpecification = [
+    'case',
+    ['>=', GLOBAL_ESTIMATED_BUILDING_STORIES, 5],
+    GLOBAL_BUILDING_UPPER_BAND_BASE,
+    GLOBAL_BUILDING_HEIGHT,
+  ];
+
+  return [
+    globalBuildingFacadeLayer(
+      GLOBAL_BUILDING_FACADE_LAYER_IDS[0],
+      GLOBAL_BUILDING_BASE,
+      GLOBAL_BUILDING_FIRST_STORY_TOP,
+      GLOBAL_BUILDING_GROUND_COLOR,
+      1,
+    ),
+    globalBuildingFacadeLayer(
+      GLOBAL_BUILDING_FACADE_LAYER_IDS[1],
+      GLOBAL_BUILDING_FIRST_STORY_TOP,
+      GLOBAL_BUILDING_LOWER_BAND_BASE,
+      GLOBAL_BUILDING_COLOR,
+      2,
+    ),
+    globalBuildingFacadeLayer(
+      GLOBAL_BUILDING_FACADE_LAYER_IDS[2],
+      GLOBAL_BUILDING_LOWER_BAND_BASE,
+      GLOBAL_BUILDING_SECOND_STORY_TOP,
+      GLOBAL_BUILDING_BAND_COLOR,
+      2,
+    ),
+    globalBuildingFacadeLayer(
+      GLOBAL_BUILDING_FACADE_LAYER_IDS[3],
+      GLOBAL_BUILDING_SECOND_STORY_TOP,
+      middleFacadeTop,
+      GLOBAL_BUILDING_COLOR,
+      3,
+    ),
+    globalBuildingFacadeLayer(
+      GLOBAL_BUILDING_FACADE_LAYER_IDS[4],
+      GLOBAL_BUILDING_UPPER_BAND_BASE,
+      GLOBAL_BUILDING_FIFTH_STORY_TOP,
+      GLOBAL_BUILDING_BAND_COLOR,
+      5,
+    ),
+    globalBuildingFacadeLayer(
+      GLOBAL_BUILDING_FACADE_LAYER_IDS[5],
+      GLOBAL_BUILDING_FIFTH_STORY_TOP,
+      GLOBAL_BUILDING_HEIGHT,
+      GLOBAL_BUILDING_COLOR,
+      6,
+    ),
+  ];
 }
 
 const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = [
@@ -415,7 +402,7 @@ export function roadWidthExpression(
   casing = false,
 ): ExpressionSpecification {
   const widthMetres: ExpressionSpecification = casing
-    ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1.4]
+    ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1]
     : ESTIMATED_ROAD_WIDTH_METRES;
 
   return [
@@ -1303,22 +1290,22 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 2,
-          15, 4.5,
-          18, 9,
+          13, 2.4,
+          15, 5.4,
+          18, 10,
         ],
         'line-translate': CARTOON_BUILDING_SHADOW_TRANSLATE,
         'line-translate-anchor': 'map',
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.9,
-          18, 2,
+          13, 1,
+          18, 2.4,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.5, 0.07,
-          18, 0.13,
+          13.5, 0.08,
+          18, 0.15,
         ],
       },
     },
@@ -1340,20 +1327,20 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1,
-          15, 2.2,
-          18, 4.2,
+          13, 1.3,
+          15, 2.8,
+          18, 5.2,
         ],
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.4,
-          18, 0.9,
+          13, 0.55,
+          18, 1.2,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.45, 0.12,
-          18, 0.23,
+          13.45, 0.15,
+          18, 0.28,
         ],
       },
     },
@@ -1392,8 +1379,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'fill-extrusion-vertical-gradient': true,
       },
     },
-    ...globalBuildingStoryLayers(),
-    ...globalBuildingDetailBandLayers(),
+    ...globalBuildingFacadeLayers(),
     {
       id: 'global-building-roof-rims',
       type: 'fill-extrusion',

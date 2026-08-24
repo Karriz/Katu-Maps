@@ -6,6 +6,7 @@ import maplibregl, {
   type HillshadeLayerSpecification,
   type LineLayerSpecification,
   type Map,
+  type MapSourceDataEvent,
   type StyleSpecification,
 } from 'maplibre-gl';
 import { BuildingRoofLayer } from './BuildingRoofLayer';
@@ -1609,11 +1610,17 @@ export function MapView() {
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
     let globalLabelPitchBucket: number | undefined;
+    let modelDataRevision = 0;
+    let lastModelUpdateSignature: string | undefined;
+    const modelVectorSourceId = USE_LOCAL_MAP_DATA ? 'tampere' : OPENFREEMAP_SOURCE_ID;
 
     const setTerrainSource = (sourceId: string) => {
       const sourceChanged = terrainSourceRef.current !== sourceId;
       terrainSourceRef.current = sourceId;
-      if (sourceChanged) treeLayer.invalidateTerrain();
+      if (sourceChanged) {
+        treeLayer.invalidateTerrain();
+        modelDataRevision += 1;
+      }
       // Reapplying the same terrain specification makes MapLibre recalculate
       // its terrain-clamped camera and can look like a small backward zoom.
       if (terrainEnabledRef.current && sourceChanged) {
@@ -1771,21 +1778,48 @@ export function MapView() {
         );
       }
     };
+    const modelUpdateSignature = () => {
+      const bounds = map.getBounds();
+      return [
+        modelDataRevision,
+        terrainSourceRef.current,
+        terrainEnabledRef.current ? 1 : 0,
+        map.getZoom().toFixed(2),
+        map.getPitch().toFixed(1),
+        map.getBearing().toFixed(1),
+        bounds.getWest().toFixed(5),
+        bounds.getSouth().toFixed(5),
+        bounds.getEast().toFixed(5),
+        bounds.getNorth().toFixed(5),
+      ].join(':');
+    };
     const updateTreeModels = () => {
+      treeUpdateTimer = undefined;
       if (map.isMoving()) {
         scheduleTreeUpdate();
         return;
       }
+      const nextSignature = modelUpdateSignature();
+      if (nextSignature === lastModelUpdateSignature) return;
       roofLayer?.updateRoofs();
       bridgeLayer?.updateBridges();
       infrastructureLayer?.updateInfrastructure();
       treeLayer.updateTrees();
+      lastModelUpdateSignature = nextSignature;
     };
     const scheduleTreeUpdate = () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       treeUpdateTimer = window.setTimeout(updateTreeModels, 120);
     };
-    treeRefreshRef.current = scheduleTreeUpdate;
+    const invalidateAndScheduleModels = () => {
+      modelDataRevision += 1;
+      scheduleTreeUpdate();
+    };
+    const handleModelSourceData = (event: MapSourceDataEvent) => {
+      if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
+      modelDataRevision += 1;
+    };
+    treeRefreshRef.current = invalidateAndScheduleModels;
     map.once('load', () => {
       // MapLibre uses image pixelRatio when determining pattern spacing. A
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
@@ -1816,6 +1850,7 @@ export function MapView() {
     const handleCameraMove = () => updateGlobalLabelDensity();
     map.on('move', handleCameraMove);
     map.on('moveend', handleMoveEnd);
+    map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
     // idle handles the final set of newly loaded tiles.
@@ -1845,6 +1880,7 @@ export function MapView() {
       terrainCoverageGeneration += 1;
       map.off('move', handleCameraMove);
       map.off('moveend', handleMoveEnd);
+      map.off('sourcedata', handleModelSourceData);
       map.off('idle', scheduleTreeUpdate);
       map.remove();
       mapRef.current = null;

@@ -331,9 +331,10 @@ function createShadowTexture() {
       const normalizedX = (x + 0.5) / size * 2 - 1;
       const normalizedY = (y + 0.5) / size * 2 - 1;
       const distance = Math.hypot(normalizedX, normalizedY);
-      const strength = Math.max(0, Math.min(1, (1 - distance) / 0.48));
+      const falloff = Math.max(0, Math.min(1, 1 - distance));
+      const strength = falloff * falloff * (3 - 2 * falloff);
       const offset = (y * size + x) * 4;
-      const value = Math.round(strength * strength * 255);
+      const value = Math.round(strength * 255);
       data[offset] = value;
       data[offset + 1] = value;
       data[offset + 2] = value;
@@ -586,7 +587,7 @@ export class TreeModelLayer implements CustomLayerInterface {
     const shadowMaterial = new THREE.MeshBasicMaterial({
       color: CARTOON_SHADOW_COLOR,
       transparent: true,
-      opacity: 0.17,
+      opacity: 0.22,
       alphaMap: this.shadowTexture,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -732,9 +733,9 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.transformHelper.position.set(east, up + 0.06, north);
       this.transformHelper.rotation.set(0, 0, 0);
       this.transformHelper.scale.set(
-        canopyRadius * 0.96,
+        canopyRadius * 1.12,
         1,
-        canopyRadius * 0.96,
+        canopyRadius * 1.12,
       );
       this.transformHelper.updateMatrix();
       shadowMesh.setMatrixAt(index, this.transformHelper.matrix);
