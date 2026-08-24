@@ -629,7 +629,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
-      paint: { 'fill-color': '#4387ad' },
+      paint: { 'fill-color': '#5d9dbf' },
     },
     {
       id: 'global-pedestrian-areas',
@@ -641,7 +641,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['==', ['geometry-type'], 'Polygon'],
         ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]],
       ],
-      paint: { 'fill-color': '#ddd8cf', 'fill-opacity': 0.84 },
+      paint: { 'fill-color': '#e5dfd4', 'fill-opacity': 0.9 },
     },
     {
       id: 'global-pier-area-shadow',
@@ -963,7 +963,25 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': '#d8d4ca',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.3, 18, 4.1],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.52],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.42],
+      },
+    },
+    {
+      id: 'global-cycleway-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 12,
+      filter: [
+        'all',
+        ['==', ['get', 'class'], 'path'],
+        ['==', ['get', 'subclass'], 'cycleway'],
+      ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#f3f0e9',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.35, 18, 5],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.82],
       },
     },
     {
@@ -983,7 +1001,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.65, 18, 3],
         'line-dasharray': [2.5, 1.4],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.68],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.56],
       },
     },
     {
@@ -999,9 +1017,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#b4867e',
+        'line-color': '#c68173',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 3.8],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.68],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.88],
       },
     },
     {
@@ -1024,7 +1042,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           '#a99c86',
         ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.65],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.66],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.52],
       },
     },
     {
@@ -1060,7 +1078,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': '#a99c86',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.5],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.64],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.5],
       },
     },
     {
@@ -1122,7 +1140,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#909a9d',
+        'line-color': [
+          'match', ['get', 'class'],
+          'transit', '#769ba0',
+          '#909a9d',
+        ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 18, 2.2],
         'line-dasharray': [2, 2],
         'line-opacity': 0.5,
@@ -1141,7 +1163,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#c0c5c2',
+        'line-color': [
+          'match', ['get', 'class'],
+          'transit', '#d4e5e3',
+          '#c0c5c2',
+        ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 14, 2.4, 18, 8],
         'line-opacity': 0.72,
       },
@@ -1154,7 +1180,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 15,
       filter: [
         'all',
-        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+        ['==', ['get', 'class'], 'rail'],
         ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
@@ -1182,9 +1208,17 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
       ],
       paint: {
-        'line-color': '#8f999a',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 18, 1.4],
-        'line-opacity': 0.8,
+        'line-color': [
+          'match', ['get', 'class'],
+          'transit', '#6f9fa5',
+          '#8f999a',
+        ],
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          11, 0.5,
+          18, ['match', ['get', 'class'], 'transit', 1.8, 1.4],
+        ],
+        'line-opacity': ['match', ['get', 'class'], 'transit', 0.94, 0.8],
       },
     },
     {
@@ -1237,8 +1271,16 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['==', ['get', 'brunnel'], 'bridge'],
       ],
       paint: {
-        'line-color': '#d0d5d1',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.8, 18, 2.2],
+        'line-color': [
+          'match', ['get', 'class'],
+          'transit', '#8eb6b8',
+          '#d0d5d1',
+        ],
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          9, 0.8,
+          18, ['match', ['get', 'class'], 'transit', 2.6, 2.2],
+        ],
       },
     },
     {
@@ -1428,17 +1470,43 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'global-bus-stops',
+      type: 'circle',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'poi',
+      minzoom: 16,
+      filter: [
+        'all',
+        ['==', ['get', 'class'], 'bus'],
+        ['==', ['get', 'subclass'], 'bus_stop'],
+      ],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 16, 1.6, 18, 2.8],
+        'circle-color': '#91b8b6',
+        'circle-stroke-color': '#fafaf5',
+        'circle-stroke-width': 0.9,
+      },
+    },
+    {
       id: 'global-railway-stations',
       type: 'circle',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'poi',
       minzoom: 11,
-      filter: ['==', ['get', 'class'], 'railway'],
+      filter: [
+        'any',
+        ['==', ['get', 'class'], 'railway'],
+        [
+          'all',
+          ['==', ['get', 'class'], 'bus'],
+          ['==', ['get', 'subclass'], 'bus_station'],
+        ],
+      ],
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 16, 5],
-        'circle-color': '#f8faf7',
-        'circle-stroke-color': '#596b72',
-        'circle-stroke-width': 1.5,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.8, 16, 5.2],
+        'circle-color': '#6f9fa5',
+        'circle-stroke-color': '#fafaf5',
+        'circle-stroke-width': 1.4,
       },
     },
     {
@@ -1449,21 +1517,84 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 11,
       filter: [
         'all',
-        ['==', ['get', 'class'], 'railway'],
+        [
+          'any',
+          ['==', ['get', 'class'], 'railway'],
+          [
+            'all',
+            ['==', ['get', 'class'], 'bus'],
+            ['==', ['get', 'subclass'], 'bus_station'],
+          ],
+        ],
         ['has', 'name'],
       ],
       layout: {
         'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
         'text-field': LOCALIZED_NAME,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 16, 12],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10.5, 16, 13],
         'text-font': ['Noto Sans Regular'],
         'text-offset': [0, 1.15],
-        'text-padding': 12,
+        'text-padding': 14,
       },
       paint: {
-        'text-color': '#536872',
-        'text-halo-color': '#f4f6f2',
-        'text-halo-width': 1.25,
+        'text-color': '#426f76',
+        'text-halo-color': '#fafaf5',
+        'text-halo-width': 1.5,
+      },
+    },
+    {
+      id: 'global-transit-line-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 11,
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+      ],
+      layout: {
+        'symbol-placement': 'line',
+        'text-field': LOCALIZED_NAME,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 9.5, 16, 11.5],
+        'text-font': ['Noto Sans Regular'],
+        'text-max-angle': 30,
+        'text-padding': 28,
+      },
+      paint: {
+        'text-color': [
+          'match', ['get', 'class'],
+          'transit', '#47777d',
+          '#667274',
+        ],
+        'text-halo-color': '#fafaf5',
+        'text-halo-width': 1.45,
+      },
+    },
+    {
+      id: 'global-cycleway-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 13.5,
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['==', ['get', 'class'], 'path'],
+        ['==', ['get', 'subclass'], 'cycleway'],
+      ],
+      layout: {
+        'symbol-placement': 'line',
+        'text-field': LOCALIZED_NAME,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 13.5, 9, 18, 11.5],
+        'text-font': ['Noto Sans Regular'],
+        'text-max-angle': 30,
+        'text-padding': 26,
+      },
+      paint: {
+        'text-color': '#965d53',
+        'text-halo-color': '#faf8f2',
+        'text-halo-width': 1.45,
       },
     },
     {
@@ -1472,7 +1603,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation_name',
       minzoom: 8,
-      filter: ['has', 'name'],
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['in', ['get', 'class'], ['literal', ROAD_CLASSES]],
+      ],
       layout: {
         'symbol-placement': 'line',
         'symbol-sort-key': [
@@ -1515,7 +1650,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'text-color': '#8fc1d7',
-        'text-halo-color': '#4387ad',
+        'text-halo-color': '#5d9dbf',
         'text-halo-width': 1.25,
       },
     },
@@ -1665,7 +1800,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: [
         'all',
         ['has', 'name'],
-        ['!=', ['get', 'class'], 'railway'],
+        ['!', ['in', ['get', 'class'], ['literal', ['railway', 'bus']]]],
         ['<=', ['coalesce', ['get', 'rank'], 20], 10],
       ],
       layout: {

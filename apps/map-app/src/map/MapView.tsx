@@ -1754,6 +1754,8 @@ export function MapView() {
       globalLabelPitchBucket = nextBucket;
 
       const opacityByLayer: Array<[string, [number, number, number]]> = [
+        ['global-transit-line-labels', [1, 0.95, 0.88]],
+        ['global-cycleway-labels', [1, 0.92, 0.84]],
         ['global-road-labels', [0.96, 0.88, 0.78]],
         ['global-water-labels', [1, 0.94, 0.84]],
         ['global-park-labels', [1, 0.9, 0.8]],
