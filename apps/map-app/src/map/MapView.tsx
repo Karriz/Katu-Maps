@@ -1554,7 +1554,7 @@ export function MapView() {
     bridges: false,
     // Prefer the MapLibre metre-scaled line layers for now. The custom
     // polygons remain available through the visibility control.
-    roofs: true,
+    roofs: false,
     trees: true,
     buildings: true,
     terrain: true,
@@ -1754,11 +1754,11 @@ export function MapView() {
       globalLabelPitchBucket = nextBucket;
 
       const opacityByLayer: Array<[string, [number, number, number]]> = [
-        ['global-road-labels', [0.96, 0.82, 0.68]],
-        ['global-water-labels', [1, 0.9, 0.75]],
-        ['global-park-labels', [1, 0.84, 0.68]],
-        ['global-railway-station-labels', [1, 0.82, 0.68]],
-        ['global-poi-labels', [1, 0.72, 0.4]],
+        ['global-road-labels', [0.96, 0.88, 0.78]],
+        ['global-water-labels', [1, 0.94, 0.84]],
+        ['global-park-labels', [1, 0.9, 0.8]],
+        ['global-railway-station-labels', [1, 0.9, 0.82]],
+        ['global-poi-labels', [1, 0.6, 0.24]],
       ];
       opacityByLayer.forEach(([layerId, opacity]) => {
         if (map.getLayer(layerId)) {
@@ -1963,7 +1963,6 @@ export function MapView() {
             {(USE_LOCAL_MAP_DATA
               ? ([
                   ['bridges', 'Bridges'],
-                  ['roofs', 'Roofs'],
                   ['trees', 'Trees'],
                   ['buildings', 'Buildings'],
                   ['terrain', 'Terrain'],
@@ -1974,7 +1973,6 @@ export function MapView() {
                   ['globe', 'Globe'],
                   ['trees', 'Trees'],
                   ['buildings', 'Buildings'],
-                  ['roofs', 'Roofs'],
                   ['terrain', 'Terrain'],
                   ['waterEffect', 'Water texture'],
                   ['shadows', 'Shadows'],

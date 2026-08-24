@@ -71,16 +71,16 @@ const PIER_LINE_FILTER: ExpressionSpecification = [
 
 const ROAD_COLOR: ExpressionSpecification = [
   'case',
-  ['==', ['get', 'surface'], 'unpaved'], '#c6bca9',
+  ['==', ['get', 'surface'], 'unpaved'], '#d0c7b6',
   [
     'match', ['get', 'class'],
-    'motorway', '#aaaead',
-    'trunk', '#adb0af',
-    'primary', '#b0b2af',
-    'secondary', '#b4b5b0',
-    'tertiary', '#b7b7b1',
-    'service', '#bdbdb7',
-    '#b8b8b2',
+    'motorway', '#b5b9b7',
+    'trunk', '#b7bab8',
+    'primary', '#b9bbb8',
+    'secondary', '#bcbdb9',
+    'tertiary', '#bebfba',
+    'service', '#c4c4be',
+    '#c0c1bb',
   ],
 ] as ExpressionSpecification;
 
@@ -629,7 +629,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
-      paint: { 'fill-color': '#397da6' },
+      paint: { 'fill-color': '#4387ad' },
     },
     {
       id: 'global-pedestrian-areas',
@@ -808,7 +808,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        'line-color': '#969e9b',
+        'line-color': '#a4aba8',
         'line-width': roadWidthExpression(61.4981, true),
         'line-opacity': 0.72,
       },
@@ -862,9 +862,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         // A dark deck rim separates the bridge from the road or water below.
-        'line-color': '#58635e',
+        'line-color': '#87918d',
         'line-width': roadWidthExpression(61.4981, true),
-        'line-opacity': 0.98,
+        'line-opacity': 0.84,
       },
     },
     {
@@ -943,9 +943,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: PATH_BRIDGE_FILTER,
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#58635e',
+        'line-color': '#87918d',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.2, 18, 6.2],
-        'line-opacity': 0.94,
+        'line-opacity': 0.84,
       },
     },
     {
@@ -1000,7 +1000,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#b4867e',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.65, 18, 3.2],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 3.8],
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.68],
       },
     },
@@ -1086,9 +1086,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: BRIDGE_AREA_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#8b928e',
+        'line-color': '#a3aaa6',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.75, 18, 1.8],
-        'line-opacity': 0.68,
+        'line-opacity': 0.6,
       },
     },
     {
@@ -1122,7 +1122,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#748086',
+        'line-color': '#909a9d',
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 18, 2.2],
         'line-dasharray': [2, 2],
         'line-opacity': 0.5,
@@ -1141,7 +1141,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#adb3b1',
+        'line-color': '#c0c5c2',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 14, 2.4, 18, 8],
         'line-opacity': 0.72,
       },
@@ -1182,7 +1182,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
       ],
       paint: {
-        'line-color': '#747e80',
+        'line-color': '#8f999a',
         'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 18, 1.4],
         'line-opacity': 0.8,
       },
@@ -1220,9 +1220,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#58635e',
+        'line-color': '#87918d',
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 18, 6],
-        'line-opacity': 0.96,
+        'line-opacity': 0.84,
       },
     },
     {
@@ -1237,7 +1237,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['==', ['get', 'brunnel'], 'bridge'],
       ],
       paint: {
-        'line-color': '#bcc4c0',
+        'line-color': '#d0d5d1',
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.8, 18, 2.2],
       },
     },
@@ -1496,9 +1496,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-padding': 20,
       },
       paint: {
-        'text-color': '#667073',
+        'text-color': '#566164',
         'text-halo-color': '#f8f9f7',
-        'text-halo-width': 1.5,
+        'text-halo-width': 1.65,
       },
     },
     {
@@ -1515,7 +1515,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'text-color': '#8fc1d7',
-        'text-halo-color': '#397da6',
+        'text-halo-color': '#4387ad',
         'text-halo-width': 1.25,
       },
     },
@@ -1534,9 +1534,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-padding': 12,
       },
       paint: {
-        'text-color': '#4f7451',
+        'text-color': '#456947',
         'text-halo-color': '#e7f1df',
-        'text-halo-width': 1.2,
+        'text-halo-width': 1.35,
       },
     },
     {
