@@ -135,7 +135,7 @@ const GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES = 100;
 const GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES = 0.4;
 const GLOBAL_BUILDING_ROOF_RIM_HEIGHT_METRES = 0.08;
 const GLOBAL_BUILDING_ROOF_CAP_HEIGHT_METRES = 0.32;
-const GLOBAL_MAP_SUN_COLOR = '#fff9ed';
+const GLOBAL_MAP_SUN_COLOR = '#fffdf9';
 
 export const GLOBAL_BUILDING_FACADE_LAYER_IDS = [
   'global-building-ground-storeys',
@@ -436,7 +436,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     anchor: 'map',
     position: CARTOON_MAP_LIGHT_POSITION,
     color: GLOBAL_MAP_SUN_COLOR,
-    intensity: 0.24,
+    intensity: 0.16,
   },
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
   sources: {
@@ -510,6 +510,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'commercial', '#c7d0ce',
           'retail', '#d8d1bc',
           'industrial', '#b8c7c7',
+          'military', '#c1c7a5',
           'cemetery', '#c2d9b5',
           'school', '#eadfbd',
           'kindergarten', '#eadfbd',
