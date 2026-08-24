@@ -11,10 +11,16 @@ import { BuildingRoofLayer } from './BuildingRoofLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
 import { InfrastructureModelLayer } from './InfrastructureModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
+import {
+  GLOBAL_MAP_STYLE,
+  OPENFREEMAP_SOURCE_ID,
+  roadWidthExpression,
+} from './GlobalMapStyle';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
 const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
+const USE_LOCAL_MAP_DATA = import.meta.env.VITE_MAP_DATA_PROVIDER === 'local';
 // Keep the metre-scaled transport polygons active at close zooms, but defer
 // expensive building detail until it is large enough to be readable.
 const BUILDING_DETAIL_MIN_ZOOM = 17;
@@ -27,6 +33,7 @@ const WATER_EFFECT_LAYER_IDS = [
   'water-pattern',
   'water-detail-pattern',
   'river-area-pattern',
+  'global-water-pattern',
 ];
 const INFRASTRUCTURE_SHADOW_LAYER_IDS = [
   'power-point-shadows',
@@ -36,6 +43,7 @@ const INFRASTRUCTURE_SHADOW_LAYER_IDS = [
 const BUILDING_SHADOW_LAYER_IDS = [
   'building-shadow-soft',
   'building-shadows',
+  'global-building-shadow',
 ];
 const BRIDGE_DECK_EFFECT_LAYER_IDS = [
   'bridge-road-edge-shade',
@@ -44,6 +52,7 @@ const BRIDGE_DECK_EFFECT_LAYER_IDS = [
 ];
 
 type LayerToggleState = {
+  globe: boolean;
   bridges: boolean;
   roofs: boolean;
   trees: boolean;
@@ -56,6 +65,7 @@ type LayerToggleState = {
 const BUILDING_LAYER_IDS = [
   ...Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, index) => `building-story-${index + 1}`),
   'building-roof-caps',
+  'global-buildings',
 ];
 
 function createWaterPattern(size: number) {
@@ -112,6 +122,25 @@ function waterPatternLayers(): FillLayerSpecification[] {
       ],
     },
   }));
+}
+
+function globalWaterPatternLayer(): FillLayerSpecification {
+  return {
+    id: 'global-water-pattern',
+    type: 'fill',
+    source: OPENFREEMAP_SOURCE_ID,
+    'source-layer': 'water',
+    paint: {
+      'fill-pattern': WATER_PATTERN_ID,
+      'fill-opacity': [
+        'interpolate', ['linear'], ['zoom'],
+        0, 0.08,
+        10, 0.14,
+        14, 0.2,
+        18, 0.28,
+      ],
+    },
+  };
 }
 
 function seededBuildingPalette(colors: string[]): ExpressionSpecification {
@@ -1484,6 +1513,7 @@ export function MapView() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
+    globe: true,
     bridges: false,
     // Prefer the MapLibre metre-scaled line layers for now. The custom
     // polygons remain available through the visibility control.
@@ -1500,10 +1530,10 @@ export function MapView() {
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: TAMPERE_STYLE,
+      style: USE_LOCAL_MAP_DATA ? TAMPERE_STYLE : GLOBAL_MAP_STYLE,
       center: TAMPERE,
-      zoom: 11,
-      pitch: 45,
+      zoom: USE_LOCAL_MAP_DATA ? 11 : 2.2,
+      pitch: USE_LOCAL_MAP_DATA ? 45 : 0,
       bearing: 0,
       // MapLibre line layers are screen-space strokes. At extreme pitch the
       // perspective projection makes foreground roads look disproportionately
@@ -1516,21 +1546,52 @@ export function MapView() {
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    const roofLayer = new BuildingRoofLayer();
-    const bridgeLayer = new BridgeModelLayer();
-    const infrastructureLayer = new InfrastructureModelLayer();
-    const treeLayer = new TreeModelLayer();
+    const roofLayer = USE_LOCAL_MAP_DATA ? new BuildingRoofLayer() : undefined;
+    const bridgeLayer = USE_LOCAL_MAP_DATA ? new BridgeModelLayer() : undefined;
+    const infrastructureLayer = USE_LOCAL_MAP_DATA
+      ? new InfrastructureModelLayer()
+      : undefined;
+    const treeLayer = new TreeModelLayer(USE_LOCAL_MAP_DATA
+      ? {
+          sourceId: 'tampere',
+          waterLayers: ['water', 'water_detail', 'river_areas'],
+          vegetationLayers: ['landuse'],
+          mappedTreeLayer: 'trees',
+        }
+      : {
+          sourceId: OPENFREEMAP_SOURCE_ID,
+          waterLayers: ['water'],
+          vegetationLayers: ['landcover', 'landuse', 'park'],
+        });
     treeLayerRef.current = treeLayer;
-    infrastructureLayerRef.current = infrastructureLayer;
+    infrastructureLayerRef.current = infrastructureLayer ?? null;
     let treeUpdateTimer: number | undefined;
+    let initialLoadComplete = false;
+    let roadWidthLatitude: number | undefined;
+    const updateGlobalRoadWidths = () => {
+      if (USE_LOCAL_MAP_DATA) return;
+      const latitude = map.getCenter().lat;
+      if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
+      roadWidthLatitude = latitude;
+      if (map.getLayer('global-road-casing')) {
+        map.setPaintProperty(
+          'global-road-casing',
+          'line-width',
+          roadWidthExpression(latitude, true),
+        );
+      }
+      if (map.getLayer('global-roads')) {
+        map.setPaintProperty('global-roads', 'line-width', roadWidthExpression(latitude));
+      }
+    };
     const updateTreeModels = () => {
       if (map.isMoving()) {
         scheduleTreeUpdate();
         return;
       }
-      roofLayer.updateRoofs();
-      bridgeLayer.updateBridges();
-      infrastructureLayer.updateInfrastructure();
+      roofLayer?.updateRoofs();
+      bridgeLayer?.updateBridges();
+      infrastructureLayer?.updateInfrastructure();
       treeLayer.updateTrees();
     };
     const scheduleTreeUpdate = () => {
@@ -1543,15 +1604,26 @@ export function MapView() {
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
       // providing broad variation at every zoom without a custom shader.
       map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
-      waterPatternLayers().forEach((layer) => map.addLayer(layer, 'water-structure-areas'));
-      map.addLayer(roofLayer, 'places-labels');
-      map.addLayer(bridgeLayer, 'places-labels');
-      map.addLayer(infrastructureLayer, 'places-labels');
-      map.addLayer(treeLayer, 'places-labels');
+      if (USE_LOCAL_MAP_DATA) {
+        waterPatternLayers().forEach((layer) => map.addLayer(layer, 'water-structure-areas'));
+        if (roofLayer) map.addLayer(roofLayer, 'places-labels');
+        if (bridgeLayer) map.addLayer(bridgeLayer, 'places-labels');
+        if (infrastructureLayer) map.addLayer(infrastructureLayer, 'places-labels');
+        map.addLayer(treeLayer, 'places-labels');
+      } else {
+        map.addLayer(globalWaterPatternLayer(), 'terrain-hillshade');
+        map.addLayer(treeLayer, 'global-place-labels');
+      }
+      updateGlobalRoadWidths();
       scheduleTreeUpdate();
+      initialLoadComplete = true;
       setMapLoaded(true);
     });
-    map.on('moveend', scheduleTreeUpdate);
+    const handleMoveEnd = () => {
+      updateGlobalRoadWidths();
+      scheduleTreeUpdate();
+    };
+    map.on('moveend', handleMoveEnd);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
     // idle handles the final set of newly loaded tiles.
@@ -1564,13 +1636,20 @@ export function MapView() {
         console.warn(message);
         return;
       }
-      setMapError(message);
+      // Individual network-tile failures are recoverable: MapLibre can retain
+      // parent tiles and retry as the camera moves. Only block the initial map
+      // for style/source errors; after load, surface failures in the console.
+      if (initialLoadComplete) {
+        console.warn(message);
+      } else {
+        setMapError(message);
+      }
     });
     mapRef.current = map;
 
     return () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
-      map.off('moveend', scheduleTreeUpdate);
+      map.off('moveend', handleMoveEnd);
       map.off('idle', scheduleTreeUpdate);
       map.remove();
       mapRef.current = null;
@@ -1605,8 +1684,13 @@ export function MapView() {
     infrastructureLayerRef.current?.setShadowsEnabled(layerToggles.shadows);
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees && layerToggles.shadows);
     setVisibility(WATER_EFFECT_LAYER_IDS, layerToggles.waterEffect);
+    if (!USE_LOCAL_MAP_DATA) {
+      map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
+    }
     map.setTerrain(layerToggles.terrain ? { source: 'terrain', exaggeration: 1.0 } : null);
-    map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain ? 'visible' : 'none');
+    if (map.getLayer('terrain-hillshade')) {
+      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain ? 'visible' : 'none');
+    }
     treeRefreshRef.current?.();
   }, [layerToggles, mapLoaded]);
 
@@ -1623,16 +1707,28 @@ export function MapView() {
       {mapLoaded && !mapError && (
         <>
           <div className="layer-toggles" aria-label="Map layer visibility">
-            <span className="layer-toggles-title">3D layers</span>
-            {([
-              ['bridges', 'Bridges'],
-              ['roofs', 'Roofs'],
-              ['trees', 'Trees'],
-              ['buildings', 'Buildings'],
-              ['terrain', 'Terrain'],
-              ['waterEffect', 'Water texture'],
-              ['shadows', 'Shadows'],
-            ] as const).map(([key, label]) => (
+            <span className="layer-toggles-title">
+              {USE_LOCAL_MAP_DATA ? '3D layers' : 'View and layers'}
+            </span>
+            {(USE_LOCAL_MAP_DATA
+              ? ([
+                  ['bridges', 'Bridges'],
+                  ['roofs', 'Roofs'],
+                  ['trees', 'Trees'],
+                  ['buildings', 'Buildings'],
+                  ['terrain', 'Terrain'],
+                  ['waterEffect', 'Water texture'],
+                  ['shadows', 'Shadows'],
+                ] as const)
+              : ([
+                  ['globe', 'Globe'],
+                  ['trees', 'Trees'],
+                  ['buildings', 'Buildings'],
+                  ['terrain', 'Terrain'],
+                  ['waterEffect', 'Water texture'],
+                  ['shadows', 'Shadows'],
+                ] as const)
+            ).map(([key, label]) => (
               <label className="layer-toggle" key={key}>
                 <input
                   type="checkbox"

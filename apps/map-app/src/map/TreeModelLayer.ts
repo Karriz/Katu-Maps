@@ -22,10 +22,24 @@ const MAX_GRID_CELLS_PER_POLYGON = 100_000;
 const SHADOW_DIRECTION_X = 0.8;
 const SHADOW_DIRECTION_Z = 0.6;
 const SHADOW_ANGLE = Math.atan2(SHADOW_DIRECTION_X, SHADOW_DIRECTION_Z);
-const TAMPERE_REFERENCE = new maplibregl.LngLat(23.7609, 61.4981);
-const REFERENCE_MERCATOR_UNITS_PER_METER = maplibregl.MercatorCoordinate
-  .fromLngLat(TAMPERE_REFERENCE)
-  .meterInMercatorCoordinateUnits();
+const EARTH_RADIUS_METERS = 6_378_137;
+const DEGREES_TO_RADIANS = Math.PI / 180;
+const RADIANS_TO_DEGREES = 180 / Math.PI;
+const MIN_LONGITUDE_SCALE = Math.cos(85 * DEGREES_TO_RADIANS);
+
+export type TreeSourceConfig = {
+  sourceId: string;
+  waterLayers: string[];
+  vegetationLayers: string[];
+  mappedTreeLayer?: string;
+};
+
+const LOCAL_TREE_SOURCES: TreeSourceConfig = {
+  sourceId: 'tampere',
+  waterLayers: ['water', 'water_detail', 'river_areas'],
+  vegetationLayers: ['landuse'],
+  mappedTreeLayer: 'trees',
+};
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
 
@@ -138,28 +152,61 @@ function toMetricPoint(coordinates: number[]): MetricPoint | undefined {
   if (coordinates.length < 2) return undefined;
   const [longitude, latitude] = coordinates;
   if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return undefined;
-  const mercator = maplibregl.MercatorCoordinate.fromLngLat([longitude, latitude]);
   return [
-    mercator.x / REFERENCE_MERCATOR_UNITS_PER_METER,
-    mercator.y / REFERENCE_MERCATOR_UNITS_PER_METER,
+    longitude * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS,
+    latitude * DEGREES_TO_RADIANS * EARTH_RADIUS_METERS,
   ];
 }
 
 function fromMetricPoint([x, y]: MetricPoint) {
-  return new maplibregl.MercatorCoordinate(
-    x * REFERENCE_MERCATOR_UNITS_PER_METER,
-    y * REFERENCE_MERCATOR_UNITS_PER_METER,
-  ).toLngLat();
+  return new maplibregl.LngLat(
+    x / EARTH_RADIUS_METERS * RADIANS_TO_DEGREES,
+    y / EARTH_RADIUS_METERS * RADIANS_TO_DEGREES,
+  );
+}
+
+function longitudeScaleAtMetricY(y: number) {
+  return Math.max(MIN_LONGITUDE_SCALE, Math.cos(y / EARTH_RADIUS_METERS));
+}
+
+function horizontalGridSpacing(cellY: number, spacing: number) {
+  const rowCenterY = (cellY + 0.5) * spacing;
+  return spacing / longitudeScaleAtMetricY(rowCenterY);
+}
+
+function metricDistanceSquared(first: MetricPoint, second: MetricPoint) {
+  const averageY = (first[1] + second[1]) * 0.5;
+  const eastWest = (first[0] - second[0]) * longitudeScaleAtMetricY(averageY);
+  const northSouth = first[1] - second[1];
+  return eastWest ** 2 + northSouth ** 2;
+}
+
+function sourceFeatures(
+  map: MaplibreMap,
+  sourceId: string,
+  sourceLayers: string[],
+): SourceFeature[] {
+  return sourceLayers.flatMap((sourceLayer) => {
+    try {
+      return map.querySourceFeatures(sourceId, { sourceLayer });
+    } catch (error) {
+      console.warn(`Could not query optional source layer ${sourceLayer}`, error);
+      return [];
+    }
+  });
 }
 
 function visibleMetricBounds(map: MaplibreMap): MetricBounds {
   const bounds = map.getBounds();
   const southWest = toMetricPoint([bounds.getWest(), bounds.getSouth()])!;
   const northEast = toMetricPoint([bounds.getEast(), bounds.getNorth()])!;
+  const centerY = (southWest[1] + northEast[1]) * 0.5;
+  const horizontalPadding = SAMPLING_BOUNDS_PADDING_METERS
+    / longitudeScaleAtMetricY(centerY);
   return {
-    minX: Math.min(southWest[0], northEast[0]) - SAMPLING_BOUNDS_PADDING_METERS,
+    minX: Math.min(southWest[0], northEast[0]) - horizontalPadding,
     minY: Math.min(southWest[1], northEast[1]) - SAMPLING_BOUNDS_PADDING_METERS,
-    maxX: Math.max(southWest[0], northEast[0]) + SAMPLING_BOUNDS_PADDING_METERS,
+    maxX: Math.max(southWest[0], northEast[0]) + horizontalPadding,
     maxY: Math.max(southWest[1], northEast[1]) + SAMPLING_BOUNDS_PADDING_METERS,
   };
 }
@@ -284,8 +331,10 @@ function mappedTreeIndex(trees: TreeInstance[]) {
   for (const tree of trees) {
     const point = toMetricPoint([tree.longitude, tree.latitude]);
     if (!point) continue;
-    const cellX = Math.floor(point[0] / MAPPED_TREE_CLEARANCE_METERS);
     const cellY = Math.floor(point[1] / MAPPED_TREE_CLEARANCE_METERS);
+    const cellX = Math.floor(
+      point[0] / horizontalGridSpacing(cellY, MAPPED_TREE_CLEARANCE_METERS),
+    );
     const key = `${cellX}:${cellY}`;
     const bucket = index.get(key) ?? [];
     bucket.push(point);
@@ -295,13 +344,20 @@ function mappedTreeIndex(trees: TreeInstance[]) {
 }
 
 function nearMappedTree(point: MetricPoint, index: Map<string, MetricPoint[]>) {
-  const cellX = Math.floor(point[0] / MAPPED_TREE_CLEARANCE_METERS);
   const cellY = Math.floor(point[1] / MAPPED_TREE_CLEARANCE_METERS);
   const clearanceSquared = MAPPED_TREE_CLEARANCE_METERS ** 2;
-  for (let xOffset = -1; xOffset <= 1; xOffset += 1) {
-    for (let yOffset = -1; yOffset <= 1; yOffset += 1) {
-      const bucket = index.get(`${cellX + xOffset}:${cellY + yOffset}`) ?? [];
-      if (bucket.some(([x, y]) => (x - point[0]) ** 2 + (y - point[1]) ** 2 < clearanceSquared)) {
+  for (let yOffset = -1; yOffset <= 1; yOffset += 1) {
+    const nearbyCellY = cellY + yOffset;
+    const nearbySpacing = horizontalGridSpacing(
+      nearbyCellY,
+      MAPPED_TREE_CLEARANCE_METERS,
+    );
+    const nearbyCellX = Math.floor(point[0] / nearbySpacing);
+    for (let xOffset = -1; xOffset <= 1; xOffset += 1) {
+      const bucket = index.get(`${nearbyCellX + xOffset}:${nearbyCellY}`) ?? [];
+      if (bucket.some((mappedPoint) => (
+        metricDistanceSquared(mappedPoint, point) < clearanceSquared
+      ))) {
         return true;
       }
     }
@@ -327,8 +383,11 @@ function collectProceduralTrees(
 
   for (const feature of sourceFeatures) {
     const landClass = String(feature.properties?.class ?? '').toLowerCase();
+    const landSubclass = String(feature.properties?.subclass ?? '').toLowerCase();
     const isForest = landClass === 'forest' || landClass === 'wood';
-    const isPark = landClass === 'park';
+    // OpenFreeMap commonly encodes parks as grass with subclass=park, while
+    // the local source uses class=park. Support both schemas.
+    const isPark = landClass === 'park' || landSubclass === 'park';
     if (!isForest && !isPark) continue;
 
     const spacing = isForest ? FOREST_TREE_SPACING_METERS : PARK_TREE_SPACING_METERS;
@@ -350,27 +409,36 @@ function collectProceduralTrees(
       const maxY = Math.min(sourceBounds.maxY, bounds.maxY);
       if (minX > maxX || minY > maxY) continue;
 
-      const firstCellX = Math.floor(minX / spacing);
-      const lastCellX = Math.floor(maxX / spacing);
       const firstCellY = Math.floor(minY / spacing);
       const lastCellY = Math.floor(maxY / spacing);
-      const gridCellCount = (lastCellX - firstCellX + 1) * (lastCellY - firstCellY + 1);
+      const middleCellY = Math.floor((firstCellY + lastCellY) * 0.5);
+      const estimatedHorizontalSpacing = horizontalGridSpacing(middleCellY, spacing);
+      const estimatedColumnCount = Math.ceil((maxX - minX) / estimatedHorizontalSpacing) + 1;
+      const gridCellCount = estimatedColumnCount * (lastCellY - firstCellY + 1);
       const zoomStep = zoom < 14 ? 2 : 1;
       const safetyStep = Math.ceil(Math.sqrt(gridCellCount / MAX_GRID_CELLS_PER_POLYGON));
       const gridStep = Math.max(zoomStep, safetyStep);
-      const alignedCellX = firstCellX + ((gridStep - (firstCellX % gridStep)) % gridStep);
       const alignedCellY = firstCellY + ((gridStep - (firstCellY % gridStep)) % gridStep);
 
-      for (let cellX = alignedCellX; cellX <= lastCellX; cellX += gridStep) {
-        for (let cellY = alignedCellY; cellY <= lastCellY; cellY += gridStep) {
+      for (let cellY = alignedCellY; cellY <= lastCellY; cellY += gridStep) {
+        // Longitude degrees get physically narrower toward the poles. Each
+        // latitude row therefore has its own world-anchored horizontal cell
+        // width, preserving approximate metre spacing without camera state.
+        const horizontalSpacing = horizontalGridSpacing(cellY, spacing);
+        const firstCellX = Math.floor(minX / horizontalSpacing);
+        const lastCellX = Math.floor(maxX / horizontalSpacing);
+        const alignedCellX = firstCellX
+          + ((gridStep - (firstCellX % gridStep)) % gridStep);
+
+        for (let cellX = alignedCellX; cellX <= lastCellX; cellX += gridStep) {
           const key = `${kind}:${cellX}:${cellY}`;
           if (candidates.has(key)) continue;
 
           const seed = cellSeed(cellX, cellY, kindSalt);
-          const jitterX = (seededUnit(seed, 67) - 0.5) * spacing * 0.7;
+          const jitterX = (seededUnit(seed, 67) - 0.5) * horizontalSpacing * 0.7;
           const jitterY = (seededUnit(seed, 79) - 0.5) * spacing * 0.7;
           const point: MetricPoint = [
-            (cellX + 0.5) * spacing + jitterX,
+            (cellX + 0.5) * horizontalSpacing + jitterX,
             (cellY + 0.5) * spacing + jitterY,
           ];
           if (!pointInPolygon(point, polygon)
@@ -420,6 +488,8 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowMesh?: THREE.InstancedMesh;
   private shadowTexture?: THREE.DataTexture;
   private shadowsEnabled = true;
+
+  constructor(private readonly sources: TreeSourceConfig = LOCAL_TREE_SOURCES) {}
 
   setShadowsEnabled(enabled: boolean) {
     this.shadowsEnabled = enabled;
@@ -511,13 +581,11 @@ export class TreeModelLayer implements CustomLayerInterface {
     const mercatorUnitsPerMeter = originMercator.meterInMercatorCoordinateUnits();
     const budget = treeBudget(map.getZoom());
     const samplingBounds = visibleMetricBounds(map);
-    const waterFeatures = [
-      ...map.querySourceFeatures('tampere', { sourceLayer: 'water' }),
-      ...map.querySourceFeatures('tampere', { sourceLayer: 'water_detail' }),
-      ...map.querySourceFeatures('tampere', { sourceLayer: 'river_areas' }),
-    ];
+    const waterFeatures = sourceFeatures(map, this.sources.sourceId, this.sources.waterLayers);
     const waterPolygons = collectMetricPolygons(waterFeatures);
-    const mappedTreeFeatures = map.querySourceFeatures('tampere', { sourceLayer: 'trees' });
+    const mappedTreeFeatures = this.sources.mappedTreeLayer
+      ? sourceFeatures(map, this.sources.sourceId, [this.sources.mappedTreeLayer])
+      : [];
     const mappedTrees = collectTreeInstances(mappedTreeFeatures)
       .filter((tree) => withinTreeBounds(tree, samplingBounds))
       .filter((tree) => {
@@ -525,7 +593,11 @@ export class TreeModelLayer implements CustomLayerInterface {
         return point !== undefined && !pointInAnyPolygon(point, waterPolygons);
       })
       .slice(0, budget.count);
-    const landuseFeatures = map.querySourceFeatures('tampere', { sourceLayer: 'landuse' });
+    const landuseFeatures = sourceFeatures(
+      map,
+      this.sources.sourceId,
+      this.sources.vegetationLayers,
+    );
     const proceduralTrees = collectProceduralTrees(
       landuseFeatures,
       waterFeatures,

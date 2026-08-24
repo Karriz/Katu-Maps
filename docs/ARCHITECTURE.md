@@ -1,6 +1,6 @@
 # 3D OSM and Public Transit Map — Architecture Plan
 
-Status: planning / no implementation yet
+Status: global browser provider implemented; local Tampere pipeline retained
 
 ## Recommendation
 
@@ -43,12 +43,23 @@ because MapLibre is a map renderer rather than a complete 3D engine.
 
 ## Important design decision
 
-Do not make the first prototype depend on a hosted OSM raster tile endpoint or
-on Overpass at runtime. Use a small, reproducible Tampere extract and generate
-OSM-derived vector tiles locally or in a backend. Runtime data providers should
-be replaceable and configured, not hard-coded.
+Use the keyless OpenFreeMap vector-tile service and Mapterhorn terrain service
+as the default browser provider. This gives the prototype global coverage and a
+static frontend deployment. Keep the reproducible Tampere extract and generated
+OSM/DEM tiles as an opt-in, higher-detail provider so the application is not
+locked to the public services. Runtime data providers remain replaceable and
+configured rather than being coupled to rendering code.
 
-For the initial prototype:
+For the default global prototype:
+
+- OSM vector tiles: OpenFreeMap's unmodified OpenMapTiles schema.
+- Terrain: Mapterhorn Terrarium-encoded terrain RGB tiles, capped at the
+  guaranteed full-planet zoom level and overzoomed by MapLibre at close range.
+- Projection: MapLibre's adaptive globe at world scale, transitioning to
+  Mercator before custom close-zoom Three.js layers become visible.
+- Deployment: static Vite assets; no application-owned tile backend or API keys.
+
+For the optional local high-detail provider:
 
 - OSM: a Tampere `.osm.pbf` extract, processed with osmium/osmium-tool or
   equivalent tooling.
