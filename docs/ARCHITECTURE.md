@@ -53,8 +53,9 @@ configured rather than being coupled to rendering code.
 For the default global prototype:
 
 - OSM vector tiles: OpenFreeMap's unmodified OpenMapTiles schema.
-- Terrain: Mapterhorn Terrarium-encoded terrain RGB tiles, capped at the
-  guaranteed full-planet zoom level and overzoomed by MapLibre at close range.
+- Terrain: Mapterhorn Terrarium-encoded terrain RGB tiles, with a guaranteed
+  full-planet source through z12 and a runtime-probed regional z13+ source that
+  falls back to the global source when detailed tiles are unavailable.
 - Projection: MapLibre's adaptive globe at world scale, transitioning to
   Mercator before custom close-zoom Three.js layers become visible.
 - Deployment: static Vite assets; no application-owned tile backend or API keys.

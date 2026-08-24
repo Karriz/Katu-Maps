@@ -3,6 +3,7 @@ import maplibregl, {
   type ExpressionSpecification,
   type FillLayerSpecification,
   type FillExtrusionLayerSpecification,
+  type HillshadeLayerSpecification,
   type LineLayerSpecification,
   type Map,
   type StyleSpecification,
@@ -12,14 +13,32 @@ import { BridgeModelLayer } from './BridgeModelLayer';
 import { InfrastructureModelLayer } from './InfrastructureModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
 import {
+  CARTOON_MAP_LIGHT_POSITION,
+  CARTOON_SHADOW_COLOR,
+  CARTOON_SUN_AZIMUTH_DEGREES,
+  CARTOON_SUN_COLOR,
+} from './CartoonLighting';
+import {
+  GLOBAL_BUILDING_LAYER_IDS,
+  GLOBAL_BUILDING_ROOF_LAYER_IDS,
   GLOBAL_MAP_STYLE,
+  GLOBAL_ROAD_CASING_LAYER_IDS,
+  GLOBAL_ROAD_LAYER_IDS,
+  MAPTERHORN_DETAIL_SOURCE_ID,
   OPENFREEMAP_SOURCE_ID,
   roadWidthExpression,
 } from './GlobalMapStyle';
+import {
+  DETAIL_TERRAIN_MAX_ZOOM,
+  detailedTerrainSource,
+  detailedTerrainZoom,
+  GLOBAL_TERRAIN_MAX_ZOOM,
+} from './TerrainCoverage';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const TILEJSON_URL = 'http://localhost:3000/tampere';
 const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
+const DETAIL_HILLSHADE_LAYER_ID = 'terrain-hillshade-detail';
 const USE_LOCAL_MAP_DATA = import.meta.env.VITE_MAP_DATA_PROVIDER === 'local';
 // Keep the metre-scaled transport polygons active at close zooms, but defer
 // expensive building detail until it is large enough to be readable.
@@ -44,11 +63,18 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'building-shadow-soft',
   'building-shadows',
   'global-building-shadow',
+  'global-building-contact-shadow',
 ];
 const BRIDGE_DECK_EFFECT_LAYER_IDS = [
   'bridge-road-edge-shade',
   'bridge-path-edge-shade',
   'bridge-railway-edge-shade',
+  'global-pier-area-shadow',
+  'global-pier-line-shadow',
+  'global-bridge-deck-shadow',
+  'global-path-bridge-shadow',
+  'global-road-bridge-shadow',
+  'global-railway-bridge-shadow',
 ];
 
 type LayerToggleState = {
@@ -65,7 +91,7 @@ type LayerToggleState = {
 const BUILDING_LAYER_IDS = [
   ...Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, index) => `building-story-${index + 1}`),
   'building-roof-caps',
-  'global-buildings',
+  ...GLOBAL_BUILDING_LAYER_IDS,
 ];
 
 function createWaterPattern(size: number) {
@@ -514,6 +540,12 @@ function railwayRailLayers(): LineLayerSpecification[] {
 const TAMPERE_STYLE: StyleSpecification = {
   version: 8,
   name: 'Tampere local OSM',
+  light: {
+    anchor: 'map',
+    position: CARTOON_MAP_LIGHT_POSITION,
+    color: CARTOON_SUN_COLOR,
+    intensity: 0.36,
+  },
   glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
   sources: {
     tampere: {
@@ -1305,7 +1337,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       filter: ['>', ['get', 'height'], 0],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#263831',
+        'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
           13, 2.5,
@@ -1336,7 +1368,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       filter: ['>', ['get', 'height'], 0],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#263831',
+        'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
           13, 1.2,
@@ -1382,7 +1414,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       minzoom: 12,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#263831',
+        'line-color': CARTOON_SHADOW_COLOR,
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1, 15, 2.5, 18, 5],
         'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.7, 18, 1.4],
         'line-opacity': 0.14,
@@ -1445,10 +1477,12 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'terrain',
       layout: { visibility: 'none' },
       paint: {
-        'hillshade-exaggeration': 0.35,
-        'hillshade-shadow-color': '#66736c',
-        'hillshade-highlight-color': '#ffffff',
-        'hillshade-accent-color': '#aeb9b0',
+        'hillshade-exaggeration': 0.4,
+        'hillshade-illumination-direction': CARTOON_SUN_AZIMUTH_DEGREES,
+        'hillshade-illumination-anchor': 'map',
+        'hillshade-shadow-color': '#5e6c65',
+        'hillshade-highlight-color': '#fff9ea',
+        'hillshade-accent-color': '#9eaaa2',
       },
     },
     {
@@ -1510,6 +1544,8 @@ export function MapView() {
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const infrastructureLayerRef = useRef<InfrastructureModelLayer | null>(null);
+  const terrainSourceRef = useRef('terrain');
+  const terrainEnabledRef = useRef(true);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
@@ -1566,22 +1602,173 @@ export function MapView() {
     treeLayerRef.current = treeLayer;
     infrastructureLayerRef.current = infrastructureLayer ?? null;
     let treeUpdateTimer: number | undefined;
+    let terrainCoverageTimer: number | undefined;
+    let terrainCoverageGeneration = 0;
+    let detailTerrainMaxZoom: number | undefined;
+    let lowZoomTerrainProbeComplete = false;
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
+    let globalLabelPitchBucket: number | undefined;
+
+    const setTerrainSource = (sourceId: string) => {
+      const sourceChanged = terrainSourceRef.current !== sourceId;
+      terrainSourceRef.current = sourceId;
+      if (sourceChanged) treeLayer.invalidateTerrain();
+      // Reapplying the same terrain specification makes MapLibre recalculate
+      // its terrain-clamped camera and can look like a small backward zoom.
+      if (terrainEnabledRef.current && sourceChanged) {
+        map.setTerrain({ source: sourceId, exaggeration: 1 });
+      }
+      if (map.getLayer('terrain-hillshade')) {
+        map.setLayoutProperty(
+          'terrain-hillshade',
+          'visibility',
+          terrainEnabledRef.current && sourceId === 'terrain' ? 'visible' : 'none',
+        );
+      }
+      if (map.getLayer(DETAIL_HILLSHADE_LAYER_ID)) {
+        map.setLayoutProperty(
+          DETAIL_HILLSHADE_LAYER_ID,
+          'visibility',
+          terrainEnabledRef.current && sourceId === MAPTERHORN_DETAIL_SOURCE_ID
+            ? 'visible'
+            : 'none',
+        );
+      }
+    };
+
+    const installDetailedTerrain = (maxzoom: number) => {
+      if (detailTerrainMaxZoom === maxzoom && map.getSource(MAPTERHORN_DETAIL_SOURCE_ID)) {
+        setTerrainSource(MAPTERHORN_DETAIL_SOURCE_ID);
+        return;
+      }
+
+      // A raster-dem source cannot change maxzoom in place. Move terrain back
+      // to the guaranteed global source before replacing the regional source.
+      if (map.getSource(MAPTERHORN_DETAIL_SOURCE_ID)) {
+        map.setTerrain(terrainEnabledRef.current
+          ? { source: 'terrain', exaggeration: 1 }
+          : null);
+        terrainSourceRef.current = 'terrain';
+        if (map.getLayer(DETAIL_HILLSHADE_LAYER_ID)) {
+          map.removeLayer(DETAIL_HILLSHADE_LAYER_ID);
+        }
+        map.removeSource(MAPTERHORN_DETAIL_SOURCE_ID);
+      }
+
+      map.addSource(MAPTERHORN_DETAIL_SOURCE_ID, detailedTerrainSource(maxzoom));
+      const detailHillshade: HillshadeLayerSpecification = {
+        id: DETAIL_HILLSHADE_LAYER_ID,
+        type: 'hillshade',
+        source: MAPTERHORN_DETAIL_SOURCE_ID,
+        layout: { visibility: 'none' },
+        paint: {
+          'hillshade-exaggeration': 0.34,
+          'hillshade-illumination-direction': CARTOON_SUN_AZIMUTH_DEGREES,
+          'hillshade-illumination-anchor': 'map',
+          'hillshade-shadow-color': '#5e6c65',
+          'hillshade-highlight-color': '#fff9ea',
+          'hillshade-accent-color': '#9eaaa2',
+        },
+      };
+      map.addLayer(detailHillshade, 'global-water-edge-shade');
+      detailTerrainMaxZoom = maxzoom;
+      setTerrainSource(MAPTERHORN_DETAIL_SOURCE_ID);
+    };
+
+    const updateTerrainResolution = async (generation: number) => {
+      if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
+      const isLowZoomProbe = map.getZoom() < GLOBAL_TERRAIN_MAX_ZOOM + 0.25;
+      // Probe the initial center while the globe is still zoomed out, where a
+      // one-time source installation is visually inert. Once installed, the
+      // same source can serve both its global z0-z12 tiles and regional detail.
+      if (isLowZoomProbe && lowZoomTerrainProbeComplete) return;
+
+      const bounds = map.getBounds();
+      const samplePoints = isLowZoomProbe
+        ? [map.getCenter()]
+        : [
+            map.getCenter(),
+            bounds.getNorthWest(),
+            bounds.getNorthEast(),
+            bounds.getSouthWest(),
+            bounds.getSouthEast(),
+          ];
+      try {
+        // Discover the regional ceiling in one pass. Incrementally replacing
+        // the DEM source at every integer camera zoom causes visible jumps.
+        const maxzoom = await detailedTerrainZoom(samplePoints, DETAIL_TERRAIN_MAX_ZOOM);
+        if (generation !== terrainCoverageGeneration) return;
+        if (isLowZoomProbe) lowZoomTerrainProbeComplete = true;
+        if (maxzoom > GLOBAL_TERRAIN_MAX_ZOOM) {
+          installDetailedTerrain(maxzoom);
+        } else {
+          setTerrainSource('terrain');
+        }
+      } catch (error) {
+        if (generation !== terrainCoverageGeneration) return;
+        if (isLowZoomProbe) lowZoomTerrainProbeComplete = true;
+        console.warn('Detailed terrain coverage check failed; using global terrain.', error);
+        setTerrainSource('terrain');
+      }
+    };
+
+    const scheduleTerrainResolutionUpdate = () => {
+      if (USE_LOCAL_MAP_DATA) return;
+      if (terrainCoverageTimer !== undefined) window.clearTimeout(terrainCoverageTimer);
+      terrainCoverageGeneration += 1;
+      const generation = terrainCoverageGeneration;
+      terrainCoverageTimer = window.setTimeout(() => {
+        void updateTerrainResolution(generation);
+      }, 180);
+    };
+
     const updateGlobalRoadWidths = () => {
       if (USE_LOCAL_MAP_DATA) return;
       const latitude = map.getCenter().lat;
       if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
       roadWidthLatitude = latitude;
-      if (map.getLayer('global-road-casing')) {
-        map.setPaintProperty(
-          'global-road-casing',
-          'line-width',
-          roadWidthExpression(latitude, true),
+      GLOBAL_ROAD_CASING_LAYER_IDS.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude, true));
+        }
+      });
+      GLOBAL_ROAD_LAYER_IDS.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude));
+        }
+      });
+    };
+    const updateGlobalLabelDensity = () => {
+      if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
+      const pitch = map.getPitch();
+      const nextBucket = pitch >= 40 ? 2 : pitch >= 25 ? 1 : 0;
+      if (globalLabelPitchBucket === nextBucket) return;
+      globalLabelPitchBucket = nextBucket;
+
+      const opacityByLayer: Array<[string, [number, number, number]]> = [
+        ['global-road-labels', [0.96, 0.82, 0.68]],
+        ['global-water-labels', [1, 0.9, 0.75]],
+        ['global-park-labels', [1, 0.84, 0.68]],
+        ['global-railway-station-labels', [1, 0.82, 0.68]],
+        ['global-poi-labels', [1, 0.72, 0.4]],
+      ];
+      opacityByLayer.forEach(([layerId, opacity]) => {
+        if (map.getLayer(layerId)) {
+          map.setPaintProperty(layerId, 'text-opacity', opacity[nextBucket]);
+        }
+      });
+      if (map.getLayer('global-housenumbers')) {
+        map.setLayoutProperty(
+          'global-housenumbers',
+          'visibility',
+          nextBucket === 2 ? 'none' : 'visible',
         );
-      }
-      if (map.getLayer('global-roads')) {
-        map.setPaintProperty('global-roads', 'line-width', roadWidthExpression(latitude));
+        map.setPaintProperty(
+          'global-housenumbers',
+          'text-opacity',
+          nextBucket === 1 ? 0.35 : 0.82,
+        );
       }
     };
     const updateTreeModels = () => {
@@ -1611,18 +1798,23 @@ export function MapView() {
         if (infrastructureLayer) map.addLayer(infrastructureLayer, 'places-labels');
         map.addLayer(treeLayer, 'places-labels');
       } else {
-        map.addLayer(globalWaterPatternLayer(), 'terrain-hillshade');
-        map.addLayer(treeLayer, 'global-place-labels');
+        map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
+        map.addLayer(treeLayer, 'global-road-labels');
       }
       updateGlobalRoadWidths();
+      updateGlobalLabelDensity();
       scheduleTreeUpdate();
+      scheduleTerrainResolutionUpdate();
       initialLoadComplete = true;
       setMapLoaded(true);
     });
     const handleMoveEnd = () => {
       updateGlobalRoadWidths();
       scheduleTreeUpdate();
+      scheduleTerrainResolutionUpdate();
     };
+    const handleCameraMove = () => updateGlobalLabelDensity();
+    map.on('move', handleCameraMove);
     map.on('moveend', handleMoveEnd);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
@@ -1649,6 +1841,9 @@ export function MapView() {
 
     return () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
+      if (terrainCoverageTimer !== undefined) window.clearTimeout(terrainCoverageTimer);
+      terrainCoverageGeneration += 1;
+      map.off('move', handleCameraMove);
       map.off('moveend', handleMoveEnd);
       map.off('idle', scheduleTreeUpdate);
       map.remove();
@@ -1672,9 +1867,12 @@ export function MapView() {
     };
 
     setVisibility(['bridge-models-3d'], layerToggles.bridges);
-    setVisibility(['building-roofs-3d', 'building-roof-caps'], layerToggles.roofs);
     setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
     setVisibility(BUILDING_LAYER_IDS, layerToggles.buildings);
+    setVisibility(
+      ['building-roofs-3d', 'building-roof-caps', ...GLOBAL_BUILDING_ROOF_LAYER_IDS],
+      layerToggles.buildings && layerToggles.roofs,
+    );
     setVisibility(
       BUILDING_SHADOW_LAYER_IDS,
       layerToggles.buildings && layerToggles.shadows,
@@ -1687,9 +1885,25 @@ export function MapView() {
     if (!USE_LOCAL_MAP_DATA) {
       map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
     }
-    map.setTerrain(layerToggles.terrain ? { source: 'terrain', exaggeration: 1.0 } : null);
+    terrainEnabledRef.current = layerToggles.terrain;
+    map.setTerrain(layerToggles.terrain
+      ? { source: terrainSourceRef.current, exaggeration: 1.0 }
+      : null);
     if (map.getLayer('terrain-hillshade')) {
-      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain ? 'visible' : 'none');
+      map.setLayoutProperty(
+        'terrain-hillshade',
+        'visibility',
+        layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none',
+      );
+    }
+    if (map.getLayer(DETAIL_HILLSHADE_LAYER_ID)) {
+      map.setLayoutProperty(
+        DETAIL_HILLSHADE_LAYER_ID,
+        'visibility',
+        layerToggles.terrain && terrainSourceRef.current === MAPTERHORN_DETAIL_SOURCE_ID
+          ? 'visible'
+          : 'none',
+      );
     }
     treeRefreshRef.current?.();
   }, [layerToggles, mapLoaded]);
@@ -1724,6 +1938,7 @@ export function MapView() {
                   ['globe', 'Globe'],
                   ['trees', 'Trees'],
                   ['buildings', 'Buildings'],
+                  ['roofs', 'Roofs'],
                   ['terrain', 'Terrain'],
                   ['waterEffect', 'Water texture'],
                   ['shadows', 'Shadows'],
