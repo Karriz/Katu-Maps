@@ -841,7 +841,7 @@ const TAMPERE_STYLE: StyleSpecification = {
           16,
           ['match', ['get', 'class'], 'dam', 8, 'breakwater', 6, 'groyne', 5, 4],
         ],
-        'line-opacity': 0.9,
+        'line-opacity': 0.78,
       },
     },
     {
@@ -863,7 +863,7 @@ const TAMPERE_STYLE: StyleSpecification = {
         'line-translate': ['interpolate', ['linear'], ['zoom'], 12, ['literal', [0.6, -0.6]], 18, ['literal', [2, -2]]],
         'line-translate-anchor': 'map',
         'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 1.2],
-        'line-opacity': 0.18,
+        'line-opacity': 0.12,
       },
     },
     {
@@ -1139,9 +1139,9 @@ const TAMPERE_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#969e9b',
+        'line-color': '#74817c',
         'line-width': ROAD_CASING_WIDTH,
-        'line-opacity': 0.72,
+        'line-opacity': 0.86,
       },
     },
     {
@@ -1221,9 +1221,9 @@ const TAMPERE_STYLE: StyleSpecification = {
         'text-padding': 20,
       },
       paint: {
-        'text-color': '#7b8588',
+        'text-color': '#596b68',
         'text-halo-color': '#f8f9f7',
-        'text-halo-width': 1.2,
+        'text-halo-width': 1.7,
       },
     },
     {
@@ -1414,9 +1414,9 @@ const TAMPERE_STYLE: StyleSpecification = {
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.06,
-          15, 0.09,
-          18, 0.13,
+          13, 0.08,
+          15, 0.13,
+          18, 0.19,
         ],
       },
     },
@@ -1443,9 +1443,9 @@ const TAMPERE_STYLE: StyleSpecification = {
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.12,
-          15, 0.17,
-          18, 0.23,
+          13, 0.15,
+          15, 0.23,
+          18, 0.31,
         ],
       },
     },
@@ -1581,7 +1581,13 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'pois',
       minzoom: 14,
-      filter: ['has', 'name'],
+      filter: [
+        'all',
+        ['has', 'name'],
+        // Keep small water features discoverable by their marker, but avoid
+        // presenting them as city-scale destinations.
+        ['!', ['in', ['get', 'class'], ['literal', ['fountain', 'pond', 'swimming_pool']]]],
+      ],
       layout: {
         'text-field': ['get', 'name'],
         'text-size': 11,
@@ -1607,6 +1613,7 @@ export function MapView() {
   const terrainEnabledRef = useRef(true);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
     globe: true,
     bridges: false,
@@ -1808,14 +1815,17 @@ export function MapView() {
     const updateGlobalLabelDensity = () => {
       if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
       const pitch = map.getPitch();
-      const nextBucket = pitch >= 40 ? 2 : pitch >= 25 ? 1 : 0;
+      const zoom = map.getZoom();
+      const pitchBucket = pitch >= 40 ? 2 : pitch >= 25 ? 1 : 0;
+      const zoomBucket = zoom >= 16 ? 2 : zoom >= 14 ? 1 : 0;
+      const nextBucket = Math.max(pitchBucket, zoomBucket);
       if (globalLabelPitchBucket === nextBucket) return;
       globalLabelPitchBucket = nextBucket;
 
       const opacityByLayer: Array<[string, [number, number, number]]> = [
         ['global-transit-line-labels', [1, 1, 1]],
         ['global-cycleway-labels', [1, 1, 1]],
-        ['global-road-labels', [1, 1, 1]],
+        ['global-road-labels', [1, 0.72, 0.36]],
         ['global-water-labels', [1, 1, 1]],
         ['global-park-labels', [1, 1, 1]],
         ['global-railway-station-labels', [1, 1, 1]],
@@ -2056,40 +2066,80 @@ export function MapView() {
       )}
       {mapLoaded && !mapError && (
         <>
-          <div className="layer-toggles" aria-label="Map layer visibility">
-            <span className="layer-toggles-title">
-              {USE_LOCAL_MAP_DATA ? '3D layers' : 'View and layers'}
-            </span>
-            {(USE_LOCAL_MAP_DATA
-              ? ([
-                  ['bridges', 'Bridges'],
-                  ['trees', 'Trees'],
-                  ['buildings', 'Buildings'],
-                  ['terrain', 'Terrain'],
-                  ['waterEffect', 'Water texture'],
-                  ['shadows', 'Shadows'],
-                ] as const)
-              : ([
-                  ['globe', 'Globe'],
-                  ['trees', 'Trees'],
-                  ['buildings', 'Buildings'],
-                  ['terrain', 'Terrain'],
-                  ['waterEffect', 'Water texture'],
-                  ['shadows', 'Shadows'],
-                ] as const)
-            ).map(([key, label]) => (
-              <label className="layer-toggle" key={key}>
-                <input
-                  type="checkbox"
-                  checked={layerToggles[key]}
-                  onChange={(event) => setLayerToggles((current) => ({
-                    ...current,
-                    [key]: event.target.checked,
-                  }))}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
+          <div className={`layer-control${layersOpen ? ' layer-control-open' : ''}`}>
+            <button
+              className="layer-control-trigger"
+              type="button"
+              aria-expanded={layersOpen}
+              aria-controls="map-layer-panel"
+              aria-label="Toggle map layers"
+              onClick={() => setLayersOpen((open) => !open)}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                <path d="m12 3 8 4-8 4-8-4 8-4Z" />
+                <path d="m4 12 8 4 8-4M4 17l8 4 8-4" />
+              </svg>
+              <span>Layers</span>
+              <svg className="layer-control-chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+
+            {layersOpen && (
+              <div className="layer-panel" id="map-layer-panel" aria-label="Map layer visibility">
+                <div className="layer-panel-heading">
+                  <div>
+                    <strong>Map layers</strong>
+                    <span>Customize your view</span>
+                  </div>
+                  <span className="layer-panel-count">
+                    {Object.values(layerToggles).filter(Boolean).length} active
+                  </span>
+                </div>
+
+                <div className="layer-group">
+                  <span className="layer-group-title">View</span>
+                  {(USE_LOCAL_MAP_DATA
+                    ? ([['terrain', 'Terrain'], ['waterEffect', 'Water texture']] as const)
+                    : ([['globe', 'Globe'], ['terrain', 'Terrain'], ['waterEffect', 'Water texture']] as const)
+                  ).map(([key, label]) => (
+                    <label className="layer-toggle" key={key}>
+                      <span>{label}</span>
+                      <input
+                        type="checkbox"
+                        checked={layerToggles[key]}
+                        onChange={(event) => setLayerToggles((current) => ({
+                          ...current,
+                          [key]: event.target.checked,
+                        }))}
+                      />
+                      <span className="layer-switch" aria-hidden="true"><span /></span>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="layer-group">
+                  <span className="layer-group-title">Details</span>
+                  {(USE_LOCAL_MAP_DATA
+                    ? ([['buildings', 'Buildings'], ['roofs', 'Building roofs'], ['trees', 'Trees'], ['bridges', 'Bridges'], ['shadows', 'Shadows']] as const)
+                    : ([['buildings', 'Buildings'], ['trees', 'Trees'], ['shadows', 'Shadows']] as const)
+                  ).map(([key, label]) => (
+                    <label className="layer-toggle" key={key}>
+                      <span>{label}</span>
+                      <input
+                        type="checkbox"
+                        checked={layerToggles[key]}
+                        onChange={(event) => setLayerToggles((current) => ({
+                          ...current,
+                          [key]: event.target.checked,
+                        }))}
+                      />
+                      <span className="layer-switch" aria-hidden="true"><span /></span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

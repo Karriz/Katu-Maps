@@ -21,10 +21,10 @@ const TREE_BUDGETS = [
   { maxZoom: 16, count: 2800 },
   { maxZoom: Number.POSITIVE_INFINITY, count: MAX_TREE_COUNT },
 ] as const;
-const FOREST_TREE_SPACING_METERS = 32;
-const PARK_TREE_SPACING_METERS = 34;
-const SHRUB_SPACING_METERS = 22;
-const ORCHARD_TREE_SPACING_METERS = 24;
+const FOREST_TREE_SPACING_METERS = 36;
+const PARK_TREE_SPACING_METERS = 40;
+const SHRUB_SPACING_METERS = 26;
+const ORCHARD_TREE_SPACING_METERS = 28;
 const MAPPED_TREE_CLEARANCE_METERS = 9;
 const TRUNK_CANOPY_OVERLAP_METERS = 0.25;
 const SAMPLING_BOUNDS_PADDING_METERS = 80;
@@ -423,7 +423,7 @@ function collectProceduralTrees(
     const kindSalt = isShrubland ? 3 : isOrchard ? 4 : isForest ? 1 : 2;
     const featureConiferChance = coniferChance(
       feature.properties?.leaf_type,
-      isForest ? 0.46 : 0.16,
+      isForest ? 0.62 : 0.28,
     );
 
     for (const sourcePolygon of featurePolygons(feature)) {
@@ -463,8 +463,18 @@ function collectProceduralTrees(
           if (candidates.has(key)) continue;
 
           const seed = cellSeed(cellX, cellY, kindSalt);
+          // Keep deterministic open pockets inside large vegetation polygons.
+          // This breaks the regular grid into loose groups without making the
+          // placement change between camera moves.
+          const clusterSeed = cellSeed(
+            Math.floor(cellX / 4),
+            Math.floor(cellY / 4),
+            kindSalt + 19,
+          );
+          const clearingChance = isPark ? 0.16 : isForest ? 0.08 : 0.1;
+          if (seededUnit(clusterSeed, 149) < clearingChance) continue;
           const jitterX = (seededUnit(seed, 67) - 0.5) * horizontalSpacing * 0.7;
-          const jitterY = (seededUnit(seed, 79) - 0.5) * spacing * 0.7;
+          const jitterY = (seededUnit(seed, 79) - 0.5) * spacing * 0.82;
           const point: MetricPoint = [
             (cellX + 0.5) * horizontalSpacing + jitterX,
             (cellY + 0.5) * spacing + jitterY,
@@ -483,11 +493,12 @@ function collectProceduralTrees(
               : isOrchard ? 'broadleaf'
                 : isPark && seededUnit(seed, 113) < 0.12 ? 'shrub'
                   : 'broadleaf';
-          const height = vegetationType === 'shrub'
+          const baseHeight = vegetationType === 'shrub'
             ? 1.4 + seededUnit(seed, 97) * 2.2
             : isOrchard ? 4.5 + seededUnit(seed, 97) * 3
               : (isForest ? 8.5 : 7.5)
                 + seededUnit(seed, 97) * (isForest ? 7.5 : 6);
+          const height = baseHeight + (leafType === 'needleleaved' ? 1.5 : 0);
           candidates.set(key, {
             ...treeInstance(
               location.lng,
@@ -651,7 +662,10 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
     const mercatorUnitsPerMeter = originMercator.meterInMercatorCoordinateUnits();
-    const budget = treeBudget(map.getZoom());
+    const zoom = map.getZoom();
+    const budget = treeBudget(zoom);
+    const shadowMaterial = shadowMesh.material as THREE.MeshBasicMaterial;
+    shadowMaterial.opacity = zoom >= 16 ? 0.28 : zoom >= 14 ? 0.18 : 0.1;
     const samplingBounds = visibleMetricBounds(map);
     const waterFeatures = sourceFeatures(map, this.sources.sourceId, this.sources.waterLayers);
     const waterPolygons = collectMetricPolygons(waterFeatures);
@@ -676,7 +690,7 @@ export class TreeModelLayer implements CustomLayerInterface {
       visibleMetricBounds(map),
       mappedTrees,
       Math.max(0, budget.count - mappedTrees.length),
-      map.getZoom(),
+      zoom,
     ).filter((tree) => withinTreeBounds(tree, samplingBounds));
     const trees = [...mappedTrees, ...proceduralTrees].slice(0, budget.count);
 
@@ -724,7 +738,7 @@ export class TreeModelLayer implements CustomLayerInterface {
       const canopyRadius = tree.height
         // Slightly broader crowns create fuller parks without adding another
         // instance or increasing the existing per-zoom tree budgets.
-        * (isShrub ? 0.58 : isConifer ? 0.21 : 0.27)
+        * (isShrub ? 0.58 : isConifer ? 0.27 : 0.27)
         * tree.widthScale;
 
       // A compact shadow under each crown acts as fake ambient occlusion. It
@@ -733,25 +747,29 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.transformHelper.position.set(east, up + 0.06, north);
       this.transformHelper.rotation.set(0, 0, 0);
       this.transformHelper.scale.set(
-        canopyRadius * 1.12,
+        canopyRadius * 1.1,
         1,
-        canopyRadius * 1.12,
+        canopyRadius * 1.1,
       );
       this.transformHelper.updateMatrix();
       shadowMesh.setMatrixAt(index, this.transformHelper.matrix);
 
       this.transformHelper.position.set(east, up + canopyBase + canopyHeight / 2, north);
       this.transformHelper.rotation.set(0, tree.rotation, 0);
+      const crownWidth = canopyRadius * (0.9 + tree.colorVariation * 0.2);
+      const crownHeight = isConifer
+        ? canopyHeight * (0.92 + tree.colorVariation * 0.16)
+        : canopyHeight * (0.86 + tree.colorVariation * 0.22);
       this.transformHelper.scale.set(
-        canopyRadius,
-        isConifer ? canopyHeight : canopyHeight / 2,
-        canopyRadius,
+        crownWidth,
+        crownHeight,
+        canopyRadius * (1.06 - tree.colorVariation * 0.12),
       );
       this.transformHelper.updateMatrix();
 
       if (isConifer) {
         coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
-        this.color.setHSL(0.31, 0.36, 0.29 + tree.colorVariation * 0.08);
+        this.color.setHSL(0.31, 0.46, 0.23 + tree.colorVariation * 0.08);
         coniferMesh.setColorAt(coniferCount, this.color);
         coniferCount += 1;
       } else if (isShrub) {
@@ -761,7 +779,7 @@ export class TreeModelLayer implements CustomLayerInterface {
         shrubCount += 1;
       } else {
         broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
-        this.color.setHSL(0.29 + tree.colorVariation * 0.035, 0.4, 0.36 + tree.colorVariation * 0.1);
+        this.color.setHSL(0.29 + tree.colorVariation * 0.04, 0.44, 0.33 + tree.colorVariation * 0.1);
         broadleafMesh.setColorAt(broadleafCount, this.color);
         broadleafCount += 1;
       }

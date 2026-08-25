@@ -92,13 +92,13 @@ const ROAD_COLOR: ExpressionSpecification = [
   ['==', ['get', 'surface'], 'unpaved'], '#d0c7b6',
   [
     'match', ['get', 'class'],
-    'motorway', '#c0c4c1',
-    'trunk', '#c2c5c2',
-    'primary', '#c4c6c2',
-    'secondary', '#c6c8c4',
-    'tertiary', '#c8c9c4',
-    'service', '#cdcdc7',
-    '#c9cac5',
+    'motorway', '#b5bfbb',
+    'trunk', '#b9c2be',
+    'primary', '#bdc5c0',
+    'secondary', '#c1c8c3',
+    'tertiary', '#c5cbc5',
+    'service', '#c9cec8',
+    '#c6cbc6',
   ],
 ] as ExpressionSpecification;
 
@@ -107,13 +107,13 @@ const BRIDGE_ROAD_COLOR: ExpressionSpecification = [
   ['==', ['get', 'surface'], 'unpaved'], '#bbb2a4',
   [
     'match', ['get', 'class'],
-    'motorway', '#c4cac6',
-    'trunk', '#c2c8c4',
-    'primary', '#c0c6c2',
-    'secondary', '#bdc4c0',
-    'tertiary', '#bbc2be',
-    'service', '#c1c6c2',
-    '#bec4c0',
+    'motorway', '#b7c1bd',
+    'trunk', '#b8c2be',
+    'primary', '#b9c3be',
+    'secondary', '#bbc5c0',
+    'tertiary', '#bec7c1',
+    'service', '#c2c9c3',
+    '#bbc4bf',
   ],
 ] as ExpressionSpecification;
 
@@ -509,6 +509,58 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: { 'background-color': '#b8d3aa' },
     },
     {
+      id: 'global-major-highway-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 2,
+      maxzoom: 13,
+      filter: [
+        'all',
+        ROAD_FILTER,
+        ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
+        ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
+      ],
+      layout: { 'line-cap': 'round', 'line-join': 'round', 'line-sort-key': ROAD_SORT_KEY },
+      paint: {
+        'line-color': '#5e7b76',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          2, ['match', ['get', 'class'], 'motorway', 2.8, 2.35],
+          5, ['match', ['get', 'class'], 'motorway', 4.1, 3.55],
+          9, ['match', ['get', 'class'], 'motorway', 5.3, 4.7],
+          13, ['match', ['get', 'class'], 'motorway', 6.1, 5.5],
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          2, 0.48,
+          5, 0.56,
+          9, 0.62,
+          13, 0.68,
+        ],
+      },
+    },
+    {
+      id: 'global-regional-road-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 2,
+      maxzoom: 7,
+      filter: REGIONAL_ROAD_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#72857d',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          2, ['match', ['get', 'class'], 'motorway', 2.2, 'trunk', 1.95, 'primary', 1.7, 1.45],
+          5, ['match', ['get', 'class'], 'motorway', 3.1, 'trunk', 2.8, 'primary', 2.45, 2],
+          7, ['match', ['get', 'class'], 'motorway', 4.1, 'trunk', 3.6, 'primary', 3.1, 2.55],
+        ],
+        'line-opacity': 0.68,
+      },
+    },
+    {
       id: 'global-regional-roads',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -520,23 +572,23 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'motorway', '#919f9a',
-          'trunk', '#9aa7a2',
-          'primary', '#a4afa9',
-          'secondary', '#adb6af',
-          '#b5bcb5',
+          'motorway', '#b7c6bf',
+          'trunk', '#bbc9c2',
+          'primary', '#c0cdc5',
+          'secondary', '#c5d1c9',
+          '#cad5cd',
         ],
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          2, ['match', ['get', 'class'], 'motorway', 1, 'trunk', 0.85, 'primary', 0.7, 0.55],
-          5, ['match', ['get', 'class'], 'motorway', 1.7, 'trunk', 1.45, 'primary', 1.15, 0.9],
-          7, ['match', ['get', 'class'], 'motorway', 2.2, 'trunk', 1.9, 'primary', 1.55, 1.2],
+          2, ['match', ['get', 'class'], 'motorway', 1.4, 'trunk', 1.15, 'primary', 1, 0.76],
+          5, ['match', ['get', 'class'], 'motorway', 2.3, 'trunk', 2, 'primary', 1.6, 1.2],
+          7, ['match', ['get', 'class'], 'motorway', 3.1, 'trunk', 2.6, 'primary', 2.1, 1.6],
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          2, 0.8,
-          5, 0.86,
-          7, 0.9,
+          2, 0.9,
+          5, 0.94,
+          7, 0.96,
         ],
       },
     },
@@ -567,6 +619,32 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           ],
         ],
         'fill-opacity': 0.96,
+      },
+    },
+    {
+      id: 'global-protected-areas',
+      type: 'fill',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'park',
+      filter: [
+        'in',
+        ['get', 'class'],
+        ['literal', [
+          'UNESCO Global Geopark',
+          'nature_reserve', 'national_park', 'protected_area', 'landscape_protection',
+        ]],
+      ],
+      paint: {
+        // A regional nature-park boundary should provide context without
+        // repainting residential or industrial landuse green.
+        'fill-color': '#b8cfaa',
+        'fill-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          2, 0.14,
+          5, 0.1,
+          9, 0.06,
+          13, 0.035,
+        ],
       },
     },
     {
@@ -612,7 +690,17 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
-      paint: { 'fill-color': '#c1d1a6', 'fill-opacity': 0.96 },
+      filter: [
+        '!',
+        ['in', ['get', 'class'], ['literal', [
+          'UNESCO Global Geopark',
+          'nature_reserve', 'national_park', 'protected_area', 'landscape_protection',
+        ]]],
+      ],
+      paint: {
+        'fill-color': '#c1d1a6',
+        'fill-opacity': 0.96,
+      },
     },
     {
       id: 'global-aeroway-areas',
@@ -749,9 +837,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: PIER_AREA_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#59635d',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.8, 18, 2],
-        'line-opacity': 0.95,
+        'line-color': '#87938d',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 18, 1.6],
+        'line-opacity': 0.72,
       },
     },
     {
@@ -780,9 +868,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: PIER_LINE_FILTER,
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#59635d',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2.2, 18, 7],
-        'line-opacity': 0.95,
+        'line-color': '#87938d',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1.8, 18, 5.8],
+        'line-opacity': 0.74,
       },
     },
     {
@@ -868,6 +956,27 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'global-overview-road-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 3,
+      maxzoom: 13,
+      filter: OVERVIEW_ROAD_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#71837b',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          3, ['match', ['get', 'class'], 'motorway', 2.55, 'trunk', 2.2, 'primary', 1.9, 1.55],
+          6, ['match', ['get', 'class'], 'motorway', 3.6, 'trunk', 3.2, 'primary', 2.7, 2.25],
+          10, ['match', ['get', 'class'], 'motorway', 4.9, 'trunk', 4.45, 'primary', 3.95, 3.35],
+          13, ['match', ['get', 'class'], 'motorway', 5.7, 'trunk', 5.25, 'primary', 4.65, 4.1],
+        ],
+        'line-opacity': 0.68,
+      },
+    },
+    {
       id: 'global-overview-roads',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -879,25 +988,25 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'motorway', '#8f9d98',
-          'trunk', '#98a59f',
-          'primary', '#a2aca6',
-          'secondary', '#aab3ad',
-          '#b2bab3',
+          'motorway', '#b6c5be',
+          'trunk', '#bac8c1',
+          'primary', '#bfccc4',
+          'secondary', '#c4d0c8',
+          '#c9d4cc',
         ],
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          3, ['match', ['get', 'class'], 'motorway', 1.3, 'trunk', 1.05, 'primary', 0.85, 0.65],
-          6, ['match', ['get', 'class'], 'motorway', 2, 'trunk', 1.65, 'primary', 1.3, 1.05],
-          10, ['match', ['get', 'class'], 'motorway', 3, 'trunk', 2.6, 'primary', 2.3, 2],
-          13, ['match', ['get', 'class'], 'motorway', 3.7, 'trunk', 3.3, 'primary', 2.9, 2.5],
+          3, ['match', ['get', 'class'], 'motorway', 1.65, 'trunk', 1.3, 'primary', 1.05, 0.8],
+          6, ['match', ['get', 'class'], 'motorway', 2.5, 'trunk', 2.1, 'primary', 1.65, 1.3],
+          10, ['match', ['get', 'class'], 'motorway', 3.7, 'trunk', 3.3, 'primary', 2.85, 2.45],
+          13, ['match', ['get', 'class'], 'motorway', 4.5, 'trunk', 4.1, 'primary', 3.6, 3.1],
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          3, 0.82,
-          6, 0.9,
-          10, 0.94,
-          13, 0.96,
+          3, 0.9,
+          6, 0.95,
+          10, 0.98,
+          13, 1,
         ],
       },
     },
@@ -913,9 +1022,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        'line-color': '#b0b6b2',
+        'line-color': '#788780',
         'line-width': roadWidthExpression(61.4981, true),
-        'line-opacity': 0.6,
+        'line-opacity': 0.78,
       },
     },
     {
@@ -932,6 +1041,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': ROAD_COLOR,
         'line-width': roadWidthExpression(61.4981),
+        'line-opacity': 0.98,
       },
     },
     {
@@ -1477,8 +1587,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.5, 0.1,
-          18, 0.19,
+          13.5, 0.14,
+          18, 0.29,
         ],
       },
     },
@@ -1512,8 +1622,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.45, 0.18,
-          18, 0.34,
+          13.45, 0.25,
+          18, 0.48,
         ],
       },
     },
@@ -1761,7 +1871,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-padding': 20,
       },
       paint: {
-        'text-color': '#566164',
+        'text-color': '#4f625e',
         'text-halo-color': '#f8f9f7',
         'text-halo-width': 1.65,
       },
@@ -1772,7 +1882,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water_name',
       minzoom: 8,
-      filter: ['has', 'name'],
+      filter: [
+        'all',
+        ['has', 'name'],
+        // OpenFreeMap can expose named fountains in water_name. Only label
+        // water bodies that belong to the actual lake/sea hierarchy here.
+        ['in', ['get', 'class'], ['literal', ['lake', 'bay', 'strait', 'sea', 'ocean']]],
+      ],
       layout: {
         'text-field': LOCALIZED_NAME,
         'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 15],
@@ -1931,6 +2047,10 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'all',
         ['has', 'name'],
         ['!', ['in', ['get', 'class'], ['literal', ['railway', 'bus']]]],
+        // Named fountains and other tiny water features are useful as map
+        // geometry, but should not compete with city-scale landmarks.
+        ['!', ['in', ['get', 'class'], ['literal', ['fountain', 'pond', 'swimming_pool']]]],
+        ['!', ['in', ['get', 'subclass'], ['literal', ['fountain', 'pond', 'swimming_pool']]]],
         ['<=', ['coalesce', ['get', 'rank'], 20], 10],
       ],
       layout: {
