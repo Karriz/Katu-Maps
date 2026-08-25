@@ -1,26 +1,27 @@
 # MVP Checklist
 
-The MVP is complete when a user can open the application in a desktop browser,
-view a limited Tampere area, tilt and rotate the camera, see OSM-derived
-buildings extruded over DEM terrain, and toggle an experimental vegetation layer.
+The MVP is complete when a user can open the hosted browser application, explore
+the global 3D map, search for places, inspect public-transit departures, and
+toggle the major visual layers without running local map infrastructure.
 
-## First vertical slice
+## Product
 
-- [ ] TypeScript web project builds on desktop browsers.
-- [ ] MapLibre GL JS is integrated.
-- [ ] Tampere map opens with pan, zoom, pitch, and rotation.
-- [ ] Tiny checked-in fixtures render without a network connection.
-- [ ] Tampere OSM vector tiles render roads, water, land use, railways, paths,
-      labels, and buildings.
-- [ ] Building heights are normalized from OSM tags with a visible fallback.
-- [ ] NLS DEM sample renders in terrain mode.
-- [ ] Buildings and linear features align with terrain.
-- [ ] Forest/park vegetation renders using instanced LOD geometry.
-- [ ] Profiling results are recorded for representative desktop browsers.
+- [x] TypeScript and Vite production build.
+- [x] Hosted OpenFreeMap vector map with adaptive globe projection.
+- [x] Mapterhorn terrain with regional detail probing and fallback.
+- [x] Extruded buildings and deterministic instanced vegetation.
+- [x] Place search and OpenStreetMap place details.
+- [x] Transit stops, departure times, selected routes, and vehicle progress.
+- [x] Pedestrian, bicycle, and car routing.
+- [x] Layer controls for terrain, buildings, trees, transit, and scene details.
+- [ ] Responsive floating departures and place-information cards.
+- [ ] Final brightened map palette and camera-composition pass.
 
-## Definition of done for each slice
+## Definition of done
 
-Every slice must have a reproducible input manifest, visible attribution, a
-small automated fixture/test where practical, and a short note about memory and
-frame-time impact. New data providers should be added through an adapter rather
-than directly from QML.
+- A clean checkout builds without a local tile server, data download, or API key.
+- Map attribution remains visible.
+- Desktop and mobile controls are keyboard accessible and do not obscure core
+  map interactions.
+- Network-service errors produce recoverable user-facing states.
+- Visual changes are compared at consistent coordinates, zoom, pitch, and bearing.

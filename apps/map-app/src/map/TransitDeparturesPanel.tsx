@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react';
-import { BusFront, Clock3, RefreshCw, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
-import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
-import { Separator } from '../components/ui/separator';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { BusFront, ChevronRight, RefreshCw, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { MAP_COLORS } from './MapPalette';
 import type { TransitStopSelection } from './TransitStopsLayer';
 
 const STOP_TIMES_API_URL = 'https://api.transitous.org/api/v6/stoptimes';
@@ -50,7 +48,7 @@ function modeIcon(mode: string) {
 
 function modeColor(mode: string) {
   if (mode === 'TRAM') return '#8554c7';
-  if (mode === 'BUS') return '#3979c9';
+  if (mode === 'BUS') return MAP_COLORS.transitBlue;
   if (mode === 'SUBWAY') return '#e87524';
   return '#4f9b70';
 }
@@ -65,6 +63,16 @@ function formatDeparture(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
+}
+
+function formatRelativeDeparture(value: string, now: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const minutes = Math.ceil((date.getTime() - now) / 60_000);
+  if (minutes <= 0) return 'Due';
+  if (minutes === 1) return 'in 1 min';
+  if (minutes < 60) return `in ${minutes} min`;
+  return '';
 }
 
 export function TransitDeparturesPanel({
@@ -82,10 +90,18 @@ export function TransitDeparturesPanel({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedDepartureKey, setSelectedDepartureKey] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     setSelectedDepartureKey(null);
+    setShowAll(false);
   }, [stop]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -135,41 +151,45 @@ export function TransitDeparturesPanel({
 
   const refresh = () => {
     setRefreshing(true);
+    setNow(Date.now());
     setRefreshKey((value) => value + 1);
     window.setTimeout(() => setRefreshing(false), 350);
   };
 
+  const StopIcon = modeIcon(stop.mode);
+  const visibleDepartures = showAll ? departures : departures.slice(0, 6);
+
   return (
-    <aside className="transit-departures-panel absolute inset-y-0 right-0 z-20 flex w-[min(380px,calc(100%_-_16px))] flex-col border-l border-slate-200/80 bg-white/95 shadow-2xl backdrop-blur-xl">
-      <div className="flex items-start justify-between gap-3 px-5 pb-4 pt-5">
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: modeColor(stop.mode) }} />
-            Departures
-          </div>
-          <h2 className="truncate text-lg font-semibold text-slate-800">{stop.name}</h2>
-          <p className="mt-1 text-xs text-slate-500">Live timetable from Transitous</p>
+    <aside className="transit-departures-panel" aria-label={`Departures from ${stop.name}`}>
+      <header className="transit-panel-header">
+        <div className="transit-panel-eyebrow" style={{ color: modeColor(stop.mode) }}>
+          <StopIcon aria-hidden="true" />
+          <span>Departures</span>
         </div>
-        <Button className="shrink-0 px-2 text-slate-500" aria-label="Close departures" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-      <Separator />
+        <button className="transit-panel-close" type="button" aria-label="Close departures" onClick={onClose}>
+          <X aria-hidden="true" />
+        </button>
+        <h2>{stop.name}</h2>
+        <div className="transit-panel-status">
+          <span aria-hidden="true" />
+          Live timetable from Transitous
+        </div>
+        <button className="transit-panel-refresh" type="button" aria-label="Refresh departures" onClick={refresh}>
+          <RefreshCw className={refreshing ? 'spinning' : ''} aria-hidden="true" />
+        </button>
+      </header>
 
-      <div className="flex items-center justify-between px-5 py-3">
-        <span className="text-xs text-slate-500">Next services</span>
-        <Button variant="outline" className="h-8 gap-1.5 px-2.5 text-xs" onClick={refresh}>
-          <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-          Refresh
-        </Button>
+      <div className="transit-panel-section-heading">
+        <strong>Next departures</strong>
+        <span>{departures.length ? `${departures.length} services` : 'Live services'}</span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
-        {loading && <div className="rounded-lg bg-slate-50 px-4 py-5 text-sm text-slate-500">Loading departures…</div>}
-        {!loading && error && <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-5 text-sm text-red-700">{error}</div>}
-        {!loading && !error && departures.length === 0 && <div className="rounded-lg bg-slate-50 px-4 py-5 text-sm text-slate-500">No upcoming departures found.</div>}
-        <div className="space-y-2">
-          {!loading && !error && departures.map((departure, index) => {
+      <div className="transit-departure-scroll">
+        {loading && <div className="transit-panel-state">Loading departures…</div>}
+        {!loading && error && <div className="transit-panel-state error">{error}</div>}
+        {!loading && !error && departures.length === 0 && <div className="transit-panel-state">No upcoming departures found.</div>}
+        <div className="transit-departure-list">
+          {!loading && !error && visibleDepartures.map((departure, index) => {
             const mode = text(departure.mode, stop.mode);
             const Icon = modeIcon(mode);
             const routeId = text(departure.routeId);
@@ -182,42 +202,51 @@ export function TransitDeparturesPanel({
             const routeTextColor = normalizedColor(departure.routeTextColor, '#ffffff');
             const departureKey = `${departure.departure}-${tripId || routeId}-${index}`;
             const selected = selectedDepartureKey === departureKey;
+            const cancelled = departure.cancelled === true;
+            const relativeDeparture = formatRelativeDeparture(departure.departure, now);
+            const cardStyle = {
+              '--route-color': routeColor,
+              '--route-soft': `${routeColor}12`,
+            } as CSSProperties;
             return (
               <button
                 aria-pressed={selected}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-xl border bg-white px-3 py-3 text-left shadow-sm transition hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-default',
-                  selected ? 'border-transparent' : 'border-slate-100',
-                )}
-                disabled={!tripId}
+                className={cn('transit-departure-card', selected && 'selected', cancelled && 'cancelled')}
+                disabled={!tripId || cancelled}
                 key={departureKey}
                 onClick={() => {
                   if (!tripId) return;
                   setSelectedDepartureKey(departureKey);
                   onDepartureSelect({ tripId, mode, color: routeColor });
                 }}
-                style={selected ? { backgroundColor: `${routeColor}0d`, boxShadow: `inset 0 0 0 2px ${routeColor}` } : undefined}
+                style={cardStyle}
                 type="button"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: routeColor, color: routeTextColor }}>
-                  <Icon className="h-4.5 w-4.5" />
+                <div className="transit-route-badge" style={{ backgroundColor: routeColor, color: routeTextColor }}>
+                  {route}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <Badge className="border-transparent px-1.5" style={{ backgroundColor: routeColor, color: routeTextColor }}>{route}</Badge>
-                    <span className="truncate text-xs text-slate-500">{modeLabel(mode)}</span>
-                  </div>
-                  <p className="mt-1 truncate text-sm text-slate-700">{destination || 'Service'}</p>
+                <div className="transit-departure-copy">
+                  <strong>{destination || 'Service'}</strong>
+                  <span><Icon aria-hidden="true" />{cancelled ? 'Cancelled' : modeLabel(mode)}</span>
                 </div>
-                <div className="flex shrink-0 items-center gap-1 text-sm font-semibold tabular-nums text-slate-800">
-                  <Clock3 className="h-3.5 w-3.5 text-slate-400" />
-                  {formatDeparture(departure.departure)}
+                <div className="transit-departure-time">
+                  {relativeDeparture && <span>{cancelled ? 'Cancelled' : relativeDeparture}</span>}
+                  <strong>{formatDeparture(departure.departure)}</strong>
                 </div>
               </button>
             );
           })}
         </div>
       </div>
+
+      {departures.length > 6 && (
+        <footer className="transit-panel-footer">
+          <button type="button" onClick={() => setShowAll((current) => !current)}>
+            {showAll ? 'Show fewer departures' : 'View all departures'}
+            <ChevronRight className={showAll ? 'expanded' : ''} aria-hidden="true" />
+          </button>
+        </footer>
+      )}
     </aside>
   );
 }

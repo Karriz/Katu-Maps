@@ -2,15 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl, {
   type ExpressionSpecification,
   type FillLayerSpecification,
-  type FillExtrusionLayerSpecification,
   type FilterSpecification,
   type HillshadeLayerSpecification,
-  type LineLayerSpecification,
   type Map,
   type MapGeoJSONFeature,
   type MapSourceDataEvent,
   type Point,
-  type StyleSpecification,
 } from 'maplibre-gl';
 import {
   Beer,
@@ -31,24 +28,21 @@ import {
 } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { BuildingRoofLayer } from './BuildingRoofLayer';
-import { BridgeModelLayer } from './BridgeModelLayer';
-import { InfrastructureModelLayer } from './InfrastructureModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
+import { MapControls, type MapLayerState } from './MapControls';
+import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitDeparturesPanel } from './TransitDeparturesPanel';
 import type { TransitStopSelection } from './TransitStopsLayer';
 import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
 import {
-  CARTOON_MAP_LIGHT_POSITION,
-  CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
-  CARTOON_SUN_COLOR,
 } from './CartoonLighting';
 import {
-  GLOBAL_BUILDING_LAYER_IDS,
-  GLOBAL_BUILDING_ROOF_LAYER_IDS,
+  GLOBAL_BUILDING_2D_LAYER_ID,
+  GLOBAL_BUILDING_3D_LAYER_IDS,
+  GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
   GLOBAL_MAP_STYLE,
   GLOBAL_ROAD_CASING_LAYER_IDS,
   GLOBAL_ROAD_LAYER_IDS,
@@ -64,57 +58,18 @@ import {
 } from './TerrainCoverage';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
-const TILEJSON_URL = 'http://localhost:3000/tampere';
-const TERRAIN_TILEJSON_URL = 'http://localhost:3000/terrain';
 const DETAIL_HILLSHADE_LAYER_ID = 'terrain-hillshade-detail';
-const USE_LOCAL_MAP_DATA = import.meta.env.VITE_MAP_DATA_PROVIDER === 'local';
-// Keep the metre-scaled transport polygons active at close zooms, but defer
-// expensive building detail until it is large enough to be readable.
-const BUILDING_DETAIL_MIN_ZOOM = 17;
-const MAX_BUILDING_STORY_SLICES = 25;
-const GROUND_COLOR = '#f0f1ed';
-const WATER_COLOR = '#a9c8d3';
-const WATER_EDGE_COLOR = '#8eafb9';
 const WATER_PATTERN_ID = 'water-surface-pattern';
-const WATER_EFFECT_LAYER_IDS = [
-  'water-pattern',
-  'water-detail-pattern',
-  'river-area-pattern',
-  'global-water-pattern',
-];
-const INFRASTRUCTURE_SHADOW_LAYER_IDS = [
-  'power-point-shadows',
-  'landmark-area-shadows',
-  'landmark-point-shadows',
-];
+const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
 const BUILDING_SHADOW_LAYER_IDS = [
-  'building-shadow-soft',
-  'building-shadows',
   'global-building-shadow',
   'global-building-contact-shadow',
 ];
-const BRIDGE_DECK_EFFECT_LAYER_IDS = [
-  'bridge-road-edge-shade',
-  'bridge-path-edge-shade',
-  'bridge-railway-edge-shade',
-  'global-pier-area-shadow',
-  'global-pier-line-shadow',
-  'global-bridge-deck-shadow',
-  'global-path-bridge-shadow',
-  'global-road-bridge-shadow',
-  'global-railway-bridge-shadow',
-];
 
-type LayerToggleState = {
-  globe: boolean;
-  bridges: boolean;
-  roofs: boolean;
-  trees: boolean;
-  buildings: boolean;
-  terrain: boolean;
-  waterEffect: boolean;
-  shadows: boolean;
-};
+function closeRangeCameraOffset(): [number, number] {
+  if (window.innerWidth > 760) return [0, 0];
+  return [0, -Math.min(140, window.innerHeight * 0.18)];
+}
 
 type PhotonFeature = {
   geometry: {
@@ -222,11 +177,7 @@ function locationSelectionFromFeature(feature: MapGeoJSONFeature): LocationSelec
   };
 }
 
-const BUILDING_LAYER_IDS = [
-  ...Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, index) => `building-story-${index + 1}`),
-  'building-roof-caps',
-  ...GLOBAL_BUILDING_LAYER_IDS,
-];
+const BUILDING_3D_LAYER_IDS = [...GLOBAL_BUILDING_3D_LAYER_IDS];
 
 const LOCATION_POI_CLASSES = [
   'restaurant', 'cafe', 'bar', 'fast_food', 'pub', 'food_court',
@@ -315,9 +266,9 @@ function locationPoiFilter() {
 }
 
 function locationPoiLayers() {
-  const source = USE_LOCAL_MAP_DATA ? 'tampere' : OPENFREEMAP_SOURCE_ID;
-  const sourceLayer = USE_LOCAL_MAP_DATA ? 'pois' : 'poi';
-  const before = USE_LOCAL_MAP_DATA ? 'places-labels' : 'global-road-labels';
+  const source = OPENFREEMAP_SOURCE_ID;
+  const sourceLayer = 'poi';
+  const before = 'global-road-labels';
   const iconPairs = [
     ...LOCATION_ICON_DEFINITIONS.flatMap(([id]) => [id, `location-${id}-icon`]),
     ...LOCATION_ICON_ALIASES.flatMap(([alias, id]) => [alias, `location-${id === 'ticket' ? 'theatre' : id}-icon`]),
@@ -365,9 +316,9 @@ function locationPoiLayers() {
           'symbol-sort-key': locationPriorityExpression(),
         },
         paint: {
-          'text-color': '#59645c',
-          'text-halo-color': '#f4f6f2',
-          'text-halo-width': 1.2,
+          'text-color': MAP_COLORS.label,
+          'text-halo-color': MAP_COLORS.labelHalo,
+          'text-halo-width': 1.3,
         },
       },
     ],
@@ -376,8 +327,8 @@ function locationPoiLayers() {
 
 function createWaterPattern(size: number) {
   const data = new Uint8ClampedArray(size * size * 4);
-  const shadow = [116, 157, 168];
-  const highlight = [174, 207, 211];
+  const shadow = [92, 171, 194];
+  const highlight = [157, 216, 227];
   const tau = Math.PI * 2;
 
   for (let y = 0; y < size; y += 1) {
@@ -460,34 +411,6 @@ function pastelBuildingColor(value: unknown, blend = 0.28) {
   return `#${channel(r)}${channel(g)}${channel(b)}`;
 }
 
-function waterPatternLayers(): FillLayerSpecification[] {
-  const layerDefinitions = [
-    ['water-pattern', 'water'],
-    ['water-detail-pattern', 'water_detail'],
-    ['river-area-pattern', 'river_areas'],
-  ] as const;
-
-  return layerDefinitions.map(([id, sourceLayer]) => ({
-    id,
-    type: 'fill',
-    source: 'tampere',
-    'source-layer': sourceLayer,
-    layout: { visibility: 'none' },
-    paint: {
-      'fill-pattern': WATER_PATTERN_ID,
-      'fill-opacity': [
-        'interpolate', ['linear'], ['zoom'],
-        0, 0.05,
-        10, 0.08,
-        12, 0.1,
-        14, 0.12,
-        15.5, 0.14,
-        18, 0.17,
-      ],
-    },
-  }));
-}
-
 function globalWaterPatternLayer(): FillLayerSpecification {
   return {
     id: 'global-water-pattern',
@@ -498,7 +421,9 @@ function globalWaterPatternLayer(): FillLayerSpecification {
       'fill-pattern': WATER_PATTERN_ID,
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
-        0, 0.05,
+        0, 0,
+        5, 0,
+        7, 0.025,
         10, 0.08,
         14, 0.12,
         18, 0.17,
@@ -507,1399 +432,20 @@ function globalWaterPatternLayer(): FillLayerSpecification {
   };
 }
 
-function seededBuildingPalette(colors: string[]): ExpressionSpecification {
-  return [
-    'match',
-    ['%', ['id'], colors.length],
-    ...colors.flatMap((color, index) => [index, color]),
-    colors[0],
-  ] as ExpressionSpecification;
-}
-
-const DEFAULT_BUILDING_PALETTE = seededBuildingPalette([
-  '#f1eee7', '#e8eef1', '#eee8f1', '#e8f0e7',
-]);
-const DEFAULT_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#dfe5df', '#dce4e8', '#e4dce6', '#e4e1d8',
-]);
-const RESIDENTIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#eadbd4', '#e1e7ed', '#eee5cb', '#dce9e2',
-]);
-const RESIDENTIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#dfd1cb', '#d5dfe8', '#e2d7bb', '#cbded5',
-]);
-const APARTMENT_BUILDING_PALETTE = seededBuildingPalette([
-  '#e6ebf2', '#eee7e2', '#e2edf0', '#f0e8d8',
-]);
-const APARTMENT_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#d5dde7', '#dfd6d1', '#d1e0e3', '#e1d8c8',
-]);
-const COMMERCIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#e1edf2', '#e7e9e5', '#e7efe5', '#e3e8f1',
-]);
-const COMMERCIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#d1e0e6', '#d8dbd6', '#d7e2d4', '#d4dbe6',
-]);
-const INDUSTRIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#e4e9e6', '#e0e7e3', '#ecebdd', '#dfe7eb',
-]);
-const INDUSTRIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#d3dbd7', '#d0dad5', '#dddccd', '#d0dbe0',
-]);
-const CIVIC_BUILDING_PALETTE = seededBuildingPalette([
-  '#f1e7d3', '#e8e7ed', '#f0e4d6', '#dcece8',
-]);
-const CIVIC_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#e1d5c1', '#d8d7df', '#e1d3c6', '#cce0db',
-]);
-
-const DEFAULT_ROOF_PALETTE = seededBuildingPalette([
-  '#c2c6c6', '#b5bcc0', '#cccbc7', '#aeb7ba',
-]);
-
-const BUILDING_PALETTE: ExpressionSpecification = [
-  'match',
-  ['get', 'building'],
-  'apartments', APARTMENT_BUILDING_PALETTE,
-  'residential', RESIDENTIAL_BUILDING_PALETTE,
-  'house', RESIDENTIAL_BUILDING_PALETTE,
-  'detached', RESIDENTIAL_BUILDING_PALETTE,
-  'terrace', RESIDENTIAL_BUILDING_PALETTE,
-  'commercial', COMMERCIAL_BUILDING_PALETTE,
-  'office', COMMERCIAL_BUILDING_PALETTE,
-  'retail', COMMERCIAL_BUILDING_PALETTE,
-  'industrial', INDUSTRIAL_BUILDING_PALETTE,
-  'warehouse', INDUSTRIAL_BUILDING_PALETTE,
-  'school', CIVIC_BUILDING_PALETTE,
-  'public', CIVIC_BUILDING_PALETTE,
-  'civic', CIVIC_BUILDING_PALETTE,
-  'church', CIVIC_BUILDING_PALETTE,
-  DEFAULT_BUILDING_PALETTE,
-];
-
-const BUILDING_PALETTE_ALT: ExpressionSpecification = [
-  'match',
-  ['get', 'building'],
-  'apartments', APARTMENT_BUILDING_PALETTE_ALT,
-  'residential', RESIDENTIAL_BUILDING_PALETTE_ALT,
-  'house', RESIDENTIAL_BUILDING_PALETTE_ALT,
-  'detached', RESIDENTIAL_BUILDING_PALETTE_ALT,
-  'terrace', RESIDENTIAL_BUILDING_PALETTE_ALT,
-  'commercial', COMMERCIAL_BUILDING_PALETTE_ALT,
-  'office', COMMERCIAL_BUILDING_PALETTE_ALT,
-  'retail', COMMERCIAL_BUILDING_PALETTE_ALT,
-  'industrial', INDUSTRIAL_BUILDING_PALETTE_ALT,
-  'warehouse', INDUSTRIAL_BUILDING_PALETTE_ALT,
-  'school', CIVIC_BUILDING_PALETTE_ALT,
-  'public', CIVIC_BUILDING_PALETTE_ALT,
-  'civic', CIVIC_BUILDING_PALETTE_ALT,
-  'church', CIVIC_BUILDING_PALETTE_ALT,
-  DEFAULT_BUILDING_PALETTE_ALT,
-];
-
-const BUILDING_COLOR: ExpressionSpecification = [
-  'coalesce',
-  ['get', 'building_color'],
-  BUILDING_PALETTE,
-];
-
-const BUILDING_COLOR_ALT: ExpressionSpecification = [
-  'coalesce',
-  ['get', 'building_color_alt'],
-  BUILDING_PALETTE_ALT,
-];
-
-const ROOF_COLOR: ExpressionSpecification = [
-  'coalesce',
-  ['get', 'roof_color'],
-  DEFAULT_ROOF_PALETTE,
-];
-
-const HAS_PITCHED_ROOF: ExpressionSpecification = [
-  'all',
-  ['has', 'roof_height'],
-  ['has', 'roof_shape'],
-  ['>', ['get', 'roof_height'], 0],
-  ['match', ['get', 'roof_shape'], 'flat', false, 'none', false, true],
-];
-
-const BUILDING_BODY_HEIGHT: ExpressionSpecification = [
-  'case',
-  HAS_PITCHED_ROOF,
-  ['-', ['get', 'height'], ['get', 'roof_height']],
-  ['get', 'height'],
-];
-
-const BUILDING_STORY_HEIGHT: ExpressionSpecification = [
-  '/',
-  ['-', BUILDING_BODY_HEIGHT, ['get', 'base']],
-  ['max', 1, ['get', 'levels']],
-];
-
-const ROAD_CLASS_WIDTH_METERS: ExpressionSpecification = [
-  'match', ['get', 'class'],
-  'motorway', 12,
-  'trunk', 10,
-  'primary', 8,
-  'secondary', 7,
-  'tertiary', 6,
-  'residential', 5.5,
-  'service', 4,
-  5,
-];
-
-const ROAD_WIDTH_METERS: ExpressionSpecification = [
-  'min', 30,
-  [
-    'case',
-    ['has', 'width'], ['get', 'width'],
-    ['has', 'lanes'], ['max', ROAD_CLASS_WIDTH_METERS, ['*', ['get', 'lanes'], 3.25]],
-    ROAD_CLASS_WIDTH_METERS,
-  ],
-];
-
-const ROAD_WIDTH: ExpressionSpecification = [
-  // Pixels per metre at Tampere's latitude for MapLibre's 512px world scale.
-  'interpolate', ['exponential', 2], ['zoom'],
-  10, ['max', 0.5, ['*', ROAD_WIDTH_METERS, 0.027416]],
-  12, ['max', 0.6, ['*', ROAD_WIDTH_METERS, 0.109664]],
-  14, ['*', ROAD_WIDTH_METERS, 0.438658],
-  16, ['*', ROAD_WIDTH_METERS, 1.754634],
-  // Slightly damp the final close-zoom interval. Full physical pixel scaling
-  // looks too heavy in pitched line-rendering mode.
-  18, ['*', ROAD_WIDTH_METERS, 5.5],
-  20, ['*', ROAD_WIDTH_METERS, 28.074158],
-];
-
-const ROAD_CASING_METERS: ExpressionSpecification = ['+', ROAD_WIDTH_METERS, 1.7];
-const ROAD_CASING_WIDTH: ExpressionSpecification = [
-  'interpolate', ['exponential', 2], ['zoom'],
-  10, ['max', 0.8, ['*', ROAD_CASING_METERS, 0.027416]],
-  12, ['max', 1, ['*', ROAD_CASING_METERS, 0.109664]],
-  14, ['*', ROAD_CASING_METERS, 0.438658],
-  16, ['*', ROAD_CASING_METERS, 1.754634],
-  18, ['*', ROAD_CASING_METERS, 5.5],
-  20, ['*', ROAD_CASING_METERS, 28.074158],
-];
-
-const PATH_WIDTH_METERS: ExpressionSpecification = [
-  'min', 12,
-  [
-    'case',
-    ['has', 'width'], ['get', 'width'],
-    [
-      'match', ['get', 'class'],
-      'track', 3.5,
-      'cycleway', 3,
-      'pedestrian', 4,
-      'footway', 2,
-      'path', 1.5,
-      2,
-    ],
-  ],
-];
-
-const PATH_WIDTH: ExpressionSpecification = [
-  'interpolate', ['exponential', 2], ['zoom'],
-  12, ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]],
-  14, ['*', PATH_WIDTH_METERS, 0.438658],
-  16, ['*', PATH_WIDTH_METERS, 1.754634],
-  18, ['*', PATH_WIDTH_METERS, 5.5],
-  20, ['*', PATH_WIDTH_METERS, 28.074158],
-];
-
-// Minor paths are useful close up but add a lot of visual noise at the first
-// zoom level where the paths layer is available.
-const PATH_DETAIL_OPACITY: ExpressionSpecification = [
-  'interpolate', ['linear'], ['zoom'],
-  12, 0,
-  13, 0.74,
-];
-const PATH_DETAIL_CASING_OPACITY: ExpressionSpecification = [
-  'interpolate', ['linear'], ['zoom'],
-  12, 0,
-  13, 0.52,
-];
-const PATH_EARTHWORK_OPACITY: ExpressionSpecification = [
-  'interpolate', ['linear'], ['zoom'],
-  12, 0,
-  13, 0.24,
-];
-
-const PATH_CASING_WIDTH: ExpressionSpecification = [
-  'interpolate', ['exponential', 2], ['zoom'],
-  12, ['+', ['max', 0.25, ['*', PATH_WIDTH_METERS, 0.109664]], 1.6],
-  14, ['+', ['*', PATH_WIDTH_METERS, 0.438658], 1.6],
-  16, ['+', ['*', PATH_WIDTH_METERS, 1.754634], 1.6],
-  18, ['+', ['*', PATH_WIDTH_METERS, 5.5], 1.6],
-  20, ['+', ['*', PATH_WIDTH_METERS, 28.074158], 1.6],
-];
-
-const RAILWAY_WIDTH_METERS: ExpressionSpecification = [
-  'case', ['has', 'width'], ['get', 'width'], 3.2,
-];
-
-const RAILWAY_BED_WIDTH: ExpressionSpecification = [
-  'interpolate', ['exponential', 2], ['zoom'],
-  10, ['min', 34, ['max', 0.5, ['*', RAILWAY_WIDTH_METERS, 0.027416]]],
-  12, ['min', 34, ['max', 0.6, ['*', RAILWAY_WIDTH_METERS, 0.109664]]],
-  14, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 0.438658]],
-  16, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 1.754634]],
-  18, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 7.01854]],
-  20, ['min', 34, ['*', RAILWAY_WIDTH_METERS, 28.074158]],
-];
-
-const RAILWAY_SLEEPER_WIDTH: ExpressionSpecification = [
-  'interpolate', ['exponential', 2], ['zoom'],
-  12, 0.7,
-  14, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 0.438658]],
-  16, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 1.754634]],
-  18, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 7.01854]],
-  20, ['min', 40, ['*', ['+', RAILWAY_WIDTH_METERS, 0.5], 28.074158]],
-];
-
-const AEROWAY_RUNWAY_WIDTH_METERS: ExpressionSpecification = [
-  'min', 90,
-  ['max', 18, ['case', ['has', 'width'], ['get', 'width'], 45]],
-];
-const AEROWAY_TAXIWAY_WIDTH_METERS: ExpressionSpecification = [
-  'min', 30,
-  ['max', 6, ['case', ['has', 'width'], ['get', 'width'], 15]],
-];
-
-const SURFACE_ROAD_COLOR: ExpressionSpecification = [
-  'match',
-  ['get', 'surface'],
-  'gravel', '#c9c1b1',
-  'unpaved', '#d0c5b0',
-  'dirt', '#c8b494',
-  'ground', '#c8b494',
-  'sand', '#ddcc9f',
-  'cobblestone', '#a4a5a1',
-  'paving_stones', '#aaaba6',
-  'concrete', '#bcbdb8',
-  '#b2b3ae',
-];
-
-const SURFACE_PATH_COLOR: ExpressionSpecification = [
-  'case',
-  ['==', ['get', 'class'], 'cycleway'], '#b9867e',
-  [
-    'match',
-    ['get', 'surface'],
-    'asphalt', '#a8aeaa',
-    'gravel', '#c5b38f',
-    'dirt', '#b79d77',
-    'ground', '#b79d77',
-    'sand', '#d5bd84',
-    '#b9ac90',
-  ],
-];
-
-function buildingStoryLayers(): FillExtrusionLayerSpecification[] {
-  return Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, storyIndex) => {
-    const isTopSlice = storyIndex === MAX_BUILDING_STORY_SLICES - 1;
-    const storyBase: ExpressionSpecification = storyIndex === 0
-      ? ['get', 'base']
-      : [
-          '+',
-          ['get', 'base'],
-          ['*', BUILDING_STORY_HEIGHT, storyIndex],
-        ];
-    const nextStoryBoundary: ExpressionSpecification = [
-      '+',
-      ['get', 'base'],
-      ['*', BUILDING_STORY_HEIGHT, storyIndex + 1],
-    ];
-    const storyTop: ExpressionSpecification = isTopSlice
-      ? BUILDING_BODY_HEIGHT
-      : ['min', BUILDING_BODY_HEIGHT, nextStoryBoundary];
-    const storyColor: ExpressionSpecification = storyIndex === 0
-      ? [
-          'step',
-          ['zoom'],
-          BUILDING_COLOR,
-          BUILDING_DETAIL_MIN_ZOOM,
-          BUILDING_COLOR_ALT,
-        ]
-      : BUILDING_COLOR;
-
-    return {
-      id: `building-story-${storyIndex + 1}`,
-      type: 'fill-extrusion',
-      source: 'tampere',
-      'source-layer': 'buildings',
-      minzoom: 12,
-      filter: ['>', ['get', 'levels'], storyIndex],
-      paint: {
-        // Keep the sliced geometry stable, but reserve the subtle alternate
-        // material for the street-level storey instead of striping every floor.
-        'fill-extrusion-color': storyColor,
-        'fill-extrusion-height': storyTop,
-        'fill-extrusion-base': storyBase,
-        'fill-extrusion-opacity': 0.96,
-      },
-    };
-  });
-}
-
-function railwayRailLayers(): LineLayerSpecification[] {
-  return ([-1, 1] as const).map((side) => ({
-    id: `railway-rail-${side < 0 ? 'left' : 'right'}`,
-    type: 'line',
-    source: 'tampere',
-    'source-layer': 'railways',
-    minzoom: 12,
-    filter: [
-      'all',
-      ['!', ['has', 'tunnel']],
-      ['!', ['has', 'covered']],
-    ],
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': '#8d9898',
-      'line-width': [
-        'interpolate', ['exponential', 2], ['zoom'],
-        12, 0.6,
-        16, 0.65,
-        18, 0.8,
-        20, 1.4,
-      ],
-      'line-offset': [
-        'interpolate', ['exponential', 2], ['zoom'],
-        12, side * 0.15,
-        14, side * 0.334,
-        16, side * 1.337,
-        18, side * 5.348,
-        20, side * 12,
-      ],
-      'line-opacity': 0.66,
-    },
-  }));
-}
-
-const TAMPERE_STYLE: StyleSpecification = {
-  version: 8,
-  name: 'Tampere local OSM',
-  light: {
-    anchor: 'map',
-    position: CARTOON_MAP_LIGHT_POSITION,
-    color: CARTOON_SUN_COLOR,
-    intensity: 0.44,
-  },
-  glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
-  sources: {
-    tampere: {
-      type: 'vector',
-      url: TILEJSON_URL,
-      attribution: '© OpenStreetMap contributors',
-    },
-    terrain: {
-      type: 'raster-dem',
-      // Use the explicit template so Martin's raster TileJSON defaults cannot
-      // override the DEM tile dimensions.
-      tiles: [`${TERRAIN_TILEJSON_URL}/{z}/{x}/{y}`],
-      // rio-rgbify's 512px PNGs are retina-style tiles for a 256px map tile.
-      tileSize: 256,
-      bounds: [23.55, 61.40, 24.05, 61.60],
-      minzoom: 8,
-      maxzoom: 14,
-      encoding: 'mapbox',
-      attribution: 'National Land Survey of Finland, Elevation model 10 m',
-    },
-    'tunnel-entrances': {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    },
-  },
-  layers: [
-    // This is also the fallback behind places without a landuse polygon, so
-    // keep it as a neutral ground color. A blue background would appear as
-    // accidental water/sky patches inside the map at high pitch.
-    { id: 'background', type: 'background', paint: { 'background-color': GROUND_COLOR } },
-    {
-      id: 'landuse',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'landuse',
-      paint: {
-        'fill-color': [
-          'match',
-          ['get', 'class'],
-          'forest', '#b8caaa',
-          'wood', '#c2d1b4',
-          'scrub', '#d0d9b8',
-          'shrubbery', '#c9d7bc',
-          'heath', '#e9e5b6',
-          'wetland', [
-            'match',
-            ['get', 'wetland'],
-            'marsh', '#c7dda8',
-            'swamp', '#a8c797',
-            'bog', '#c3d5b1',
-            'fen', '#c9dbb3',
-            '#c6d9ad',
-          ],
-          'bare_rock', '#e5e3dd',
-          'cliff', '#d9d7d0',
-          'scree', '#ddd8cc',
-          'shingle', '#e5d8bc',
-          'mud', '#d5c9aa',
-          'sand', '#f4dfa7',
-          'beach', '#f7e6b6',
-          'farmland', '#edf0bb',
-          'farmyard', '#eee7d6',
-          'orchard', '#dfedc4',
-          'vineyard', '#e2ebc0',
-          'plant_nursery', '#c9dda9',
-          'greenhouse_horticulture', '#dbe4c5',
-          'park', '#c6d6aa',
-          'recreation_ground', '#c8d9ae',
-          'meadow', '#d1dfb9',
-          'grass', '#cbdcb0',
-          'grassland', '#c9d9aa',
-          'garden', '#cbdcb4',
-          'dog_park', '#9fd275',
-          'village_green', '#9dd273',
-          'allotments', '#c9dc9f',
-          'cemetery', '#c2d9b5',
-          'churchyard', '#c7d9ba',
-          'religious', '#d8dfca',
-          'nature_reserve', '#9fc98d',
-          'pitch', '#add38e',
-          'marketplace', '#ddd3c5',
-          'square', '#ddd6ca',
-          'playground', '#d6df9d',
-          'sports_centre', '#d7e9c1',
-          'stadium', '#d2e7b9',
-          'track', '#dceac0',
-          'golf_course', '#d0e8bd',
-          'fitness_station', '#c0dba8',
-          'ice_rink', '#d3e8e8',
-          'swimming_pool', '#b8d8df',
-          'swimming_area', '#c1dfe4',
-          'marina', '#cbdfe2',
-          'residential', '#cbd4c6',
-          'commercial', '#c7d0ce',
-          'retail', '#d8d1bc',
-          'industrial', '#b8c7c7',
-          'railway', '#e1e1dc',
-          'construction', '#ded8c8',
-          'quarry', '#d9d6cf',
-          'greenfield', '#d8e5c1',
-          'landfill', '#d6d2c9',
-          'military', '#d3d3c9',
-          'logging', '#d6cfad',
-          'education', '#e4e8d7',
-          'healthcare', '#d9ddd6',
-          'civic', '#e5e1d8',
-          'civil', '#e5e1d8',
-          'civic_admin', '#e5e1d8',
-          'garages', '#dedfdb',
-          'storage', '#dce1e1',
-          'brownfield', '#eee2d0',
-          GROUND_COLOR,
-        ],
-        'fill-opacity': 0.82,
-      },
-    },
-    {
-      id: 'waterways',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'waterways',
-      paint: {
-        'line-color': '#8fb7c1',
-        'line-opacity': 0.72,
-        'line-width': [
-          'match',
-          ['get', 'class'],
-          'river', 2.4,
-          'canal', 2,
-          'stream', 1.3,
-          'ditch', 0.9,
-          'drain', 0.9,
-          1,
-        ],
-      },
-    },
-    {
-      id: 'water-edge-shade',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'water',
-      paint: {
-        'fill-color': WATER_EDGE_COLOR,
-        'fill-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
-        'fill-translate-anchor': 'map',
-        'fill-opacity': 0.1,
-      },
-    },
-    {
-      id: 'water',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'water',
-      paint: { 'fill-color': WATER_COLOR },
-    },
-    {
-      id: 'water-detail-edge-shade',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'water_detail',
-      paint: {
-        'fill-color': WATER_EDGE_COLOR,
-        'fill-translate': ['interpolate', ['linear'], ['zoom'], 13, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
-        'fill-translate-anchor': 'map',
-        'fill-opacity': 0.08,
-      },
-    },
-    {
-      id: 'water-detail',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'water_detail',
-      paint: { 'fill-color': WATER_COLOR },
-    },
-    {
-      id: 'river-area-cover',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'river_areas',
-      paint: {
-        'fill-color': WATER_COLOR,
-        'fill-opacity': 1,
-        'fill-outline-color': WATER_EDGE_COLOR,
-      },
-    },
-    {
-      id: 'water-structure-areas',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'water_structures',
-      minzoom: 12,
-      paint: {
-        'fill-color': [
-          'match',
-          ['get', 'class'],
-          'dock', '#b9dfef',
-          'pier', '#d9d0bd',
-          'quay', '#d2ccc1',
-          'breakwater', '#c8c5bd',
-          'groyne', '#c8c5bd',
-          '#d2cec5',
-        ],
-        'fill-opacity': 0.88,
-      },
-    },
-    {
-      id: 'water-structures',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'water_structures',
-      minzoom: 12,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': [
-          'match',
-          ['get', 'class'],
-          'dam', '#96938a',
-          'dock', '#94c3d7',
-          'pier', '#aaa088',
-          'quay', '#a59f94',
-          'breakwater', '#9e9e97',
-          'groyne', '#9e9e97',
-          '#aaa69c',
-        ],
-        'line-width': [
-          'interpolate',
-          ['linear'],
-          ['zoom'],
-          12,
-          ['match', ['get', 'class'], 'dam', 2.4, 'breakwater', 2, 'groyne', 1.8, 1.2],
-          16,
-          ['match', ['get', 'class'], 'dam', 8, 'breakwater', 6, 'groyne', 5, 4],
-        ],
-        'line-opacity': 0.78,
-      },
-    },
-    {
-      id: 'water-structure-edge-shade',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'water_structures',
-      minzoom: 12,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#6f685e',
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          12,
-          ['match', ['get', 'class'], 'dam', 2.4, 'breakwater', 2, 'groyne', 1.8, 1.2],
-          16,
-          ['match', ['get', 'class'], 'dam', 8, 'breakwater', 6, 'groyne', 5, 4],
-        ],
-        'line-translate': ['interpolate', ['linear'], ['zoom'], 12, ['literal', [0.6, -0.6]], 18, ['literal', [2, -2]]],
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 1.2],
-        'line-opacity': 0.12,
-      },
-    },
-    {
-      id: 'bridge-area-deck-shades',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'bridges',
-      minzoom: 10,
-      paint: {
-        'fill-color': '#59615d',
-        'fill-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.8, -0.8]], 18, ['literal', [3, -3]]],
-        'fill-translate-anchor': 'map',
-        'fill-opacity': 0.16,
-      },
-    },
-    {
-      id: 'bridges',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'bridges',
-      // OSM bridge footprints are part of the basemap and remain visible even
-      // when the optional elevated 3D bridge models are disabled.
-      paint: {
-        'fill-color': '#d7d1c5',
-        'fill-outline-color': '#c7c1b7',
-        'fill-opacity': 0.98,
-      },
-    },
-    {
-      id: 'parking',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'parking',
-      paint: {
-        'fill-color': '#dad8d2',
-        'fill-opacity': 0.86,
-      },
-    },
-    {
-      id: 'pedestrian-areas',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'pedestrian_areas',
-      paint: {
-        'fill-color': '#ddd6ca',
-        'fill-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          14, 0.88,
-          14.75, [
-            'case',
-            ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-            0.88,
-            0,
-          ],
-        ],
-      },
-    },
-    {
-      id: 'aeroway-areas',
-      type: 'fill',
-      source: 'tampere',
-      'source-layer': 'aeroway',
-      paint: {
-        'fill-color': [
-          'match', ['get', 'class'],
-          'aerodrome', '#d2d8d0',
-          'terminal', '#d7d1c5',
-          'apron', '#d5d8d8',
-          'helipad', '#d0d3d2',
-          '#eaedef',
-        ],
-        'fill-opacity': 0.92,
-      },
-    },
-    {
-      id: 'aeroway-taxiways',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'aeroway',
-      filter: ['==', ['get', 'class'], 'taxiway'],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': [
-          'match', ['get', 'surface'],
-          'asphalt', '#aeb5b3',
-          'concrete', '#c0c3c0',
-          '#b8bebd',
-        ],
-        'line-width': [
-          'interpolate', ['exponential', 2], ['zoom'],
-          10, ['*', AEROWAY_TAXIWAY_WIDTH_METERS, 0.027416],
-          14, ['*', AEROWAY_TAXIWAY_WIDTH_METERS, 0.438658],
-          18, ['*', AEROWAY_TAXIWAY_WIDTH_METERS, 5.5],
-        ],
-        'line-opacity': 0.94,
-      },
-    },
-    {
-      id: 'aeroway-taxiway-markings',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'aeroway',
-      minzoom: 14,
-      filter: ['==', ['get', 'class'], 'taxiway'],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#d9b94c',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.6, 17, 1.3],
-        'line-opacity': 0.82,
-      },
-    },
-    {
-      id: 'aeroway-runways',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'aeroway',
-      filter: ['==', ['get', 'class'], 'runway'],
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: {
-        'line-color': [
-          'match', ['get', 'surface'],
-          'asphalt', '#969d9b',
-          'concrete', '#aaa9a2',
-          '#a6aaa5',
-        ],
-        'line-width': [
-          'interpolate', ['exponential', 2], ['zoom'],
-          10, ['*', AEROWAY_RUNWAY_WIDTH_METERS, 0.027416],
-          14, ['*', AEROWAY_RUNWAY_WIDTH_METERS, 0.438658],
-          18, ['*', AEROWAY_RUNWAY_WIDTH_METERS, 5.5],
-        ],
-        'line-opacity': 0.96,
-      },
-    },
-    {
-      id: 'aeroway-runway-markings',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'aeroway',
-      minzoom: 12,
-      filter: ['==', ['get', 'class'], 'runway'],
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: {
-        'line-color': '#f7f5ea',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 1.5, 18, 2.2],
-        'line-dasharray': [4, 5],
-        'line-opacity': 0.86,
-      },
-    },
-    {
-      id: 'power-lines',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'power',
-      paint: { 'line-color': '#c8cac7', 'line-width': 1.2, 'line-opacity': 0.5 },
-    },
-    {
-      id: 'power-points',
-      type: 'circle',
-      source: 'tampere',
-      'source-layer': 'power',
-      paint: { 'circle-color': '#c8cac7', 'circle-radius': 1.5, 'circle-opacity': 0.5 },
-    },
-    {
-      id: 'retaining-walls',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'barriers',
-      filter: ['==', ['get', 'class'], 'retaining_wall'],
-      paint: {
-        'line-color': '#a19b91',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.2, 14, 3.5, 17, 5],
-        'line-opacity': 0.9,
-      },
-    },
-    {
-      id: 'barriers',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'barriers',
-      filter: ['!=', ['get', 'class'], 'retaining_wall'],
-      paint: { 'line-color': '#bbb7ad', 'line-width': 1, 'line-dasharray': [2, 2], 'line-opacity': 0.72 },
-    },
-    {
-      id: 'railway-earthworks',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'railways',
-      filter: [
-        'all',
-        ['any', ['has', 'embankment'], ['has', 'cutting']],
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      paint: {
-        'line-color': ['case', ['has', 'cutting'], '#b2aaa0', '#c3b79f'],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 9, 17, 14],
-        'line-opacity': 0.26,
-      },
-    },
-    {
-      id: 'railway-bed',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'railways',
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#aab3b2',
-        'line-width': RAILWAY_BED_WIDTH,
-        'line-opacity': 0.58,
-      },
-    },
-    {
-      id: 'railway-sleepers',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'railways',
-      minzoom: 15.5,
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: {
-        'line-color': '#d5dcda',
-        'line-width': RAILWAY_SLEEPER_WIDTH,
-        'line-dasharray': [0.18, 1.15],
-        'line-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          15.5, 0,
-          17, 0.56,
-          18, 0.48,
-        ],
-      },
-    },
-    ...railwayRailLayers(),
-    {
-      id: 'road-earthworks',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'roads',
-      filter: [
-        'all',
-        ['any', ['has', 'embankment'], ['has', 'cutting']],
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      paint: {
-        'line-color': [
-          'case',
-          ['has', 'cutting'], '#b2aaa0',
-          '#c3b79f',
-        ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2.4, 14, 10, 17, 16],
-        'line-opacity': 0.38,
-      },
-    },
-    {
-      id: 'road-casing',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'roads',
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#74817c',
-        'line-width': ROAD_CASING_WIDTH,
-        'line-opacity': 0.86,
-      },
-    },
-    {
-      id: 'roads',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'roads',
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': SURFACE_ROAD_COLOR,
-        'line-width': ROAD_WIDTH,
-        'line-opacity': 0.96,
-      },
-    },
-    {
-      id: 'road-center-markings',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'roads',
-      minzoom: 14,
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-        [
-          'match', ['get', 'class'],
-          'motorway', true,
-          'trunk', true,
-          'primary', true,
-          'secondary', true,
-          'tertiary', true,
-          false,
-        ],
-        [
-          'match', ['get', 'surface'],
-          'gravel', false,
-          'unpaved', false,
-          'dirt', false,
-          'ground', false,
-          'sand', false,
-          true,
-        ],
-        ['match', ['get', 'lane_markings'], 'no', false, 'false', false, true],
-        ['case', ['has', 'lanes'], ['>=', ['get', 'lanes'], 2], true],
-      ],
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ffffff',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.7, 17, 1.2],
-        'line-dasharray': [3, 4],
-        'line-opacity': 0.66,
-      },
-    },
-    {
-      id: 'road-labels',
-      type: 'symbol',
-      source: 'tampere',
-      'source-layer': 'roads',
-      minzoom: 13,
-      filter: [
-        'all',
-        ['has', 'name'],
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: {
-        'symbol-placement': 'line',
-        'text-field': ['get', 'name'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 15, 13],
-        'text-font': ['Open Sans Regular'],
-        'text-max-angle': 30,
-        'text-padding': 20,
-      },
-      paint: {
-        'text-color': '#596b68',
-        'text-halo-color': '#f8f9f7',
-        'text-halo-width': 1.7,
-      },
-    },
-    {
-      id: 'water-labels',
-      type: 'symbol',
-      source: 'tampere',
-      'source-layer': 'water',
-      minzoom: 10,
-      filter: ['has', 'name'],
-      layout: {
-        'text-field': ['get', 'name'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15],
-        'text-font': ['Open Sans Regular'],
-        'text-allow-overlap': false,
-      },
-      paint: {
-        'text-color': '#8fc1d7',
-        'text-halo-color': WATER_COLOR,
-        'text-halo-width': 1.25,
-      },
-    },
-    {
-      id: 'waterway-labels',
-      type: 'symbol',
-      source: 'tampere',
-      'source-layer': 'waterways',
-      minzoom: 14,
-      filter: ['has', 'name'],
-      layout: {
-        'symbol-placement': 'line',
-        'text-field': ['get', 'name'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9, 17, 11],
-        'text-font': ['Open Sans Regular'],
-        'text-max-angle': 30,
-        'text-padding': 16,
-      },
-      paint: {
-        'text-color': '#8fc1d7',
-        'text-halo-color': WATER_COLOR,
-        'text-halo-width': 1.25,
-        'text-opacity': 0.82,
-      },
-    },
-    {
-      id: 'path-earthworks',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'paths',
-      filter: [
-        'all',
-        ['any', ['has', 'embankment'], ['has', 'cutting']],
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      paint: {
-        'line-color': ['case', ['has', 'cutting'], '#b2aaa0', '#c3b79f'],
-        'line-width': 3,
-        'line-opacity': PATH_EARTHWORK_OPACITY,
-      },
-    },
-    {
-      id: 'path-casing',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'paths',
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#e6dfd2',
-        'line-width': PATH_CASING_WIDTH,
-        'line-opacity': PATH_DETAIL_CASING_OPACITY,
-      },
-    },
-    {
-      id: 'paths',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'paths',
-      filter: [
-        'all',
-        ['!', ['has', 'tunnel']],
-        ['!', ['has', 'covered']],
-      ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': SURFACE_PATH_COLOR,
-        'line-width': PATH_WIDTH,
-        'line-opacity': PATH_DETAIL_OPACITY,
-      },
-    },
-    {
-      id: 'bridge-road-edge-shade',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'roads',
-      minzoom: 12,
-      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#59615d',
-        'line-width': ROAD_WIDTH,
-        'line-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.5, -0.5]], 18, ['literal', [2.5, -2.5]]],
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 1.6],
-        'line-opacity': 0.1,
-      },
-    },
-    {
-      id: 'bridge-path-edge-shade',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'paths',
-      minzoom: 12,
-      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#59615d',
-        'line-width': PATH_WIDTH,
-        'line-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.5, -0.5]], 18, ['literal', [2.5, -2.5]]],
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 1.6],
-        'line-opacity': 0.09,
-      },
-    },
-    {
-      id: 'bridge-railway-edge-shade',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'railways',
-      minzoom: 12,
-      filter: ['all', ['has', 'bridge'], ['!=', ['get', 'bridge'], 'no']],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#59615d',
-        'line-width': RAILWAY_BED_WIDTH,
-        'line-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.5, -0.5]], 18, ['literal', [2.5, -2.5]]],
-        'line-translate-anchor': 'map',
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 1.6],
-        'line-opacity': 0.09,
-      },
-    },
-    {
-      id: 'tunnel-entrance-casing',
-      type: 'line',
-      source: 'tunnel-entrances',
-      minzoom: 13,
-      paint: {
-        'line-color': '#d5d0c6',
-        'line-width': ['match', ['get', 'transport'], 'railway', 7, 9],
-        'line-opacity': 0.95,
-      },
-    },
-    {
-      id: 'tunnel-entrances',
-      type: 'line',
-      source: 'tunnel-entrances',
-      minzoom: 13,
-      paint: {
-        'line-color': '#4d5150',
-        'line-width': ['match', ['get', 'transport'], 'railway', 2.2, 3],
-        'line-opacity': 0.95,
-      },
-    },
-    {
-      id: 'building-shadow-soft',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'buildings',
-      minzoom: 13,
-      filter: ['>', ['get', 'height'], 0],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 2,
-          15, 4.5,
-          18, 9,
-        ],
-        'line-blur': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0.9,
-          18, 2,
-        ],
-        'line-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0.08,
-          15, 0.13,
-          18, 0.19,
-        ],
-      },
-    },
-    {
-      id: 'building-shadows',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'buildings',
-      minzoom: 13,
-      filter: ['>', ['get', 'height'], 0],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 1,
-          15, 2.2,
-          18, 4.2,
-        ],
-        'line-blur': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0.4,
-          18, 0.9,
-        ],
-        'line-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0.15,
-          15, 0.23,
-          18, 0.31,
-        ],
-      },
-    },
-    {
-      id: 'power-point-shadows',
-      type: 'circle',
-      source: 'tampere',
-      'source-layer': 'power',
-      minzoom: 10,
-      filter: ['match', ['get', 'class'], 'tower', true, 'generator', true, false],
-      paint: {
-        'circle-color': '#1f302d',
-        'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, 0.7, 14, 2.5, 18, 8],
-        'circle-pitch-alignment': 'map',
-        'circle-pitch-scale': 'map',
-        'circle-blur': 0.75,
-        'circle-opacity': 0.18,
-      },
-    },
-    {
-      id: 'landmark-area-shadows',
-      type: 'line',
-      source: 'tampere',
-      'source-layer': 'landmarks',
-      minzoom: 12,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1, 15, 2.5, 18, 5],
-        'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.7, 18, 1.4],
-        'line-opacity': 0.14,
-      },
-    },
-    {
-      id: 'landmark-point-shadows',
-      type: 'circle',
-      source: 'tampere',
-      'source-layer': 'landmarks',
-      minzoom: 12,
-      paint: {
-        'circle-color': '#1f302d',
-        'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 12, 1.2, 14, 3, 18, 10],
-        'circle-pitch-alignment': 'map',
-        'circle-pitch-scale': 'map',
-        'circle-blur': 0.72,
-        'circle-opacity': 0.17,
-      },
-    },
-    ...buildingStoryLayers(),
-    {
-      id: 'building-roof-caps',
-      type: 'fill-extrusion',
-      source: 'tampere',
-      'source-layer': 'buildings',
-      minzoom: BUILDING_DETAIL_MIN_ZOOM,
-      filter: [
-        'all',
-        ['>', ['get', 'roof_height'], 0],
-        ['==', ['get', 'roof_shape'], 'flat'],
-      ],
-      paint: {
-        'fill-extrusion-color': ROOF_COLOR,
-        'fill-extrusion-height': ['+', ['get', 'height'], 0.04],
-        // Render only a thin cap. Extruding the full tagged roof height would
-        // overlap the upper floor bands and reintroduce depth fighting.
-        'fill-extrusion-base': ['get', 'height'],
-        'fill-extrusion-opacity': 0.98,
-      },
-    },
-    {
-      id: 'tree-points',
-      type: 'circle',
-      source: 'tampere',
-      'source-layer': 'trees',
-      minzoom: 11,
-      maxzoom: 13,
-      paint: {
-        'circle-color': '#5d9951',
-        'circle-radius': 2,
-        'circle-opacity': 0.8,
-        'circle-stroke-color': '#39713a',
-        'circle-stroke-width': 0.5,
-      },
-    },
-    {
-      id: 'terrain-hillshade',
-      type: 'hillshade',
-      source: 'terrain',
-      layout: { visibility: 'none' },
-      paint: {
-        'hillshade-exaggeration': 0.4,
-        'hillshade-illumination-direction': CARTOON_SUN_AZIMUTH_DEGREES,
-        'hillshade-illumination-anchor': 'map',
-        'hillshade-shadow-color': '#5e6c65',
-        'hillshade-highlight-color': '#fff9ea',
-        'hillshade-accent-color': '#9eaaa2',
-      },
-    },
-    {
-      id: 'places-labels',
-      type: 'symbol',
-      source: 'tampere',
-      'source-layer': 'places',
-      layout: {
-        'text-field': ['get', 'name'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 14, 15],
-        'text-font': ['Open Sans Regular'],
-        'text-offset': [0, 0.8],
-      },
-      paint: {
-        'text-color': '#4e5a52',
-        'text-halo-color': '#f4f6f2',
-        'text-halo-width': 1.5,
-      },
-    },
-    {
-      id: 'poi-circles',
-      type: 'circle',
-      source: 'tampere',
-      'source-layer': 'pois',
-      minzoom: 14,
-      filter: [
-        'all',
-        ['has', 'name'],
-        ['!', ['in', ['get', 'class'], ['literal', ['bus', 'railway', 'tram', 'subway', 'station']]]],
-      ],
-      paint: {
-        'circle-color': '#ffffff',
-        'circle-radius': 4,
-        'circle-stroke-color': '#6d7a71',
-        'circle-stroke-width': 1,
-      },
-    },
-    {
-      id: 'poi-labels',
-      type: 'symbol',
-      source: 'tampere',
-      'source-layer': 'pois',
-      minzoom: 14,
-      filter: [
-        'all',
-        ['has', 'name'],
-        ['!', ['in', ['get', 'class'], ['literal', ['bus', 'railway', 'tram', 'subway', 'station']]]],
-        // Keep small water features discoverable by their marker, but avoid
-        // presenting them as city-scale destinations.
-        ['!', ['in', ['get', 'class'], ['literal', ['fountain', 'pond', 'swimming_pool']]]],
-      ],
-      layout: {
-        'text-field': ['get', 'name'],
-        'text-size': 11,
-        'text-font': ['Open Sans Regular'],
-        'text-offset': [0, 1.1],
-      },
-      paint: {
-        'text-color': '#59645c',
-        'text-halo-color': '#f4f6f2',
-        'text-halo-width': 1.25,
-      },
-    },
-  ],
-};
-
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
-  const infrastructureLayerRef = useRef<InfrastructureModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(true);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [orientationChanged, setOrientationChanged] = useState(false);
   const [selectedTransitStop, setSelectedTransitStop] = useState<TransitStopSelection | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [mapToolNotice, setMapToolNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PhotonFeature[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1919,15 +465,12 @@ export function MapView() {
   const locationDetailsAbortRef = useRef<AbortController | null>(null);
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
   const nominatimLastRequestRef = useRef(0);
-  const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
+  const [layerToggles, setLayerToggles] = useState<MapLayerState>({
     globe: true,
-    bridges: false,
-    // Prefer the MapLibre metre-scaled line layers for now. The custom
-    // polygons remain available through the visibility control.
-    roofs: false,
     trees: true,
     buildings: true,
     terrain: true,
+    transit: true,
     waterEffect: true,
     shadows: true,
   });
@@ -1987,10 +530,10 @@ export function MapView() {
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: USE_LOCAL_MAP_DATA ? TAMPERE_STYLE : GLOBAL_MAP_STYLE,
+      style: GLOBAL_MAP_STYLE,
       center: TAMPERE,
-      zoom: USE_LOCAL_MAP_DATA ? 11 : 2.2,
-      pitch: USE_LOCAL_MAP_DATA ? 45 : 0,
+      zoom: 2.2,
+      pitch: 0,
       bearing: 0,
       // MapLibre line layers are screen-space strokes. At extreme pitch the
       // perspective projection makes foreground roads look disproportionately
@@ -2002,26 +545,12 @@ export function MapView() {
       attributionControl: { compact: true },
     });
 
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    const roofLayer = USE_LOCAL_MAP_DATA ? new BuildingRoofLayer() : undefined;
-    const bridgeLayer = USE_LOCAL_MAP_DATA ? new BridgeModelLayer() : undefined;
-    const infrastructureLayer = USE_LOCAL_MAP_DATA
-      ? new InfrastructureModelLayer()
-      : undefined;
-    const treeLayer = new TreeModelLayer(USE_LOCAL_MAP_DATA
-      ? {
-          sourceId: 'tampere',
-          waterLayers: ['water', 'water_detail', 'river_areas'],
-          vegetationLayers: ['landuse'],
-          mappedTreeLayer: 'trees',
-        }
-      : {
-          sourceId: OPENFREEMAP_SOURCE_ID,
-          waterLayers: ['water'],
-          vegetationLayers: ['landcover', 'landuse', 'park'],
-        });
+    const treeLayer = new TreeModelLayer({
+      sourceId: OPENFREEMAP_SOURCE_ID,
+      waterLayers: ['water'],
+      vegetationLayers: ['landcover', 'landuse', 'park'],
+    });
     treeLayerRef.current = treeLayer;
-    infrastructureLayerRef.current = infrastructureLayer ?? null;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     const transitStopsLayer = new TransitStopsLayer((pose) => transitVehicleLayer.setPose(pose));
     transitStopsLayerRef.current = transitStopsLayer;
@@ -2033,10 +562,11 @@ export function MapView() {
     let lowZoomTerrainProbeComplete = false;
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
-    let globalLabelPitchBucket: number | undefined;
+    let globalLabelDensitySignature: string | undefined;
+    let previousOrientationChanged = false;
     let modelDataRevision = 0;
     let lastModelUpdateSignature: string | undefined;
-    const modelVectorSourceId = USE_LOCAL_MAP_DATA ? 'tampere' : OPENFREEMAP_SOURCE_ID;
+    const modelVectorSourceId = OPENFREEMAP_SOURCE_ID;
     const processedBuildingColors = new globalThis.Map<string, { base: string; alt: string; band: string }>();
 
     const setTerrainSource = (sourceId: string) => {
@@ -2095,12 +625,12 @@ export function MapView() {
         source: MAPTERHORN_DETAIL_SOURCE_ID,
         layout: { visibility: 'none' },
         paint: {
-          'hillshade-exaggeration': 0.34,
+          'hillshade-exaggeration': 0.32,
           'hillshade-illumination-direction': CARTOON_SUN_AZIMUTH_DEGREES,
           'hillshade-illumination-anchor': 'map',
-          'hillshade-shadow-color': '#5e6c65',
-          'hillshade-highlight-color': '#fff9ea',
-          'hillshade-accent-color': '#9eaaa2',
+          'hillshade-shadow-color': '#7d8e82',
+          'hillshade-highlight-color': '#fffbea',
+          'hillshade-accent-color': '#b3c0b5',
         },
       };
       map.addLayer(detailHillshade, 'global-water-edge-shade');
@@ -2109,7 +639,7 @@ export function MapView() {
     };
 
     const updateTerrainResolution = async (generation: number) => {
-      if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
+      if (!map.isStyleLoaded()) return;
       const isLowZoomProbe = map.getZoom() < GLOBAL_TERRAIN_MAX_ZOOM + 0.25;
       // Probe the initial center while the globe is still zoomed out, where a
       // one-time source installation is visually inert. Once installed, the
@@ -2146,7 +676,6 @@ export function MapView() {
     };
 
     const scheduleTerrainResolutionUpdate = () => {
-      if (USE_LOCAL_MAP_DATA) return;
       if (terrainCoverageTimer !== undefined) window.clearTimeout(terrainCoverageTimer);
       terrainCoverageGeneration += 1;
       const generation = terrainCoverageGeneration;
@@ -2156,7 +685,6 @@ export function MapView() {
     };
 
     const updateGlobalRoadWidths = () => {
-      if (USE_LOCAL_MAP_DATA) return;
       const latitude = map.getCenter().lat;
       if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
       roadWidthLatitude = latitude;
@@ -2172,20 +700,22 @@ export function MapView() {
       });
     };
     const updateGlobalLabelDensity = () => {
-      if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
+      if (!map.isStyleLoaded()) return;
       const pitch = map.getPitch();
       const zoom = map.getZoom();
       const pitchBucket = pitch >= 40 ? 2 : pitch >= 25 ? 1 : 0;
       const zoomBucket = zoom >= 16 ? 2 : zoom >= 14 ? 1 : 0;
       const nextBucket = Math.max(pitchBucket, zoomBucket);
-      if (globalLabelPitchBucket === nextBucket) return;
-      globalLabelPitchBucket = nextBucket;
+      const regionalLabelFade = Math.min(1, Math.max(0, (zoom - 6) / 1.25));
+      const nextSignature = `${nextBucket}:${Math.round(regionalLabelFade * 10)}`;
+      if (globalLabelDensitySignature === nextSignature) return;
+      globalLabelDensitySignature = nextSignature;
 
       const opacityByLayer: Array<[string, [number, number, number]]> = [
         ['global-transit-line-labels', [1, 1, 1]],
         ['global-cycleway-labels', [1, 1, 1]],
-        ['global-road-labels', [1, 0.72, 0.36]],
-        ['global-water-labels', [1, 1, 1]],
+        ['global-road-labels', [regionalLabelFade, 0.78 * regionalLabelFade, 0.5 * regionalLabelFade]],
+        ['global-water-labels', [regionalLabelFade, regionalLabelFade, regionalLabelFade]],
         ['global-park-labels', [1, 1, 1]],
         ['global-railway-station-labels', [1, 1, 1]],
         ['global-poi-labels', [1, 1, 1]],
@@ -2238,9 +768,6 @@ export function MapView() {
       }
       const nextSignature = modelUpdateSignature();
       if (nextSignature === lastModelUpdateSignature) return;
-      roofLayer?.updateRoofs();
-      bridgeLayer?.updateBridges();
-      infrastructureLayer?.updateInfrastructure();
       treeLayer.updateTrees();
       lastModelUpdateSignature = nextSignature;
     };
@@ -2266,7 +793,7 @@ export function MapView() {
       scheduleTreeUpdate();
     };
     const updatePastelBuildingColors = () => {
-      if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
+      if (!map.isStyleLoaded()) return;
       let changed = false;
       for (const feature of map.querySourceFeatures(OPENFREEMAP_SOURCE_ID, {
         sourceLayer: 'building',
@@ -2330,18 +857,9 @@ export function MapView() {
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
       // providing broad variation at every zoom without a custom shader.
       map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
-      if (USE_LOCAL_MAP_DATA) {
-        waterPatternLayers().forEach((layer) => map.addLayer(layer, 'water-structure-areas'));
-        if (roofLayer) map.addLayer(roofLayer, 'places-labels');
-        if (bridgeLayer) map.addLayer(bridgeLayer, 'places-labels');
-        if (infrastructureLayer) map.addLayer(infrastructureLayer, 'places-labels');
-        map.addLayer(treeLayer, 'places-labels');
-        map.addLayer(transitVehicleLayer, 'places-labels');
-      } else {
-        map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
-        map.addLayer(treeLayer, 'global-road-labels');
-        map.addLayer(transitVehicleLayer, 'global-road-labels');
-      }
+      map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
+      map.addLayer(treeLayer, 'global-road-labels');
+      map.addLayer(transitVehicleLayer, 'global-road-labels');
       try {
         await addLocationIcons(map);
       } catch (error) {
@@ -2368,21 +886,21 @@ export function MapView() {
         type: 'line',
         source: 'selected-route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#347fe3', 'line-width': 5, 'line-opacity': 0.95 },
+        paint: { 'line-color': MAP_COLORS.transitBlue, 'line-width': 5, 'line-opacity': 0.98 },
       }, poiLayers.before);
       map.addLayer({
         id: 'selected-location-halo', type: 'circle', source: 'selected-location',
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 10, 18, 15],
           'circle-color': '#ffffff', 'circle-opacity': 0.95,
-          'circle-stroke-color': '#347fe3', 'circle-stroke-width': 2,
+          'circle-stroke-color': MAP_COLORS.transitBlue, 'circle-stroke-width': 2,
         },
       }, poiLayers.before);
       map.addLayer({
         id: 'selected-location-icon', type: 'circle', source: 'selected-location',
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 18, 9],
-          'circle-color': '#347fe3', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5,
+          'circle-color': MAP_COLORS.transitBlue, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5,
         },
       }, poiLayers.before);
       poiLayers.layers.forEach((layer) => map.addLayer(layer, poiLayers.before));
@@ -2391,7 +909,16 @@ export function MapView() {
       map.on('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
       map.on('mouseenter', 'location-poi-labels', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'location-poi-labels', () => { map.getCanvas().style.cursor = ''; });
-      void transitStopsLayer.install(map, setSelectedTransitStop).then(() => {
+      void transitStopsLayer.install(map, (stop) => {
+        setSelectedTransitStop(stop);
+        map.easeTo({
+          center: stop.coordinates,
+          zoom: Math.max(map.getZoom(), 14.6),
+          pitch: Math.max(map.getPitch(), 46),
+          offset: closeRangeCameraOffset(),
+          duration: 900,
+        });
+      }).then(() => {
         if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
         map.moveLayer(transitVehicleLayer.id, 'transitous-estimated-vehicle-label');
         updateTransitStops();
@@ -2414,7 +941,14 @@ export function MapView() {
       scheduleTerrainResolutionUpdate();
       scheduleTransitStopsUpdate();
     };
-    const handleCameraMove = () => updateGlobalLabelDensity();
+    const handleCameraMove = () => {
+      updateGlobalLabelDensity();
+      const nextOrientationChanged = Math.abs(map.getBearing()) > 1 || map.getPitch() > 1;
+      if (nextOrientationChanged !== previousOrientationChanged) {
+        previousOrientationChanged = nextOrientationChanged;
+        setOrientationChanged(nextOrientationChanged);
+      }
+    };
     map.on('move', handleCameraMove);
     map.on('moveend', handleMoveEnd);
     map.on('sourcedata', handleModelSourceData);
@@ -2460,7 +994,6 @@ export function MapView() {
       mapRef.current = null;
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
-      infrastructureLayerRef.current = null;
       transitStopsLayerRef.current = null;
     };
   }, []);
@@ -2477,25 +1010,26 @@ export function MapView() {
       });
     };
 
-    setVisibility(['bridge-models-3d'], layerToggles.bridges);
     setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
-    setVisibility(BUILDING_LAYER_IDS, layerToggles.buildings);
     setVisibility(
-      ['building-roofs-3d', 'building-roof-caps', ...GLOBAL_BUILDING_ROOF_LAYER_IDS],
-      layerToggles.buildings && layerToggles.roofs,
+      (map.getStyle().layers ?? [])
+        .map((layer) => layer.id)
+        .filter((layerId) => layerId.startsWith('transitous-') || layerId === 'transit-vehicle-model-3d'),
+      layerToggles.transit,
     );
+    setVisibility(BUILDING_3D_LAYER_IDS, layerToggles.buildings);
+    setVisibility(
+      [GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID],
+      layerToggles.buildings,
+    );
+    setVisibility([GLOBAL_BUILDING_2D_LAYER_ID], !layerToggles.buildings);
     setVisibility(
       BUILDING_SHADOW_LAYER_IDS,
       layerToggles.buildings && layerToggles.shadows,
     );
-    setVisibility(BRIDGE_DECK_EFFECT_LAYER_IDS, layerToggles.shadows);
-    setVisibility(INFRASTRUCTURE_SHADOW_LAYER_IDS, layerToggles.shadows);
-    infrastructureLayerRef.current?.setShadowsEnabled(layerToggles.shadows);
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees && layerToggles.shadows);
     setVisibility(WATER_EFFECT_LAYER_IDS, layerToggles.waterEffect);
-    if (!USE_LOCAL_MAP_DATA) {
-      map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
-    }
+    map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
     terrainEnabledRef.current = layerToggles.terrain;
     map.setTerrain(layerToggles.terrain
       ? { source: terrainSourceRef.current, exaggeration: 1.0 }
@@ -2517,6 +1051,10 @@ export function MapView() {
       );
     }
     treeRefreshRef.current?.();
+    if (!layerToggles.transit) {
+      transitStopsLayerRef.current?.clearSelection();
+      setSelectedTransitStop(null);
+    }
   }, [layerToggles, mapLoaded]);
 
   useEffect(() => {
@@ -2650,7 +1188,9 @@ export function MapView() {
     setSelectedTransitStop(null);
     map.flyTo({
       center: feature.geometry.coordinates,
-      zoom: Math.max(map.getZoom(), USE_LOCAL_MAP_DATA ? 15 : 14),
+      zoom: Math.max(map.getZoom(), 14),
+      pitch: Math.max(map.getPitch(), 44),
+      offset: closeRangeCameraOffset(),
       duration: 1200,
     });
     const { primary } = photonResultLabel(feature);
@@ -2681,6 +1221,37 @@ export function MapView() {
     setSearchOpen(false);
   };
 
+  const locateUser = () => {
+    if (!navigator.geolocation) {
+      setMapToolNotice('Location is not available in this browser.');
+      return;
+    }
+    setMapToolNotice('Finding your location…');
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.flyTo({
+          center: [coords.longitude, coords.latitude],
+          zoom: Math.max(map.getZoom(), 14),
+          pitch: Math.max(map.getPitch(), 42),
+          duration: 1000,
+        });
+        setMapToolNotice('Location found');
+        window.setTimeout(() => setMapToolNotice(null), 1800);
+      },
+      () => setMapToolNotice('Unable to access your location.'),
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  };
+
+  const resetMapOrientation = () => {
+    mapRef.current?.easeTo({ bearing: 0, pitch: 0, duration: 600 });
+  };
+
+  const zoomIn = () => mapRef.current?.zoomIn({ duration: 250 });
+  const zoomOut = () => mapRef.current?.zoomOut({ duration: 250 });
+
   return (
     <div className="map-view">
       <div ref={containerRef} className="map-canvas" />
@@ -2694,57 +1265,51 @@ export function MapView() {
       )}
       {mapLoaded && !mapError && (
         <>
-          <div className="location-search">
-            <form
-              className="location-search-form"
-              role="search"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (searchResults[0]) selectSearchResult(searchResults[0]);
-              }}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                <circle cx="10.8" cy="10.8" r="6.8" />
-                <path d="m16 16 4.2 4.2" />
-              </svg>
-              <input
-                aria-label="Search for a place"
-                placeholder="Search places…"
-                value={searchQuery}
-                onChange={(event) => {
-                  setSearchQuery(event.target.value);
-                  setSearchOpen(true);
-                }}
-                onFocus={() => setSearchOpen(true)}
-              />
-              {searchLoading && <span className="location-search-spinner" aria-label="Searching" />}
-            </form>
-            {searchOpen && searchQuery.trim().length >= 2 && (
-              <div className="location-search-results" role="listbox" aria-label="Location search results">
-                {searchError && <div className="location-search-message">{searchError}</div>}
-                {!searchLoading && !searchError && searchResults.length === 0 && (
-                  <div className="location-search-message">No places found</div>
-                )}
-                {searchResults.map((feature, index) => {
-                  const { primary, secondary } = photonResultLabel(feature);
-                  return (
-                    <button
-                      className="location-search-result"
-                      key={`${feature.geometry.coordinates.join(':')}-${index}`}
-                      type="button"
-                      role="option"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => selectSearchResult(feature)}
-                    >
-                      <strong>{primary}</strong>
-                      {secondary && <span>{secondary}</span>}
-                    </button>
-                  );
-                })}
-                <div className="location-search-attribution">Powered by Photon</div>
-              </div>
-            )}
-          </div>
+          <MapControls
+            query={searchQuery}
+            searchOpen={searchOpen}
+            searchLoading={searchLoading}
+            searchError={searchError}
+            searchResults={searchResults.map((feature, index) => {
+              const { primary, secondary } = photonResultLabel(feature);
+              return {
+                id: `${feature.geometry.coordinates.join(':')}-${index}`,
+                primary,
+                secondary,
+              };
+            })}
+            onQueryChange={(query) => {
+              setSearchQuery(query);
+              setSearchOpen(true);
+              setLayersOpen(false);
+            }}
+            onSearchFocus={() => {
+              setSearchOpen(true);
+              setLayersOpen(false);
+            }}
+            onSearchSubmit={() => {
+              if (searchResults[0]) selectSearchResult(searchResults[0]);
+            }}
+            onSearchResultSelect={(index) => {
+              if (searchResults[index]) selectSearchResult(searchResults[index]);
+            }}
+            layersOpen={layersOpen}
+            onLayersOpenChange={(open) => {
+              setLayersOpen(open);
+              if (open) setSearchOpen(false);
+            }}
+            layers={layerToggles}
+            onLayerChange={(key, enabled) => setLayerToggles((current) => ({
+              ...current,
+              [key]: enabled,
+            }))}
+            onLocate={locateUser}
+            onResetOrientation={resetMapOrientation}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            orientationChanged={orientationChanged}
+            notice={mapToolNotice}
+          />
           {selectedTransitStop && (
             <TransitDeparturesPanel
               stop={selectedTransitStop}
@@ -2821,7 +1386,7 @@ export function MapView() {
           {routeSelectingDestination && (
             <div className="route-selection-banner" role="status">
               <strong>Choose a destination</strong>
-              <span>Click anywhere on the map</span>
+              <span>Select a point on the map</span>
               <button type="button" onClick={cancelRoute}>Cancel</button>
             </div>
           )}
@@ -2855,81 +1420,6 @@ export function MapView() {
           >
             Transit data by Transitous
           </a>
-          <div className={`layer-control${layersOpen ? ' layer-control-open' : ''}`}>
-            <button
-              className="layer-control-trigger"
-              type="button"
-              aria-expanded={layersOpen}
-              aria-controls="map-layer-panel"
-              aria-label="Toggle map layers"
-              onClick={() => setLayersOpen((open) => !open)}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                <path d="m12 3 8 4-8 4-8-4 8-4Z" />
-                <path d="m4 12 8 4 8-4M4 17l8 4 8-4" />
-              </svg>
-              <span>Layers</span>
-              <svg className="layer-control-chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
-
-            {layersOpen && (
-              <div className="layer-panel" id="map-layer-panel" aria-label="Map layer visibility">
-                <div className="layer-panel-heading">
-                  <div>
-                    <strong>Map layers</strong>
-                    <span>Customize your view</span>
-                  </div>
-                  <span className="layer-panel-count">
-                    {Object.values(layerToggles).filter(Boolean).length} active
-                  </span>
-                </div>
-
-                <div className="layer-group">
-                  <span className="layer-group-title">View</span>
-                  {(USE_LOCAL_MAP_DATA
-                    ? ([['terrain', 'Terrain'], ['waterEffect', 'Water texture']] as const)
-                    : ([['globe', 'Globe'], ['terrain', 'Terrain'], ['waterEffect', 'Water texture']] as const)
-                  ).map(([key, label]) => (
-                    <label className="layer-toggle" key={key}>
-                      <span>{label}</span>
-                      <input
-                        type="checkbox"
-                        checked={layerToggles[key]}
-                        onChange={(event) => setLayerToggles((current) => ({
-                          ...current,
-                          [key]: event.target.checked,
-                        }))}
-                      />
-                      <span className="layer-switch" aria-hidden="true"><span /></span>
-                    </label>
-                  ))}
-                </div>
-
-                <div className="layer-group">
-                  <span className="layer-group-title">Details</span>
-                  {(USE_LOCAL_MAP_DATA
-                    ? ([['buildings', 'Buildings'], ['roofs', 'Building roofs'], ['trees', 'Trees'], ['bridges', 'Bridges'], ['shadows', 'Shadows']] as const)
-                    : ([['buildings', 'Buildings'], ['trees', 'Trees'], ['shadows', 'Shadows']] as const)
-                  ).map(([key, label]) => (
-                    <label className="layer-toggle" key={key}>
-                      <span>{label}</span>
-                      <input
-                        type="checkbox"
-                        checked={layerToggles[key]}
-                        onChange={(event) => setLayerToggles((current) => ({
-                          ...current,
-                          [key]: event.target.checked,
-                        }))}
-                      />
-                      <span className="layer-switch" aria-hidden="true"><span /></span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         </>
       )}
     </div>

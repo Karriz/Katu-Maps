@@ -10,6 +10,7 @@ import type {
 import { BusFront, Navigation, TrainFront, TrainFrontTunnel, TramFront } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MAP_COLORS } from './MapPalette';
 
 const TRANSIT_API_URL = 'https://api.transitous.org/api/v6/map/stops';
 const TRANSIT_TRIP_API_URL = 'https://api.transitous.org/api/v6/trip';
@@ -244,7 +245,7 @@ function routeColor(value: unknown, fallback = '#8554c7') {
 
 function stopColor(mode: string) {
   if (mode === 'TRAM') return '#8554c7';
-  if (mode === 'BUS') return '#3979c9';
+  if (mode === 'BUS') return MAP_COLORS.transitBlue;
   if (mode === 'SUBWAY') return METRO_COLOR;
   return '#4f9b70';
 }
@@ -464,7 +465,7 @@ export class TransitStopsLayer {
     });
 
     await Promise.all([
-      addTransitIcon(map, TRANSIT_ICON_IDS.bus, BusFront, '#3979c9'),
+      addTransitIcon(map, TRANSIT_ICON_IDS.bus, BusFront, MAP_COLORS.transitBlue),
       addTransitIcon(map, TRANSIT_ICON_IDS.tram, TramFront, '#8554c7'),
       addTransitIcon(map, TRANSIT_ICON_IDS.metro, TrainFrontTunnel, METRO_COLOR),
       addTransitIcon(map, TRANSIT_ICON_IDS.train, TrainFront, '#4f9b70'),
@@ -558,14 +559,11 @@ export class TransitStopsLayer {
       labelLayer('transitous-tram-stop-labels', 14, ['TRAM']),
       labelLayer('transitous-bus-stop-labels', 16, ['BUS']),
     ];
-    // The local Tampere style has a `places-labels` anchor, while the global
-    // OpenFreeMap style does not. Use whichever label layer exists and let
-    // MapLibre append the transit layers when neither style has an anchor.
-    const beforeLayerId = map.getLayer('places-labels')
-      ? 'places-labels'
-      : map.getLayer('global-poi-labels')
-        ? 'global-poi-labels'
-        : undefined;
+    // Keep transit symbols below the app's close-zoom POI labels when the
+    // style provides that anchor, otherwise let MapLibre append them.
+    const beforeLayerId = map.getLayer('global-poi-labels')
+      ? 'global-poi-labels'
+      : undefined;
     const routeCasing: LineLayerSpecification = {
       id: 'transitous-selected-route-casing',
       type: 'line',

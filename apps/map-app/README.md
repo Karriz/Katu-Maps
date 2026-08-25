@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Global mode retains MapLibre terrain, hillshade, OpenMapTiles building
+The map retains MapLibre terrain, hillshade, OpenMapTiles building
 extrusions, water styling, and deterministic procedural trees sampled from
 `landcover`, `landuse`, and `park`. Building colours use mapped facade colours
 where available and a stable facade-material palette otherwise. Ordinary buildings use
@@ -20,13 +20,11 @@ one non-overlapping set of estimated three-metre storey slices at every building
 zoom; only their alternating detail colours fade in at close zooms. Short and
 structures over 100 metres stay on a single extrusion because OpenFreeMap does
 not expose storey counts or parent-building IDs. Untagged parts created together
-share a coarsened deterministic colour seed. The global style also distinguishes road and rail bridges,
+share a coarsened deterministic colour seed. The style also distinguishes road and rail bridges,
 tunnels, transport hierarchy, airports, ranked labels, peaks, parks, stations,
-and close-zoom house numbers. Detailed roof geometry, mapped individual trees,
-specialized infrastructure, and custom bridge meshes depend on fields in the
-local Tilemaker schema and are intentionally unavailable in global mode.
+and close-zoom house numbers.
 
-The global style starts at world scale using MapLibre's adaptive globe
+The style starts at world scale using MapLibre's adaptive globe
 projection. Continents use a continuous green base while OpenMapTiles ocean and
 inland-water polygons provide the blue surface. Between zooms 10 and 12 the
 `globe` preset transitions to Mercator; buildings and procedural trees appear
@@ -44,25 +42,9 @@ The production build separates the application, React, Three.js, MapLibre, and
 other dependencies into independently cacheable chunks. This keeps ordinary
 style and UI changes out of the large stable renderer bundles.
 
-## Local high-detail provider
-
-The original Tampere Tilemaker and NLS terrain pipeline remains available.
-After building and serving its MBTiles as described in
-`../tile-tools/README.md`, select it when starting or building the app:
-
-```sh
-VITE_MAP_DATA_PROVIDER=local npm run dev
-VITE_MAP_DATA_PROVIDER=local npm run build
-```
-
-Any value other than `local`, including an unset variable, selects the global
-provider. This keeps the hosted and self-managed data contracts separate while
-allowing the same UI and MapLibre renderer to support both.
-
 ## Attribution and service expectations
 
 MapLibre's attribution control displays the OpenFreeMap, OpenMapTiles,
 OpenStreetMap, and Mapterhorn credits supplied by the sources. Keep this control
 enabled in deployed builds. The hosted endpoints do not require accounts or API
-keys, but they do not provide an SLA; production deployments should retain the
-provider switch or point an equivalent provider adapter at self-hosted data.
+keys, but they do not provide an SLA.

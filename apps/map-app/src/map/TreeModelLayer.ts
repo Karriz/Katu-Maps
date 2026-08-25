@@ -21,9 +21,9 @@ const TREE_BUDGETS = [
   { maxZoom: 16, count: 2800 },
   { maxZoom: Number.POSITIVE_INFINITY, count: MAX_TREE_COUNT },
 ] as const;
-const FOREST_TREE_SPACING_METERS = 36;
-const PARK_TREE_SPACING_METERS = 40;
-const SHRUB_SPACING_METERS = 26;
+const FOREST_TREE_SPACING_METERS = 32;
+const PARK_TREE_SPACING_METERS = 35;
+const SHRUB_SPACING_METERS = 24;
 const ORCHARD_TREE_SPACING_METERS = 28;
 const MAPPED_TREE_CLEARANCE_METERS = 9;
 const TRUNK_CANOPY_OVERLAP_METERS = 0.25;
@@ -41,13 +41,6 @@ export type TreeSourceConfig = {
   waterLayers: string[];
   vegetationLayers: string[];
   mappedTreeLayer?: string;
-};
-
-const LOCAL_TREE_SOURCES: TreeSourceConfig = {
-  sourceId: 'tampere',
-  waterLayers: ['water', 'water_detail', 'river_areas'],
-  vegetationLayers: ['landuse'],
-  mappedTreeLayer: 'trees',
 };
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
@@ -546,7 +539,7 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowTexture?: THREE.DataTexture;
   private shadowsEnabled = true;
 
-  constructor(private readonly sources: TreeSourceConfig = LOCAL_TREE_SOURCES) {}
+  constructor(private readonly sources: TreeSourceConfig) {}
 
   invalidateTerrain() {
     this.elevationCache.clear();
@@ -570,9 +563,9 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.scene.add(new THREE.HemisphereLight(
       CARTOON_AMBIENT_SKY_COLOR,
       CARTOON_AMBIENT_GROUND_COLOR,
-      2.1,
+      1.8,
     ));
-    const sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.7);
+    const sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.4);
     const sunDistance = 140;
     const sunHorizontalDistance = Math.sin(SUN_POLAR_RADIANS) * sunDistance;
     sunlight.position.set(
@@ -665,7 +658,7 @@ export class TreeModelLayer implements CustomLayerInterface {
     const zoom = map.getZoom();
     const budget = treeBudget(zoom);
     const shadowMaterial = shadowMesh.material as THREE.MeshBasicMaterial;
-    shadowMaterial.opacity = zoom >= 16 ? 0.28 : zoom >= 14 ? 0.18 : 0.1;
+    shadowMaterial.opacity = zoom >= 16 ? 0.27 : zoom >= 14 ? 0.18 : 0.1;
     const samplingBounds = visibleMetricBounds(map);
     const waterFeatures = sourceFeatures(map, this.sources.sourceId, this.sources.waterLayers);
     const waterPolygons = collectMetricPolygons(waterFeatures);
@@ -729,7 +722,7 @@ export class TreeModelLayer implements CustomLayerInterface {
         this.transformHelper.scale.set(trunkWidth, trunkHeight, trunkWidth);
         this.transformHelper.updateMatrix();
         trunkMesh.setMatrixAt(trunkCount, this.transformHelper.matrix);
-        this.color.setHSL(0.075, 0.32, 0.25 + tree.colorVariation * 0.06);
+        this.color.setHSL(0.075, 0.38, 0.27 + tree.colorVariation * 0.06);
         trunkMesh.setColorAt(trunkCount, this.color);
         trunkCount += 1;
       }
@@ -747,9 +740,9 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.transformHelper.position.set(east, up + 0.06, north);
       this.transformHelper.rotation.set(0, 0, 0);
       this.transformHelper.scale.set(
-        canopyRadius * 1.1,
+        canopyRadius * 1.18,
         1,
-        canopyRadius * 1.1,
+        canopyRadius * 1.18,
       );
       this.transformHelper.updateMatrix();
       shadowMesh.setMatrixAt(index, this.transformHelper.matrix);
@@ -769,17 +762,17 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       if (isConifer) {
         coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
-        this.color.setHSL(0.31, 0.46, 0.23 + tree.colorVariation * 0.08);
+        this.color.setHSL(0.31, 0.54, 0.26 + tree.colorVariation * 0.08);
         coniferMesh.setColorAt(coniferCount, this.color);
         coniferCount += 1;
       } else if (isShrub) {
         shrubMesh.setMatrixAt(shrubCount, this.transformHelper.matrix);
-        this.color.setHSL(0.24 + tree.colorVariation * 0.04, 0.38, 0.31 + tree.colorVariation * 0.1);
+        this.color.setHSL(0.24 + tree.colorVariation * 0.04, 0.47, 0.34 + tree.colorVariation * 0.1);
         shrubMesh.setColorAt(shrubCount, this.color);
         shrubCount += 1;
       } else {
         broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
-        this.color.setHSL(0.29 + tree.colorVariation * 0.04, 0.44, 0.33 + tree.colorVariation * 0.1);
+        this.color.setHSL(0.29 + tree.colorVariation * 0.04, 0.53, 0.36 + tree.colorVariation * 0.1);
         broadleafMesh.setColorAt(broadleafCount, this.color);
         broadleafCount += 1;
       }
