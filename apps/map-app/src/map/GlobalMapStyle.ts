@@ -87,13 +87,13 @@ const ROAD_COLOR: ExpressionSpecification = [
   ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa',
   [
     'match', ['get', 'class'],
-    'motorway', '#e5e7df',
-    'trunk', '#e7e8e0',
+    'motorway', '#f9f7ef',
+    'trunk', '#f8f6ee',
     'primary', MAP_COLORS.road,
-    'secondary', '#ecebe3',
-    'tertiary', '#eeede5',
-    'service', '#f0efe8',
-    '#eeede6',
+    'secondary', '#f5f3ec',
+    'tertiary', '#f4f2eb',
+    'service', '#f3f1ea',
+    '#f4f2eb',
   ],
 ] as ExpressionSpecification;
 
@@ -102,13 +102,13 @@ const BRIDGE_ROAD_COLOR: ExpressionSpecification = [
   ['==', ['get', 'surface'], 'unpaved'], '#d3c4a5',
   [
     'match', ['get', 'class'],
-    'motorway', '#e0e3db',
-    'trunk', '#e2e4dc',
-    'primary', '#e4e5dd',
-    'secondary', '#e6e7df',
-    'tertiary', '#e8e9e1',
-    'service', '#ebeae3',
-    '#e5e6de',
+    'motorway', '#f4f2ea',
+    'trunk', '#f3f1e9',
+    'primary', '#f2f0e8',
+    'secondary', '#f1efe7',
+    'tertiary', '#f0eee6',
+    'service', '#efede5',
+    '#f1efe7',
   ],
 ] as ExpressionSpecification;
 
@@ -927,11 +927,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          1.5, ['match', ['get', 'class'], 'motorway', 2.4, 'trunk', 2.05, 'primary', 1.55, 1.1],
-          4, ['match', ['get', 'class'], 'motorway', 3.15, 'trunk', 2.7, 'primary', 2.15, 1.55],
-          7, ['match', ['get', 'class'], 'motorway', 4.1, 'trunk', 3.6, 'primary', 2.95, 2.25],
-          10, ['match', ['get', 'class'], 'motorway', 5, 'trunk', 4.5, 'primary', 3.95, 3.35],
-          13.5, ['match', ['get', 'class'], 'motorway', 5.8, 'trunk', 5.35, 'primary', 4.75, 4.2],
+          1.5, ['match', ['get', 'class'], 'motorway', 2.95, 'trunk', 2.45, 'primary', 1.55, 1.1],
+          4, ['match', ['get', 'class'], 'motorway', 3.95, 'trunk', 3.35, 'primary', 2.15, 1.55],
+          7, ['match', ['get', 'class'], 'motorway', 4.95, 'trunk', 4.3, 'primary', 2.95, 2.25],
+          10, ['match', ['get', 'class'], 'motorway', 5.5, 'trunk', 4.95, 'primary', 3.95, 3.35],
+          13.5, ['match', ['get', 'class'], 'motorway', 5.9, 'trunk', 5.4, 'primary', 4.75, 4.2],
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -962,11 +962,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          1.5, ['match', ['get', 'class'], 'motorway', 1.35, 'trunk', 1.05, 'primary', 0.75, 0.5],
-          4, ['match', ['get', 'class'], 'motorway', 2.05, 'trunk', 1.7, 'primary', 1.25, 0.8],
-          7, ['match', ['get', 'class'], 'motorway', 3, 'trunk', 2.5, 'primary', 1.9, 1.35],
-          10, ['match', ['get', 'class'], 'motorway', 3.8, 'trunk', 3.35, 'primary', 2.85, 2.45],
-          13.5, ['match', ['get', 'class'], 'motorway', 4.6, 'trunk', 4.15, 'primary', 3.65, 3.15],
+          1.5, ['match', ['get', 'class'], 'motorway', 1.7, 'trunk', 1.35, 'primary', 0.75, 0.5],
+          4, ['match', ['get', 'class'], 'motorway', 2.65, 'trunk', 2.15, 'primary', 1.25, 0.8],
+          7, ['match', ['get', 'class'], 'motorway', 3.75, 'trunk', 3.1, 'primary', 1.9, 1.35],
+          10, ['match', ['get', 'class'], 'motorway', 4.35, 'trunk', 3.8, 'primary', 2.85, 2.45],
+          13.5, ['match', ['get', 'class'], 'motorway', 4.8, 'trunk', 4.3, 'primary', 3.65, 3.15],
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1556,15 +1556,17 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // This is the persistent flat representation used when 3D buildings
         // are disabled. It gains a little definition at close zooms without
         // trying to imitate extrusion lighting.
-        'fill-color': GLOBAL_BUILDING_COLOR,
+        'fill-color': '#fffef9',
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           12, 0,
-          12.7, 0.72,
-          15, 0.82,
-          18, 0.88,
+          12.7, 0.84,
+          15, 0.92,
+          18, 0.95,
         ],
-        'fill-outline-color': '#bdbfb7',
+        // Fill outlines render as a restrained one-pixel hairline in
+        // MapLibre, keeping adjacent footprints legible without heavy rims.
+        'fill-outline-color': '#b7beb7',
       },
     },
     {
