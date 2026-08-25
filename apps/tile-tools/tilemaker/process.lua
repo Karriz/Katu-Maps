@@ -1,5 +1,7 @@
 node_keys = {
   "place", "name", "amenity", "shop", "tourism", "natural", "power", "barrier",
+  "opening_hours", "phone", "website", "email", "contact:phone", "contact:website", "contact:email",
+  "addr:housenumber", "addr:street", "addr:city",
   "man_made", "height", "tower:type", "tower:construction",
   "communication:radio", "communication:television",
   "generator:source", "generator:type",
@@ -8,6 +10,8 @@ node_keys = {
 way_keys = {
   "building", "highway", "railway", "waterway", "natural", "landuse",
   "leisure", "amenity", "place", "name", "building:part", "man_made", "aeroway",
+  "opening_hours", "phone", "website", "email", "contact:phone", "contact:website", "contact:email",
+  "addr:housenumber", "addr:street", "addr:city",
   "power", "barrier", "leaf_type", "leaf_cycle", "species", "genus",
   "height", "min_height", "building:levels", "building:colour", "building:color",
   "bridge", "bridge:structure", "bridge:name", "name:bridge", "layer", "tunnel", "covered", "embankment", "cutting", "surface",
@@ -106,6 +110,35 @@ local function add_name()
   local name = Find("name")
   if name ~= "" then
     Attribute("name", name)
+  end
+end
+
+local function add_location_details()
+  local details = {
+    { "opening_hours", "opening_hours" },
+    { "phone", "phone" },
+    { "contact:phone", "contact_phone" },
+    { "website", "website" },
+    { "contact:website", "contact_website" },
+    { "email", "email" },
+    { "contact:email", "contact_email" },
+  }
+  for _, detail in ipairs(details) do
+    local value = Find(detail[1])
+    if value ~= "" then
+      Attribute(detail[2], value)
+    end
+  end
+  local address = {
+    { "addr:housenumber", "housenumber" },
+    { "addr:street", "street" },
+    { "addr:city", "city" },
+  }
+  for _, part in ipairs(address) do
+    local value = Find(part[1])
+    if value ~= "" then
+      Attribute(part[2], value)
+    end
   end
 end
 
@@ -321,6 +354,7 @@ function node_function()
     Layer("pois", false)
     Attribute("class", amenity ~= "" and amenity or (shop ~= "" and shop or tourism))
     add_name()
+    add_location_details()
   end
 
   local power = Find("power")

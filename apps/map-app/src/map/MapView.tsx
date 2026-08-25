@@ -3,12 +3,34 @@ import maplibregl, {
   type ExpressionSpecification,
   type FillLayerSpecification,
   type FillExtrusionLayerSpecification,
+  type FilterSpecification,
   type HillshadeLayerSpecification,
   type LineLayerSpecification,
   type Map,
+  type MapGeoJSONFeature,
   type MapSourceDataEvent,
+  type Point,
   type StyleSpecification,
 } from 'maplibre-gl';
+import {
+  Beer,
+  BookOpen,
+  Church,
+  Coffee,
+  GraduationCap,
+  Hospital,
+  Hotel,
+  Landmark,
+  Palette,
+  ShoppingBag,
+  Store,
+  Ticket,
+  TreePine,
+  Utensils,
+  type LucideIcon,
+} from 'lucide-react';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { BuildingRoofLayer } from './BuildingRoofLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
 import { InfrastructureModelLayer } from './InfrastructureModelLayer';
@@ -17,6 +39,7 @@ import { TransitStopsLayer } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitDeparturesPanel } from './TransitDeparturesPanel';
 import type { TransitStopSelection } from './TransitStopsLayer';
+import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
 import {
   CARTOON_MAP_LIGHT_POSITION,
   CARTOON_SHADOW_COLOR,
@@ -93,11 +116,263 @@ type LayerToggleState = {
   shadows: boolean;
 };
 
+type PhotonFeature = {
+  geometry: {
+    coordinates: [number, number];
+  };
+  properties: {
+    name?: string;
+    housenumber?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    [key: string]: unknown;
+  };
+};
+
+type LocationSelection = {
+  name: string;
+  category: string;
+  address?: string;
+  coordinates: [number, number];
+  source: 'search' | 'map';
+  openingHours?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  osmType?: string;
+  osmId?: string | number;
+  iconId?: string;
+};
+
+function photonResultLabel(feature: PhotonFeature) {
+  const { name, housenumber, street, city, state, country } = feature.properties;
+  const address = [housenumber, street].filter(Boolean).join(' ');
+  const primary = name || address || city || state || country || 'Unnamed place';
+  const secondary = [
+    name && address,
+    city,
+    state,
+    country,
+  ].filter(Boolean).join(', ');
+  return { primary, secondary };
+}
+
+function locationCategory(properties: Record<string, unknown>) {
+  const value = String(properties.class ?? properties.osm_value ?? properties.subclass ?? 'place').replaceAll('_', ' ');
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function locationIconId(properties: Record<string, unknown>) {
+  return String(properties.class ?? properties.osm_value ?? properties.subclass ?? 'shop');
+}
+
+function locationName(properties: Record<string, unknown>) {
+  return String(properties.name ?? properties['name:en'] ?? 'Interesting place');
+}
+
+function locationAddress(properties: Record<string, unknown>) {
+  return [properties.housenumber, properties.street, properties.city]
+    .filter(Boolean)
+    .join(' ')
+    .trim() || undefined;
+}
+
+function locationProperty(properties: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = properties[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function locationDetails(properties: Record<string, unknown>) {
+  const extra = properties.extra && typeof properties.extra === 'object'
+    ? properties.extra as Record<string, unknown>
+    : properties.extratags && typeof properties.extratags === 'object'
+      ? properties.extratags as Record<string, unknown>
+      : {};
+  const detailProperties = { ...properties, ...extra };
+  const website = locationProperty(detailProperties, 'website', 'contact:website', 'contact_website');
+  return {
+    openingHours: locationProperty(detailProperties, 'opening_hours', 'openingHours'),
+    phone: locationProperty(detailProperties, 'phone', 'contact:phone', 'contact_phone'),
+    email: locationProperty(detailProperties, 'email', 'contact:email', 'contact_email'),
+    website: website && (/^https?:\/\//i.test(website) ? website : `https://${website}`),
+  };
+}
+
+function locationSelectionFromFeature(feature: MapGeoJSONFeature): LocationSelection {
+  const properties = (feature.properties ?? {}) as Record<string, unknown>;
+  return {
+    name: locationName(properties),
+    category: locationCategory(properties),
+    address: locationAddress(properties),
+    coordinates: feature.geometry.type === 'Point'
+      ? feature.geometry.coordinates as [number, number]
+      : [0, 0],
+    source: 'map',
+    ...locationDetails(properties),
+    iconId: locationIconId(properties),
+    osmId: typeof properties.osm_id === 'string' || typeof properties.osm_id === 'number'
+      ? properties.osm_id
+      : (typeof feature.id === 'string' || typeof feature.id === 'number' ? feature.id : undefined),
+    osmType: typeof properties.osm_type === 'string' ? properties.osm_type : undefined,
+  };
+}
+
 const BUILDING_LAYER_IDS = [
   ...Array.from({ length: MAX_BUILDING_STORY_SLICES }, (_, index) => `building-story-${index + 1}`),
   'building-roof-caps',
   ...GLOBAL_BUILDING_LAYER_IDS,
 ];
+
+const LOCATION_POI_CLASSES = [
+  'restaurant', 'cafe', 'bar', 'fast_food', 'pub', 'food_court',
+  'bakery', 'shop', 'supermarket', 'marketplace', 'museum', 'gallery',
+  'theatre', 'cinema', 'artwork', 'attraction', 'tourism', 'hotel',
+  'hospital', 'clinic', 'pharmacy', 'school', 'university', 'library',
+  'place_of_worship', 'park', 'stadium', 'community_centre', 'food', 'catering',
+  'sustenance', 'commercial', 'historic', 'entertainment', 'healthcare',
+  'education', 'religion', 'leisure',
+];
+
+const LOCATION_ICON_DEFINITIONS: Array<[string, LucideIcon]> = [
+  ['restaurant', Utensils], ['cafe', Coffee], ['bar', Beer], ['fast_food', Utensils],
+  ['pub', Beer], ['food_court', Utensils], ['bakery', Store],
+  ['shop', ShoppingBag], ['supermarket', ShoppingBag], ['marketplace', Store],
+  ['museum', Landmark], ['gallery', Palette], ['theatre', Ticket], ['cinema', Ticket],
+  ['artwork', Palette], ['attraction', Landmark], ['tourism', Landmark], ['hotel', Hotel],
+  ['hospital', Hospital], ['clinic', Hospital], ['pharmacy', Hospital],
+  ['school', GraduationCap], ['university', GraduationCap], ['library', BookOpen],
+  ['place_of_worship', Church], ['park', TreePine], ['stadium', Ticket],
+  ['community_centre', Landmark],
+];
+
+const LOCATION_ICON_COLORS: Record<string, string> = {
+  restaurant: '#d46d62', cafe: '#b98655', bar: '#ab6d9d', fast_food: '#d48b55', pub: '#ab6d9d',
+  food_court: '#d48b55', bakery: '#b98655', shop: '#5f8ec4', supermarket: '#5f8ec4', marketplace: '#5f8ec4',
+  museum: '#806bb0', gallery: '#806bb0', theatre: '#806bb0', cinema: '#806bb0', artwork: '#806bb0',
+  attraction: '#806bb0', tourism: '#806bb0', hotel: '#806bb0', hospital: '#b45f72', clinic: '#b45f72',
+  pharmacy: '#b45f72', school: '#6d8d68', university: '#6d8d68', library: '#6d8d68',
+  place_of_worship: '#a18159', park: '#6d9a71', stadium: '#6d9a71', community_centre: '#64748b',
+};
+
+const LOCATION_ICON_ALIASES: Array<[string, string]> = [
+  ['food', 'restaurant'], ['catering', 'restaurant'], ['sustenance', 'restaurant'],
+  ['commercial', 'shop'], ['historic', 'museum'], ['entertainment', 'ticket'],
+  ['healthcare', 'hospital'], ['education', 'school'], ['religion', 'place_of_worship'],
+  ['leisure', 'park'],
+];
+
+const LOCATION_PRIORITY: Array<[string, number]> = [
+  ['restaurant', 1], ['cafe', 2], ['bar', 3], ['pub', 3], ['fast_food', 4],
+  ['museum', 5], ['gallery', 5], ['theatre', 5], ['cinema', 5], ['attraction', 5],
+  ['hospital', 6], ['clinic', 6], ['pharmacy', 6], ['school', 7], ['university', 7],
+  ['library', 7], ['place_of_worship', 8], ['hotel', 8], ['park', 9], ['stadium', 9],
+  ['shop', 15], ['supermarket', 16], ['marketplace', 16], ['bakery', 10],
+];
+
+function locationPriorityExpression() {
+  const pairs = LOCATION_PRIORITY.flatMap(([className, priority]) => [className, priority]);
+  return [
+    'match', ['get', 'class'], ...pairs,
+    ['match', ['get', 'subclass'], ...pairs, 20],
+  ] as unknown as ExpressionSpecification;
+}
+
+async function addLocationIcons(map: Map) {
+  await Promise.all(LOCATION_ICON_DEFINITIONS.map(async ([id, Icon]) => {
+    const imageId = `location-${id}-icon`;
+    if (map.hasImage(imageId)) return;
+    const svg = renderToStaticMarkup(createElement(Icon, {
+      color: '#ffffff', size: 22, strokeWidth: 2.4,
+    })).replace(
+      /(<svg[^>]*>)/,
+      `$1<circle cx="12" cy="12" r="11" fill="${LOCATION_ICON_COLORS[id] ?? '#64748b'}"/>`,
+    );
+    const image = new Image();
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`Unable to load ${imageId}`));
+    });
+    if (!map.hasImage(imageId)) map.addImage(imageId, image, { pixelRatio: 2 });
+  }));
+}
+
+function locationPoiFilter() {
+  return [
+    'all',
+    ['has', 'name'],
+    ['any',
+      ['in', ['get', 'class'], ['literal', LOCATION_POI_CLASSES]],
+      ['in', ['get', 'subclass'], ['literal', LOCATION_POI_CLASSES]],
+    ],
+    ['!', ['in', ['get', 'class'], ['literal', ['bus', 'railway']]]],
+  ] as unknown as FilterSpecification;
+}
+
+function locationPoiLayers() {
+  const source = USE_LOCAL_MAP_DATA ? 'tampere' : OPENFREEMAP_SOURCE_ID;
+  const sourceLayer = USE_LOCAL_MAP_DATA ? 'pois' : 'poi';
+  const before = USE_LOCAL_MAP_DATA ? 'places-labels' : 'global-road-labels';
+  const iconPairs = [
+    ...LOCATION_ICON_DEFINITIONS.flatMap(([id]) => [id, `location-${id}-icon`]),
+    ...LOCATION_ICON_ALIASES.flatMap(([alias, id]) => [alias, `location-${id === 'ticket' ? 'theatre' : id}-icon`]),
+  ];
+  const iconImage = [
+    'match', ['get', 'class'],
+    ...iconPairs,
+    ['match', ['get', 'subclass'], ...iconPairs, 'location-shop-icon'],
+  ];
+  return {
+    before,
+    layers: [
+      {
+        id: 'location-poi-icons', type: 'symbol' as const, source, 'source-layer': sourceLayer,
+        minzoom: 13.5, maxzoom: 15.5, filter: locationPoiFilter(),
+        layout: {
+          'icon-image': iconImage as unknown as ExpressionSpecification,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 1.05, 17, 1.35] as ExpressionSpecification,
+          'icon-padding': 7,
+          'icon-allow-overlap': false,
+          'icon-ignore-placement': false,
+          'symbol-sort-key': locationPriorityExpression(),
+        },
+      },
+      {
+        id: 'location-poi-labels', type: 'symbol' as const, source, 'source-layer': sourceLayer,
+        minzoom: 15.5, filter: locationPoiFilter(),
+        layout: {
+          'icon-image': iconImage as unknown as ExpressionSpecification,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 15.5, 1.05, 18, 1.35] as ExpressionSpecification,
+          'icon-padding': 5,
+          'icon-allow-overlap': false,
+          'icon-ignore-placement': false,
+          'text-field': ['get', 'name'] as ExpressionSpecification,
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 10, 18, 13] as ExpressionSpecification,
+          'text-offset': [0, 1.35] as [number, number],
+          'text-anchor': 'top' as const,
+          'text-padding': 7,
+          'text-allow-overlap': false,
+          'text-ignore-placement': false,
+          // Icons remain useful when a label cannot fit; priority places the
+          // most useful destinations before ordinary retail points.
+          'text-optional': true,
+          'symbol-sort-key': locationPriorityExpression(),
+        },
+        paint: {
+          'text-color': '#59645c',
+          'text-halo-color': '#f4f6f2',
+          'text-halo-width': 1.2,
+        },
+      },
+    ],
+  };
+}
 
 function createWaterPattern(size: number) {
   const data = new Uint8ClampedArray(size * size * 4);
@@ -1625,6 +1900,25 @@ export function MapView() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [selectedTransitStop, setSelectedTransitStop] = useState<TransitStopSelection | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<PhotonFeature[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const selectedSearchQueryRef = useRef<string | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<LocationSelection | null>(null);
+  const [locationDetailsLoading, setLocationDetailsLoading] = useState(false);
+  const [routeMode, setRouteMode] = useState<RouteMode>('pedestrian');
+  const [routeSelectingDestination, setRouteSelectingDestination] = useState(false);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const routeOriginRef = useRef<[number, number] | null>(null);
+  const routeSelectingRef = useRef(false);
+  const routeAbortRef = useRef<AbortController | null>(null);
+  const locationDetailsAbortRef = useRef<AbortController | null>(null);
+  const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
+  const nominatimLastRequestRef = useRef(0);
   const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
     globe: true,
     bridges: false,
@@ -1637,6 +1931,56 @@ export function MapView() {
     waterEffect: true,
     shadows: true,
   });
+
+  const setRouteGeometry = (result: RouteResult | null) => {
+    const source = mapRef.current?.getSource('selected-route') as { setData: (data: unknown) => void } | undefined;
+    source?.setData(result
+      ? { type: 'Feature', geometry: result.geometry, properties: {} }
+      : { type: 'FeatureCollection', features: [] });
+  };
+
+  const requestRoute = async (origin: [number, number], destination: [number, number]) => {
+    routeAbortRef.current?.abort();
+    const controller = new AbortController();
+    routeAbortRef.current = controller;
+    setRouteLoading(true);
+    setRouteError(null);
+    try {
+      const result = await fetchValhallaRoute(origin, destination, routeMode, controller.signal);
+      if (controller.signal.aborted) return;
+      setRouteResult(result);
+      setRouteGeometry(result);
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') {
+        setRouteResult(null);
+        setRouteGeometry(null);
+        setRouteError((error as Error).message || 'Could not calculate a route');
+      }
+    } finally {
+      if (!controller.signal.aborted) setRouteLoading(false);
+    }
+  };
+
+  const startRouteSelection = (origin: [number, number]) => {
+    routeAbortRef.current?.abort();
+    routeOriginRef.current = origin;
+    routeSelectingRef.current = true;
+    setRouteSelectingDestination(true);
+    setRouteResult(null);
+    setRouteError(null);
+    setRouteGeometry(null);
+  };
+
+  const cancelRoute = () => {
+    routeAbortRef.current?.abort();
+    routeOriginRef.current = null;
+    routeSelectingRef.current = false;
+    setRouteSelectingDestination(false);
+    setRouteLoading(false);
+    setRouteResult(null);
+    setRouteError(null);
+    setRouteGeometry(null);
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -1955,7 +2299,33 @@ export function MapView() {
       updatePastelBuildingColors();
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
-    map.once('load', () => {
+    const handleLocationClick = (event: { point: Point }) => {
+      const locationLayers = ['location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
+      const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
+      if (routeSelectingRef.current) {
+        const destination = feature && feature.layer.id !== 'selected-location-icon'
+          ? locationSelectionFromFeature(feature).coordinates
+          : [map.unproject(event.point).lng, map.unproject(event.point).lat] as [number, number];
+        const origin = routeOriginRef.current;
+        routeSelectingRef.current = false;
+        setRouteSelectingDestination(false);
+        if (origin) void requestRoute(origin, destination);
+        return;
+      }
+      if (!feature || feature.layer.id === 'selected-location-icon') return;
+      const selection = locationSelectionFromFeature(feature);
+      if (selection.coordinates[0] === 0 && selection.coordinates[1] === 0) return;
+      transitStopsLayerRef.current?.clearSelection();
+      setSelectedTransitStop(null);
+      setSelectedLocation(selection);
+      void enrichLocationDetails(selection);
+      const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
+      selectedSource?.setData({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: selection.coordinates }, properties: {} }],
+      });
+    };
+    map.once('load', async () => {
       // MapLibre uses image pixelRatio when determining pattern spacing. A
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
       // providing broad variation at every zoom without a custom shader.
@@ -1972,12 +2342,61 @@ export function MapView() {
         map.addLayer(treeLayer, 'global-road-labels');
         map.addLayer(transitVehicleLayer, 'global-road-labels');
       }
+      try {
+        await addLocationIcons(map);
+      } catch (error) {
+        console.warn('Location icons could not be loaded; hiding POI icons.', error);
+      }
+      const poiLayers = locationPoiLayers();
+      map.addSource('selected-location', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addSource('selected-route', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'selected-route-casing',
+        type: 'line',
+        source: 'selected-route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'selected-route',
+        type: 'line',
+        source: 'selected-route',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#347fe3', 'line-width': 5, 'line-opacity': 0.95 },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'selected-location-halo', type: 'circle', source: 'selected-location',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 10, 18, 15],
+          'circle-color': '#ffffff', 'circle-opacity': 0.95,
+          'circle-stroke-color': '#347fe3', 'circle-stroke-width': 2,
+        },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'selected-location-icon', type: 'circle', source: 'selected-location',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 18, 9],
+          'circle-color': '#347fe3', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5,
+        },
+      }, poiLayers.before);
+      poiLayers.layers.forEach((layer) => map.addLayer(layer, poiLayers.before));
+      map.on('click', handleLocationClick);
+      map.on('mouseenter', 'location-poi-icons', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
+      map.on('mouseenter', 'location-poi-labels', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'location-poi-labels', () => { map.getCanvas().style.cursor = ''; });
       void transitStopsLayer.install(map, setSelectedTransitStop).then(() => {
         if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
         map.moveLayer(transitVehicleLayer.id, 'transitous-estimated-vehicle-label');
         updateTransitStops();
       });
-      ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels'].forEach((layerId) => {
+      ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels', 'global-poi-labels', 'poi-labels'].forEach((layerId) => {
         if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
       });
       updateGlobalRoadWidths();
@@ -2031,6 +2450,9 @@ export function MapView() {
       map.off('move', handleCameraMove);
       map.off('moveend', handleMoveEnd);
       map.off('sourcedata', handleModelSourceData);
+      map.off('click', handleLocationClick);
+      map.off('mouseenter', 'location-poi-icons', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.off('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
       map.off('idle', scheduleTreeUpdate);
       map.off('idle', updatePastelBuildingColors);
       transitStopsLayer.dispose();
@@ -2097,6 +2519,168 @@ export function MapView() {
     treeRefreshRef.current?.();
   }, [layerToggles, mapLoaded]);
 
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query && selectedSearchQueryRef.current === query) {
+      selectedSearchQueryRef.current = null;
+      return;
+    }
+    if (query.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true);
+      setSearchError(null);
+      try {
+        const params = new URLSearchParams({
+          q: query,
+          limit: '6',
+          location_bias_scale: '0.2',
+        });
+        const map = mapRef.current;
+        if (map) {
+          const center = map.getCenter();
+          params.set('lon', center.lng.toFixed(6));
+          params.set('lat', center.lat.toFixed(6));
+          params.set('zoom', String(Math.round(map.getZoom())));
+        }
+        const response = await fetch(
+          `https://photon.komoot.io/api/?${params.toString()}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error('Search service unavailable');
+        const data = await response.json() as { features?: PhotonFeature[] };
+        setSearchResults(data.features ?? []);
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          setSearchResults([]);
+          setSearchError('Could not search right now');
+        }
+      } finally {
+        if (!controller.signal.aborted) setSearchLoading(false);
+      }
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery]);
+
+  const enrichLocationDetails = async (selection: LocationSelection) => {
+    const lookupKey = selection.osmType && selection.osmId
+      ? `lookup:${selection.osmType}${selection.osmId}`
+      : `reverse:${selection.coordinates[0].toFixed(6)},${selection.coordinates[1].toFixed(6)}`;
+    const cached = nominatimCacheRef.current.get(lookupKey);
+    if (cached) {
+      setLocationDetailsLoading(false);
+      setSelectedLocation((current) => current?.coordinates.join(',') === selection.coordinates.join(',')
+        ? { ...current, ...cached }
+        : current);
+      return;
+    }
+
+    locationDetailsAbortRef.current?.abort();
+    const controller = new AbortController();
+    locationDetailsAbortRef.current = controller;
+    setLocationDetailsLoading(true);
+    const wait = Math.max(0, 1100 - (Date.now() - nominatimLastRequestRef.current));
+    try {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, wait));
+      if (controller.signal.aborted) return;
+      nominatimLastRequestRef.current = Date.now();
+      const params = new URLSearchParams({
+        format: 'jsonv2',
+        addressdetails: '1',
+        extratags: '1',
+      });
+      const endpoint = selection.osmType && selection.osmId
+        ? `https://nominatim.openstreetmap.org/lookup?osm_ids=${encodeURIComponent(`${selection.osmType}${selection.osmId}`)}&${params}`
+        : `https://nominatim.openstreetmap.org/reverse?lat=${selection.coordinates[1]}&lon=${selection.coordinates[0]}&zoom=18&${params}`;
+      const response = await fetch(endpoint, { signal: controller.signal });
+      if (!response.ok) throw new Error('Nominatim lookup failed');
+      const payload = await response.json() as Record<string, unknown> | Array<Record<string, unknown>>;
+      const result = Array.isArray(payload) ? payload[0] : payload;
+      if (!result) return;
+      const address = result.address as Record<string, unknown> | undefined;
+      const extra = result.extratags as Record<string, unknown> | undefined;
+      const details = {
+        address: selection.address ?? (
+          [address?.house_number, address?.road, address?.city ?? address?.town]
+            .filter(Boolean).join(' ') || undefined
+        ),
+        ...locationDetails({ ...result, ...(extra ?? {}) }),
+      };
+      nominatimCacheRef.current.set(lookupKey, details);
+      setSelectedLocation((current) => current?.coordinates.join(',') === selection.coordinates.join(',')
+        ? { ...current, ...details }
+        : current);
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') console.warn('Location details lookup failed.', error);
+    } finally {
+      if (!controller.signal.aborted) setLocationDetailsLoading(false);
+    }
+  };
+
+  const selectedIconKey = selectedLocation?.iconId && (
+    LOCATION_ICON_DEFINITIONS.some(([id]) => id === selectedLocation.iconId)
+      ? selectedLocation.iconId
+      : LOCATION_ICON_ALIASES.find(([alias]) => alias === selectedLocation.iconId)?.[1]
+  ) || 'shop';
+  const SelectedLocationIcon = LOCATION_ICON_DEFINITIONS.find(([id]) => id === selectedIconKey)?.[1] ?? Store;
+
+  useEffect(() => {
+    if (routeResult && routeOriginRef.current && !routeSelectingDestination) {
+      setRouteGeometry(null);
+      void requestRoute(routeOriginRef.current, routeResult.geometry.coordinates.at(-1) as [number, number]);
+    }
+  // Recalculate an existing route when the travel mode changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeMode]);
+
+  const selectSearchResult = (feature: PhotonFeature) => {
+    const map = mapRef.current;
+    if (!map) return;
+    transitStopsLayerRef.current?.clearSelection();
+    setSelectedTransitStop(null);
+    map.flyTo({
+      center: feature.geometry.coordinates,
+      zoom: Math.max(map.getZoom(), USE_LOCAL_MAP_DATA ? 15 : 14),
+      duration: 1200,
+    });
+    const { primary } = photonResultLabel(feature);
+    const properties = feature.properties as Record<string, unknown>;
+    const address = [properties.housenumber, properties.street, properties.city]
+      .filter(Boolean).join(' ') || undefined;
+    const selection: LocationSelection = {
+      name: primary,
+      category: locationCategory(properties),
+      address,
+      coordinates: feature.geometry.coordinates,
+      source: 'search',
+      ...locationDetails(properties),
+      iconId: locationIconId(properties),
+      osmType: typeof properties.osm_type === 'string' ? properties.osm_type : undefined,
+      osmId: properties.osm_id as string | number | undefined,
+    };
+    setSelectedLocation(selection);
+    void enrichLocationDetails(selection);
+    const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
+    selectedSource?.setData({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: selection.coordinates }, properties: {} }],
+    });
+    selectedSearchQueryRef.current = primary;
+    setSearchQuery(primary);
+    setSearchResults([]);
+    setSearchOpen(false);
+  };
+
   return (
     <div className="map-view">
       <div ref={containerRef} className="map-canvas" />
@@ -2110,6 +2694,57 @@ export function MapView() {
       )}
       {mapLoaded && !mapError && (
         <>
+          <div className="location-search">
+            <form
+              className="location-search-form"
+              role="search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (searchResults[0]) selectSearchResult(searchResults[0]);
+              }}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                <circle cx="10.8" cy="10.8" r="6.8" />
+                <path d="m16 16 4.2 4.2" />
+              </svg>
+              <input
+                aria-label="Search for a place"
+                placeholder="Search places…"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+              />
+              {searchLoading && <span className="location-search-spinner" aria-label="Searching" />}
+            </form>
+            {searchOpen && searchQuery.trim().length >= 2 && (
+              <div className="location-search-results" role="listbox" aria-label="Location search results">
+                {searchError && <div className="location-search-message">{searchError}</div>}
+                {!searchLoading && !searchError && searchResults.length === 0 && (
+                  <div className="location-search-message">No places found</div>
+                )}
+                {searchResults.map((feature, index) => {
+                  const { primary, secondary } = photonResultLabel(feature);
+                  return (
+                    <button
+                      className="location-search-result"
+                      key={`${feature.geometry.coordinates.join(':')}-${index}`}
+                      type="button"
+                      role="option"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectSearchResult(feature)}
+                    >
+                      <strong>{primary}</strong>
+                      {secondary && <span>{secondary}</span>}
+                    </button>
+                  );
+                })}
+                <div className="location-search-attribution">Powered by Photon</div>
+              </div>
+            )}
+          </div>
           {selectedTransitStop && (
             <TransitDeparturesPanel
               stop={selectedTransitStop}
@@ -2121,6 +2756,96 @@ export function MapView() {
                 setSelectedTransitStop(null);
               }}
             />
+          )}
+          {selectedLocation && !selectedTransitStop && (
+            <aside className="location-info-panel" aria-label="Location information">
+              <div
+                className="location-info-icon"
+                aria-hidden="true"
+                style={{ backgroundColor: LOCATION_ICON_COLORS[selectedIconKey] ?? '#64748b' }}
+              >
+                <SelectedLocationIcon size={20} strokeWidth={2.4} />
+              </div>
+              <div className="location-info-content">
+                <span className="location-info-category">{selectedLocation.category}</span>
+                <h2>{selectedLocation.name}</h2>
+                {selectedLocation.address && <p>{selectedLocation.address}</p>}
+                {locationDetailsLoading && <p className="location-info-loading">Loading OpenStreetMap details…</p>}
+                {(selectedLocation.openingHours || selectedLocation.phone || selectedLocation.email || selectedLocation.website) && (
+                  <div className="location-info-details">
+                    {selectedLocation.openingHours && <div><strong>Hours</strong><span>{selectedLocation.openingHours}</span></div>}
+                    {selectedLocation.phone && <div><strong>Phone</strong><a href={`tel:${selectedLocation.phone}`}>{selectedLocation.phone}</a></div>}
+                    {selectedLocation.email && <div><strong>Email</strong><a href={`mailto:${selectedLocation.email}`}>{selectedLocation.email}</a></div>}
+                    {selectedLocation.website && <div><strong>Web</strong><a href={selectedLocation.website} target="_blank" rel="noreferrer">Visit website</a></div>}
+                  </div>
+                )}
+                {!locationDetailsLoading && !selectedLocation.openingHours && !selectedLocation.phone && !selectedLocation.email && !selectedLocation.website && (
+                  <p className="location-info-empty">No opening hours or contact details are available in the current map data.</p>
+                )}
+                <span className="location-info-source">
+                  {selectedLocation.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
+                </span>
+                <button
+                  className="route-start-button"
+                  type="button"
+                  onClick={() => startRouteSelection(selectedLocation.coordinates)}
+                >
+                  Route from here
+                </button>
+                <a
+                  className="location-info-attribution"
+                  href="https://nominatim.openstreetmap.org/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  © OpenStreetMap contributors · Nominatim
+                </a>
+              </div>
+              <button
+                className="location-info-close"
+                type="button"
+                aria-label="Close location information"
+                onClick={() => {
+                  locationDetailsAbortRef.current?.abort();
+                  setLocationDetailsLoading(false);
+                  setSelectedLocation(null);
+                  (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+                    type: 'FeatureCollection', features: [],
+                  });
+                }}
+              >
+                ×
+              </button>
+            </aside>
+          )}
+          {routeSelectingDestination && (
+            <div className="route-selection-banner" role="status">
+              <strong>Choose a destination</strong>
+              <span>Click anywhere on the map</span>
+              <button type="button" onClick={cancelRoute}>Cancel</button>
+            </div>
+          )}
+          {(routeLoading || routeResult || routeError) && !routeSelectingDestination && (
+            <aside className="route-panel" aria-label="Route details">
+              <div className="route-panel-heading">
+                <div><strong>Route</strong><span>Powered by Valhalla</span></div>
+                <button type="button" aria-label="Clear route" onClick={cancelRoute}>×</button>
+              </div>
+              <div className="route-mode-tabs" role="tablist" aria-label="Travel mode">
+                {([['pedestrian', 'Walk'], ['bicycle', 'Cycle'], ['auto', 'Drive']] as const).map(([mode, label]) => (
+                  <button key={mode} type="button" className={routeMode === mode ? 'active' : ''} onClick={() => setRouteMode(mode)}>{label}</button>
+                ))}
+              </div>
+              {routeLoading && <p className="route-panel-message">Calculating route…</p>}
+              {routeError && <p className="route-panel-error">{routeError}</p>}
+              {routeResult && !routeLoading && (
+                <div className="route-summary">
+                  <strong>{routeResult.distanceKm < 1 ? `${Math.round(routeResult.distanceKm * 1000)} m` : `${routeResult.distanceKm.toFixed(1)} km`}</strong>
+                  <span>{routeResult.durationSeconds < 3600 ? `${Math.round(routeResult.durationSeconds / 60)} min` : `${Math.floor(routeResult.durationSeconds / 3600)} h ${Math.round(routeResult.durationSeconds % 3600 / 60)} min`}</span>
+                </div>
+              )}
+              {!routeLoading && !routeResult && !routeError && <button className="route-retry-button" type="button" onClick={() => setRouteSelectingDestination(true)}>Choose destination</button>}
+            </aside>
           )}
           <a
             className="transitous-attribution"
