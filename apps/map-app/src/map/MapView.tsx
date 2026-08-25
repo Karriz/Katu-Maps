@@ -13,6 +13,10 @@ import { BuildingRoofLayer } from './BuildingRoofLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
 import { InfrastructureModelLayer } from './InfrastructureModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
+import { TransitStopsLayer } from './TransitStopsLayer';
+import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
+import { TransitDeparturesPanel } from './TransitDeparturesPanel';
+import type { TransitStopSelection } from './TransitStopsLayer';
 import {
   CARTOON_MAP_LIGHT_POSITION,
   CARTOON_SHADOW_COLOR,
@@ -1567,7 +1571,11 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'pois',
       minzoom: 14,
-      filter: ['has', 'name'],
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['!', ['in', ['get', 'class'], ['literal', ['bus', 'railway', 'tram', 'subway', 'station']]]],
+      ],
       paint: {
         'circle-color': '#ffffff',
         'circle-radius': 4,
@@ -1584,6 +1592,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       filter: [
         'all',
         ['has', 'name'],
+        ['!', ['in', ['get', 'class'], ['literal', ['bus', 'railway', 'tram', 'subway', 'station']]]],
         // Keep small water features discoverable by their marker, but avoid
         // presenting them as city-scale destinations.
         ['!', ['in', ['get', 'class'], ['literal', ['fountain', 'pond', 'swimming_pool']]]],
@@ -1609,10 +1618,12 @@ export function MapView() {
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const infrastructureLayerRef = useRef<InfrastructureModelLayer | null>(null);
+  const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(true);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [selectedTransitStop, setSelectedTransitStop] = useState<TransitStopSelection | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [layerToggles, setLayerToggles] = useState<LayerToggleState>({
     globe: true,
@@ -1667,7 +1678,11 @@ export function MapView() {
         });
     treeLayerRef.current = treeLayer;
     infrastructureLayerRef.current = infrastructureLayer ?? null;
+    const transitVehicleLayer = new TransitVehicleModelLayer();
+    const transitStopsLayer = new TransitStopsLayer((pose) => transitVehicleLayer.setPose(pose));
+    transitStopsLayerRef.current = transitStopsLayer;
     let treeUpdateTimer: number | undefined;
+    let transitStopsTimer: number | undefined;
     let terrainCoverageTimer: number | undefined;
     let terrainCoverageGeneration = 0;
     let detailTerrainMaxZoom: number | undefined;
@@ -1889,6 +1904,19 @@ export function MapView() {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       treeUpdateTimer = window.setTimeout(updateTreeModels, 120);
     };
+    const updateTransitStops = () => {
+      transitStopsTimer = undefined;
+      if (!map.isStyleLoaded()) return;
+      if (map.getZoom() < 9) {
+        transitStopsLayer.clear();
+        return;
+      }
+      void transitStopsLayer.update(map.getBounds(), map.getZoom());
+    };
+    const scheduleTransitStopsUpdate = () => {
+      if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
+      transitStopsTimer = window.setTimeout(updateTransitStops, 220);
+    };
     const invalidateAndScheduleModels = () => {
       modelDataRevision += 1;
       scheduleTreeUpdate();
@@ -1938,14 +1966,25 @@ export function MapView() {
         if (bridgeLayer) map.addLayer(bridgeLayer, 'places-labels');
         if (infrastructureLayer) map.addLayer(infrastructureLayer, 'places-labels');
         map.addLayer(treeLayer, 'places-labels');
+        map.addLayer(transitVehicleLayer, 'places-labels');
       } else {
         map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
         map.addLayer(treeLayer, 'global-road-labels');
+        map.addLayer(transitVehicleLayer, 'global-road-labels');
       }
+      void transitStopsLayer.install(map, setSelectedTransitStop).then(() => {
+        if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
+        map.moveLayer(transitVehicleLayer.id, 'transitous-estimated-vehicle-label');
+        updateTransitStops();
+      });
+      ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels'].forEach((layerId) => {
+        if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
+      });
       updateGlobalRoadWidths();
       updateGlobalLabelDensity();
       scheduleTreeUpdate();
       scheduleTerrainResolutionUpdate();
+      scheduleTransitStopsUpdate();
       initialLoadComplete = true;
       setMapLoaded(true);
     });
@@ -1954,6 +1993,7 @@ export function MapView() {
       updatePastelBuildingColors();
       scheduleTreeUpdate();
       scheduleTerrainResolutionUpdate();
+      scheduleTransitStopsUpdate();
     };
     const handleCameraMove = () => updateGlobalLabelDensity();
     map.on('move', handleCameraMove);
@@ -1985,6 +2025,7 @@ export function MapView() {
 
     return () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
+      if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       if (terrainCoverageTimer !== undefined) window.clearTimeout(terrainCoverageTimer);
       terrainCoverageGeneration += 1;
       map.off('move', handleCameraMove);
@@ -1992,11 +2033,13 @@ export function MapView() {
       map.off('sourcedata', handleModelSourceData);
       map.off('idle', scheduleTreeUpdate);
       map.off('idle', updatePastelBuildingColors);
+      transitStopsLayer.dispose();
       map.remove();
       mapRef.current = null;
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
       infrastructureLayerRef.current = null;
+      transitStopsLayerRef.current = null;
     };
   }, []);
 
@@ -2055,7 +2098,8 @@ export function MapView() {
   }, [layerToggles, mapLoaded]);
 
   return (
-    <div ref={containerRef} className="map-canvas">
+    <div className="map-view">
+      <div ref={containerRef} className="map-canvas" />
       {!mapLoaded && !mapError && <div className="map-status">Loading map…</div>}
       {mapError && (
         <div className="map-status map-status-error">
@@ -2066,6 +2110,26 @@ export function MapView() {
       )}
       {mapLoaded && !mapError && (
         <>
+          {selectedTransitStop && (
+            <TransitDeparturesPanel
+              stop={selectedTransitStop}
+              onDepartureSelect={({ tripId, mode, color }) => {
+                void transitStopsLayerRef.current?.selectTrip(tripId, mode, color);
+              }}
+              onClose={() => {
+                transitStopsLayerRef.current?.clearSelection();
+                setSelectedTransitStop(null);
+              }}
+            />
+          )}
+          <a
+            className="transitous-attribution"
+            href="https://transitous.org/sources/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Transit data by Transitous
+          </a>
           <div className={`layer-control${layersOpen ? ' layer-control-open' : ''}`}>
             <button
               className="layer-control-trigger"
