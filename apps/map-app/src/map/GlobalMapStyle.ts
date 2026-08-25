@@ -38,6 +38,24 @@ const ROAD_FILTER: ExpressionSpecification = [
   ['in', ['get', 'class'], ['literal', ROAD_CLASSES]],
 ] as ExpressionSpecification;
 
+const OVERVIEW_ROAD_FILTER: ExpressionSpecification = [
+  'all',
+  ROAD_FILTER,
+  ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary']]],
+] as ExpressionSpecification;
+
+const REGIONAL_ROAD_FILTER: ExpressionSpecification = [
+  'all',
+  ROAD_FILTER,
+  ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary']]],
+] as ExpressionSpecification;
+
+const OVERVIEW_RAIL_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+] as ExpressionSpecification;
+
 const SURFACE_ROAD_FILTER: ExpressionSpecification = [
   'all',
   ROAD_FILTER,
@@ -74,13 +92,13 @@ const ROAD_COLOR: ExpressionSpecification = [
   ['==', ['get', 'surface'], 'unpaved'], '#d0c7b6',
   [
     'match', ['get', 'class'],
-    'motorway', '#b5b9b7',
-    'trunk', '#b7bab8',
-    'primary', '#b9bbb8',
-    'secondary', '#bcbdb9',
-    'tertiary', '#bebfba',
-    'service', '#c4c4be',
-    '#c0c1bb',
+    'motorway', '#c0c4c1',
+    'trunk', '#c2c5c2',
+    'primary', '#c4c6c2',
+    'secondary', '#c6c8c4',
+    'tertiary', '#c8c9c4',
+    'service', '#cdcdc7',
+    '#c9cac5',
   ],
 ] as ExpressionSpecification;
 
@@ -159,34 +177,62 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
 ];
 
 const TAGGED_BUILDING_COLOR: ExpressionSpecification = [
-  'match', ['downcase', ['to-string', ['get', 'colour']]],
-  'red', '#dc9f92',
-  'green', '#acd0aa',
-  'blue', '#a9c8d8',
-  'yellow', '#eadb9d',
+  'match', ['downcase', ['to-string', ['coalesce', ['get', 'colour'], ['get', 'color'], '']]],
+  'black', '#a3a8a5',
+  'red', '#d2ada8',
+  'green', '#c4cec0',
+  'blue', '#b3cfdb',
+  'brown', '#c8b6a5',
+  'beige', '#dfd0ad',
+  'orange', '#dfb18a',
+  'pink', '#ddb5bd',
+  'maroon', '#b99396',
+  'silver', '#c7ccca',
+  'yellow', '#dfcb91',
   'white', '#f1f2ed',
-  'grey', '#d0d5d2',
-  'gray', '#d0d5d2',
-  ['to-color', ['get', 'colour'], '#e1e5e0'],
+  'lightgray', '#d7dcda',
+  'lightgrey', '#d7dcda',
+  'grey', '#d6dbd8',
+  'gray', '#d6dbd8',
+  '#e3e6e1',
 ] as ExpressionSpecification;
 
-const GLOBAL_BUILDING_COLOR: ExpressionSpecification = [
+// Temporary visual experiment: keep the building material system and facade
+// depth, but remove source-specific building colors so we can judge the map's
+// hierarchy and lighting independently of landmark colors.
+const SHOW_SOURCE_BUILDING_COLORS = false;
+
+const GLOBAL_BUILDING_SOURCE_COLOR: ExpressionSpecification = [
   'case',
-  ['has', 'colour'],
+  ['any', ['has', 'colour'], ['has', 'color']],
   TAGGED_BUILDING_COLOR,
   '#efefeb',
 ] as ExpressionSpecification;
 
-const GLOBAL_BUILDING_COLOR_ALT: ExpressionSpecification = [
+const GLOBAL_BUILDING_COLOR: ExpressionSpecification = [
   'case',
-  ['has', 'colour'],
+  SHOW_SOURCE_BUILDING_COLORS,
+  ['coalesce', ['feature-state', 'pastelBuildingColor'], GLOBAL_BUILDING_SOURCE_COLOR],
+  '#efefeb',
+] as ExpressionSpecification;
+
+const GLOBAL_BUILDING_SOURCE_COLOR_ALT: ExpressionSpecification = [
+  'case',
+  ['any', ['has', 'colour'], ['has', 'color']],
   TAGGED_BUILDING_COLOR,
   '#dedfda',
 ] as ExpressionSpecification;
 
-const GLOBAL_BUILDING_DETAIL_BAND_COLOR: ExpressionSpecification = [
+const GLOBAL_BUILDING_COLOR_ALT: ExpressionSpecification = [
   'case',
-  ['has', 'colour'],
+  SHOW_SOURCE_BUILDING_COLORS,
+  ['coalesce', ['feature-state', 'pastelBuildingColorAlt'], GLOBAL_BUILDING_SOURCE_COLOR_ALT],
+  '#dedfda',
+] as ExpressionSpecification;
+
+const GLOBAL_BUILDING_DETAIL_BAND_SOURCE_COLOR: ExpressionSpecification = [
+  'case',
+  ['any', ['has', 'colour'], ['has', 'color']],
   [
     'interpolate', ['linear'], 0.16,
     0, TAGGED_BUILDING_COLOR,
@@ -195,8 +241,15 @@ const GLOBAL_BUILDING_DETAIL_BAND_COLOR: ExpressionSpecification = [
   '#d1d5d2',
 ] as ExpressionSpecification;
 
-const GLOBAL_BUILDING_ROOF_COLOR = '#858f93';
-const GLOBAL_BUILDING_ROOF_RIM_COLOR = '#6f7a7e';
+const GLOBAL_BUILDING_DETAIL_BAND_COLOR: ExpressionSpecification = [
+  'case',
+  SHOW_SOURCE_BUILDING_COLORS,
+  ['coalesce', ['feature-state', 'pastelBuildingBandColor'], GLOBAL_BUILDING_DETAIL_BAND_SOURCE_COLOR],
+  '#d1d5d2',
+] as ExpressionSpecification;
+
+const GLOBAL_BUILDING_ROOF_COLOR = '#aab3af';
+const GLOBAL_BUILDING_ROOF_RIM_COLOR = '#8f9995';
 
 const GLOBAL_BUILDING_BASE: ExpressionSpecification = [
   'coalesce', ['get', 'render_min_height'], 0,
@@ -296,7 +349,7 @@ function globalBuildingFacadeLayer(
         13.45, 0.96,
         18, 1,
       ],
-      'fill-extrusion-vertical-gradient': false,
+      'fill-extrusion-vertical-gradient': true,
     },
   };
 }
@@ -320,23 +373,9 @@ function globalBuildingFacadeLayers(): FillExtrusionLayerSpecification[] {
     globalBuildingFacadeLayer(
       GLOBAL_BUILDING_FACADE_LAYER_IDS[1],
       GLOBAL_BUILDING_FIRST_STORY_TOP,
-      GLOBAL_BUILDING_LOWER_BAND_BASE,
-      GLOBAL_BUILDING_COLOR,
-      2,
-    ),
-    globalBuildingFacadeLayer(
-      GLOBAL_BUILDING_FACADE_LAYER_IDS[2],
-      GLOBAL_BUILDING_LOWER_BAND_BASE,
-      GLOBAL_BUILDING_SECOND_STORY_TOP,
-      GLOBAL_BUILDING_BAND_COLOR,
-      2,
-    ),
-    globalBuildingFacadeLayer(
-      GLOBAL_BUILDING_FACADE_LAYER_IDS[3],
-      GLOBAL_BUILDING_SECOND_STORY_TOP,
       middleFacadeTop,
       GLOBAL_BUILDING_COLOR,
-      3,
+      2,
     ),
     globalBuildingFacadeLayer(
       GLOBAL_BUILDING_FACADE_LAYER_IDS[4],
@@ -436,7 +475,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     anchor: 'map',
     position: CARTOON_MAP_LIGHT_POSITION,
     color: GLOBAL_MAP_SUN_COLOR,
-    intensity: 0.16,
+    intensity: 0.22,
   },
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
   sources: {
@@ -470,6 +509,38 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: { 'background-color': '#b8d3aa' },
     },
     {
+      id: 'global-regional-roads',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 2,
+      maxzoom: 7,
+      filter: REGIONAL_ROAD_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'class'],
+          'motorway', '#919f9a',
+          'trunk', '#9aa7a2',
+          'primary', '#a4afa9',
+          'secondary', '#adb6af',
+          '#b5bcb5',
+        ],
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          2, ['match', ['get', 'class'], 'motorway', 1, 'trunk', 0.85, 'primary', 0.7, 0.55],
+          5, ['match', ['get', 'class'], 'motorway', 1.7, 'trunk', 1.45, 'primary', 1.15, 0.9],
+          7, ['match', ['get', 'class'], 'motorway', 2.2, 'trunk', 1.9, 'primary', 1.55, 1.2],
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          2, 0.8,
+          5, 0.86,
+          7, 0.9,
+        ],
+      },
+    },
+    {
       id: 'global-landcover',
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
@@ -477,16 +548,16 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'fill-color': [
           'case',
-          ['==', ['get', 'subclass'], 'park'], '#9dce78',
-          ['in', ['get', 'subclass'], ['literal', ['scrub', 'shrubbery', 'heath']]], '#a8c98c',
-          ['in', ['get', 'subclass'], ['literal', ['orchard', 'plant_nursery']]], '#c5d79a',
+          ['==', ['get', 'subclass'], 'park'], '#c1d1a6',
+          ['in', ['get', 'subclass'], ['literal', ['scrub', 'shrubbery', 'heath']]], '#c8d3b2',
+          ['in', ['get', 'subclass'], ['literal', ['orchard', 'plant_nursery']]], '#d0d9b4',
           ['==', ['get', 'subclass'], 'vineyard'], '#d4d5a2',
           ['in', ['get', 'subclass'], ['literal', ['garden', 'flowerbed']]], '#c5dda8',
           ['in', ['get', 'subclass'], ['literal', ['meadow', 'grassland', 'village_green']]], '#c8dea8',
           [
             'match', ['get', 'class'],
-            'wood', '#86b978',
-            'grass', '#b8d99f',
+            'wood', '#b7c9a6',
+            'grass', '#c4d5ae',
             'farmland', '#edf0bb',
             'wetland', '#c6d9ad',
             'sand', '#f4dfa7',
@@ -519,7 +590,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'college', '#d9dfc6',
           'hospital', '#d9ddd6',
           'parking', '#dad8d2',
-          'park', '#9dce78',
+          'park', '#c1d1a6',
           'garden', '#aad68a',
           'allotments', '#c8dca9',
           'orchard', '#c5d79a',
@@ -541,7 +612,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
-      paint: { 'fill-color': '#9dce78', 'fill-opacity': 0.96 },
+      paint: { 'fill-color': '#c1d1a6', 'fill-opacity': 0.96 },
     },
     {
       id: 'global-aeroway-areas',
@@ -604,7 +675,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'waterway',
       paint: {
-        'line-color': '#5faec8',
+        'line-color': '#8fb8c3',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 16, 3],
       },
     },
@@ -614,14 +685,14 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
       paint: {
-        'fill-color': '#285f82',
+        'fill-color': '#91b4be',
         'fill-translate': [
           'interpolate', ['linear'], ['zoom'],
           0, ['literal', [0.4, -0.4]],
           18, ['literal', [2.5, -2.5]],
         ],
         'fill-translate-anchor': 'map',
-        'fill-opacity': 0.14,
+        'fill-opacity': 0.1,
       },
     },
     {
@@ -629,7 +700,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
-      paint: { 'fill-color': '#5d9dbf' },
+      paint: { 'fill-color': '#91bac5' },
     },
     {
       id: 'global-pedestrian-areas',
@@ -797,6 +868,40 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'global-overview-roads',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 3,
+      maxzoom: 13,
+      filter: OVERVIEW_ROAD_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'class'],
+          'motorway', '#8f9d98',
+          'trunk', '#98a59f',
+          'primary', '#a2aca6',
+          'secondary', '#aab3ad',
+          '#b2bab3',
+        ],
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          3, ['match', ['get', 'class'], 'motorway', 1.3, 'trunk', 1.05, 'primary', 0.85, 0.65],
+          6, ['match', ['get', 'class'], 'motorway', 2, 'trunk', 1.65, 'primary', 1.3, 1.05],
+          10, ['match', ['get', 'class'], 'motorway', 3, 'trunk', 2.6, 'primary', 2.3, 2],
+          13, ['match', ['get', 'class'], 'motorway', 3.7, 'trunk', 3.3, 'primary', 2.9, 2.5],
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          3, 0.82,
+          6, 0.9,
+          10, 0.94,
+          13, 0.96,
+        ],
+      },
+    },
+    {
       id: 'global-road-casing',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -808,9 +913,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        'line-color': '#a4aba8',
+        'line-color': '#b0b6b2',
         'line-width': roadWidthExpression(61.4981, true),
-        'line-opacity': 0.72,
+        'line-opacity': 0.6,
       },
     },
     {
@@ -981,7 +1086,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': '#f3f0e9',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.35, 18, 5],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.82],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.66],
       },
     },
     {
@@ -1017,9 +1122,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#c68173',
+        'line-color': '#b99a91',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 3.8],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.88],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.76],
       },
     },
     {
@@ -1142,7 +1247,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'transit', '#769ba0',
+          'transit', '#909a9d',
           '#909a9d',
         ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 18, 2.2],
@@ -1151,11 +1256,36 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'global-overview-railways',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 3,
+      maxzoom: 12,
+      filter: OVERVIEW_RAIL_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#7f898b',
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          3, 1,
+          6, 1.35,
+          8, 1.8,
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          3, 0.78,
+          6, 0.86,
+          8, 0.9,
+        ],
+      },
+    },
+    {
       id: 'global-railway-bed',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
-      minzoom: 8,
+      minzoom: 7,
       filter: [
         'all',
         ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
@@ -1165,11 +1295,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'transit', '#d4e5e3',
+          'transit', '#c0c5c2',
           '#c0c5c2',
         ],
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 14, 2.4, 18, 8],
-        'line-opacity': 0.72,
+        'line-opacity': 0.82,
       },
     },
     {
@@ -1201,7 +1331,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
-      minzoom: 11,
+      minzoom: 8,
       filter: [
         'all',
         ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
@@ -1210,15 +1340,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'transit', '#6f9fa5',
-          '#8f999a',
+          'transit', '#828c8d',
+          '#828c8d',
         ],
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
           11, 0.5,
           18, ['match', ['get', 'class'], 'transit', 1.8, 1.4],
         ],
-        'line-opacity': ['match', ['get', 'class'], 'transit', 0.94, 0.8],
+        'line-opacity': ['match', ['get', 'class'], 'transit', 0.9, 0.86],
       },
     },
     {
@@ -1273,7 +1403,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'transit', '#8eb6b8',
+          'transit', '#d0d5d1',
           '#d0d5d1',
         ],
         'line-width': [
@@ -1306,7 +1436,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'building',
-      minzoom: 13,
+      minzoom: 14,
       maxzoom: 13.75,
       paint: {
         'fill-color': GLOBAL_BUILDING_COLOR,
@@ -1347,8 +1477,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.5, 0.08,
-          18, 0.15,
+          13.5, 0.1,
+          18, 0.19,
         ],
       },
     },
@@ -1382,8 +1512,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.45, 0.15,
-          18, 0.28,
+          13.45, 0.18,
+          18, 0.34,
         ],
       },
     },
@@ -1592,9 +1722,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-padding': 26,
       },
       paint: {
-        'text-color': '#965d53',
+        'text-color': '#89736e',
         'text-halo-color': '#faf8f2',
-        'text-halo-width': 1.45,
+        'text-halo-width': 1.25,
       },
     },
     {
@@ -1602,7 +1732,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation_name',
-      minzoom: 8,
+      minzoom: 11,
       filter: [
         'all',
         ['has', 'name'],
@@ -1649,9 +1779,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-font': ['Noto Sans Regular'],
       },
       paint: {
-        'text-color': '#8fc1d7',
-        'text-halo-color': '#5d9dbf',
-        'text-halo-width': 1.25,
+        'text-color': '#d7edf0',
+        'text-halo-color': '#79aeba',
+        'text-halo-width': 1.45,
       },
     },
     {
@@ -1659,7 +1789,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
-      minzoom: 11,
+      minzoom: 13,
       filter: ['has', 'name'],
       layout: {
         'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
@@ -1796,7 +1926,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'poi',
-      minzoom: 13,
+      minzoom: 15,
       filter: [
         'all',
         ['has', 'name'],

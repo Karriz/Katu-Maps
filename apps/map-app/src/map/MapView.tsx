@@ -45,9 +45,9 @@ const USE_LOCAL_MAP_DATA = import.meta.env.VITE_MAP_DATA_PROVIDER === 'local';
 // expensive building detail until it is large enough to be readable.
 const BUILDING_DETAIL_MIN_ZOOM = 17;
 const MAX_BUILDING_STORY_SLICES = 25;
-const GROUND_COLOR = '#e8ece5';
-const WATER_COLOR = '#397da6';
-const WATER_EDGE_COLOR = '#285f82';
+const GROUND_COLOR = '#f0f1ed';
+const WATER_COLOR = '#a9c8d3';
+const WATER_EDGE_COLOR = '#8eafb9';
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = [
   'water-pattern',
@@ -97,8 +97,8 @@ const BUILDING_LAYER_IDS = [
 
 function createWaterPattern(size: number) {
   const data = new Uint8ClampedArray(size * size * 4);
-  const shadow = [25, 67, 104];
-  const highlight = [83, 148, 180];
+  const shadow = [116, 157, 168];
+  const highlight = [174, 207, 211];
   const tau = Math.PI * 2;
 
   for (let y = 0; y < size; y += 1) {
@@ -123,6 +123,64 @@ function createWaterPattern(size: number) {
   return { width: size, height: size, data };
 }
 
+const BUILDING_COLOR_NAMES: Record<string, string> = {
+  black: '#202522', white: '#f1f2ed', gray: '#808080', grey: '#808080',
+  lightgray: '#d3d3d3', lightgrey: '#d3d3d3', silver: '#c0c0c0',
+  red: '#b94a48', green: '#4f8a5b', blue: '#3366aa', brown: '#8b5a3c',
+  beige: '#d8c9a7', orange: '#e58a3a', pink: '#e69aaa', maroon: '#7f3038',
+  yellow: '#e5c34b',
+};
+
+function pastelBuildingColor(value: unknown, blend = 0.28) {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase().replace(/^#/, '');
+  const hex = BUILDING_COLOR_NAMES[normalized]?.slice(1) ?? (
+    normalized.length === 3
+      ? normalized.split('').map((part) => `${part}${part}`).join('')
+      : normalized
+  );
+  if (!/^[0-9a-f]{6}$/.test(hex)) return undefined;
+  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const lightness = (max + min) / 2;
+  const delta = max - min;
+  let hue = 0;
+  if (delta > 0) {
+    if (max === red) hue = ((green - blue) / delta) % 6;
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue /= 6;
+    if (hue < 0) hue += 1;
+  }
+  const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
+  const hueSaturationScale = (hue >= 0.2 && hue <= 0.45)
+    ? 0.62 // greens read especially strongly against ivory buildings
+    : (hue <= 0.08 || hue >= 0.92)
+      ? 0.68 // reds
+      : (hue > 0.08 && hue < 0.18)
+        ? 0.72 // orange and brown
+        : 1;
+  const nextSaturation = Math.min(saturation * hueSaturationScale, 0.22);
+  const nextLightness = saturation <= 0.18 && lightness >= 0.46 && lightness <= 0.88
+    ? lightness
+    : Math.min(0.84, Math.max(0.46, lightness * (1 - blend) + 0.62 * blend));
+  const chroma = (1 - Math.abs(2 * nextLightness - 1)) * nextSaturation;
+  const second = nextLightness - chroma / 2;
+  const huePart = (hue * 6) % 2;
+  const x = chroma * (1 - Math.abs(huePart - 1));
+  const [r, g, b] = hue < 1 / 6 ? [chroma, x, 0]
+    : hue < 2 / 6 ? [x, chroma, 0]
+      : hue < 3 / 6 ? [0, chroma, x]
+        : hue < 4 / 6 ? [0, x, chroma]
+          : hue < 5 / 6 ? [x, 0, chroma]
+            : [chroma, 0, x];
+  const channel = (part: number) => Math.round((part + second) * 255).toString(16).padStart(2, '0');
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
 function waterPatternLayers(): FillLayerSpecification[] {
   const layerDefinitions = [
     ['water-pattern', 'water'],
@@ -140,12 +198,12 @@ function waterPatternLayers(): FillLayerSpecification[] {
       'fill-pattern': WATER_PATTERN_ID,
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
-        0, 0.08,
-        10, 0.12,
-        12, 0.14,
-        14, 0.16,
-        15.5, 0.24,
-        18, 0.28,
+        0, 0.05,
+        10, 0.08,
+        12, 0.1,
+        14, 0.12,
+        15.5, 0.14,
+        18, 0.17,
       ],
     },
   }));
@@ -161,10 +219,10 @@ function globalWaterPatternLayer(): FillLayerSpecification {
       'fill-pattern': WATER_PATTERN_ID,
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
-        0, 0.08,
-        10, 0.14,
-        14, 0.2,
-        18, 0.28,
+        0, 0.05,
+        10, 0.08,
+        14, 0.12,
+        18, 0.17,
       ],
     },
   };
@@ -186,10 +244,10 @@ const DEFAULT_BUILDING_PALETTE_ALT = seededBuildingPalette([
   '#dfe5df', '#dce4e8', '#e4dce6', '#e4e1d8',
 ]);
 const RESIDENTIAL_BUILDING_PALETTE = seededBuildingPalette([
-  '#f2d9ce', '#e5e9f3', '#f3e4bd', '#d8ebe4',
+  '#eadbd4', '#e1e7ed', '#eee5cb', '#dce9e2',
 ]);
 const RESIDENTIAL_BUILDING_PALETTE_ALT = seededBuildingPalette([
-  '#e3c8bd', '#d6dde9', '#e4d4ab', '#c9ded6',
+  '#dfd1cb', '#d5dfe8', '#e2d7bb', '#cbded5',
 ]);
 const APARTMENT_BUILDING_PALETTE = seededBuildingPalette([
   '#e6ebf2', '#eee7e2', '#e2edf0', '#f0e8d8',
@@ -520,7 +578,7 @@ function railwayRailLayers(): LineLayerSpecification[] {
     ],
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#747e80',
+      'line-color': '#8d9898',
       'line-width': [
         'interpolate', ['exponential', 2], ['zoom'],
         12, 0.6,
@@ -536,7 +594,7 @@ function railwayRailLayers(): LineLayerSpecification[] {
         18, side * 5.348,
         20, side * 12,
       ],
-      'line-opacity': 0.8,
+      'line-opacity': 0.66,
     },
   }));
 }
@@ -589,10 +647,10 @@ const TAMPERE_STYLE: StyleSpecification = {
         'fill-color': [
           'match',
           ['get', 'class'],
-          'forest', '#7eae70',
-          'wood', '#86b978',
-          'scrub', '#b8d58f',
-          'shrubbery', '#a8cb91',
+          'forest', '#b8caaa',
+          'wood', '#c2d1b4',
+          'scrub', '#d0d9b8',
+          'shrubbery', '#c9d7bc',
           'heath', '#e9e5b6',
           'wetland', [
             'match',
@@ -616,12 +674,12 @@ const TAMPERE_STYLE: StyleSpecification = {
           'vineyard', '#e2ebc0',
           'plant_nursery', '#c9dda9',
           'greenhouse_horticulture', '#dbe4c5',
-          'park', '#9dce78',
-          'recreation_ground', '#a0d77a',
-          'meadow', '#b5dd8e',
-          'grass', '#a8d882',
-          'grassland', '#a6d47f',
-          'garden', '#aad68a',
+          'park', '#c6d6aa',
+          'recreation_ground', '#c8d9ae',
+          'meadow', '#d1dfb9',
+          'grass', '#cbdcb0',
+          'grassland', '#c9d9aa',
+          'garden', '#cbdcb4',
           'dog_park', '#9fd275',
           'village_green', '#9dd273',
           'allotments', '#c9dc9f',
@@ -639,9 +697,9 @@ const TAMPERE_STYLE: StyleSpecification = {
           'golf_course', '#d0e8bd',
           'fitness_station', '#c0dba8',
           'ice_rink', '#d3e8e8',
-          'swimming_pool', '#a9d8e6',
-          'swimming_area', '#b6dce7',
-          'marina', '#c4dce4',
+          'swimming_pool', '#b8d8df',
+          'swimming_area', '#c1dfe4',
+          'marina', '#cbdfe2',
           'residential', '#cbd4c6',
           'commercial', '#c7d0ce',
           'retail', '#d8d1bc',
@@ -663,7 +721,7 @@ const TAMPERE_STYLE: StyleSpecification = {
           'brownfield', '#eee2d0',
           GROUND_COLOR,
         ],
-        'fill-opacity': 0.96,
+        'fill-opacity': 0.82,
       },
     },
     {
@@ -672,8 +730,8 @@ const TAMPERE_STYLE: StyleSpecification = {
       source: 'tampere',
       'source-layer': 'waterways',
       paint: {
-        'line-color': '#4b91b7',
-        'line-opacity': 0.9,
+        'line-color': '#8fb7c1',
+        'line-opacity': 0.72,
         'line-width': [
           'match',
           ['get', 'class'],
@@ -695,7 +753,7 @@ const TAMPERE_STYLE: StyleSpecification = {
         'fill-color': WATER_EDGE_COLOR,
         'fill-translate': ['interpolate', ['linear'], ['zoom'], 10, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
         'fill-translate-anchor': 'map',
-        'fill-opacity': 0.14,
+        'fill-opacity': 0.1,
       },
     },
     {
@@ -714,7 +772,7 @@ const TAMPERE_STYLE: StyleSpecification = {
         'fill-color': WATER_EDGE_COLOR,
         'fill-translate': ['interpolate', ['linear'], ['zoom'], 13, ['literal', [0.7, -0.7]], 18, ['literal', [2.5, -2.5]]],
         'fill-translate-anchor': 'map',
-        'fill-opacity': 0.12,
+        'fill-opacity': 0.08,
       },
     },
     {
@@ -908,7 +966,7 @@ const TAMPERE_STYLE: StyleSpecification = {
       type: 'line',
       source: 'tampere',
       'source-layer': 'aeroway',
-      minzoom: 13,
+      minzoom: 14,
       filter: ['==', ['get', 'class'], 'taxiway'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
@@ -1018,9 +1076,9 @@ const TAMPERE_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#adb3b1',
+        'line-color': '#aab3b2',
         'line-width': RAILWAY_BED_WIDTH,
-        'line-opacity': 0.72,
+        'line-opacity': 0.58,
       },
     },
     {
@@ -1036,14 +1094,14 @@ const TAMPERE_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#e7ebe7',
+        'line-color': '#d5dcda',
         'line-width': RAILWAY_SLEEPER_WIDTH,
         'line-dasharray': [0.18, 1.15],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           15.5, 0,
           17, 0.56,
-          18, 0.7,
+          18, 0.48,
         ],
       },
     },
@@ -1163,9 +1221,9 @@ const TAMPERE_STYLE: StyleSpecification = {
         'text-padding': 20,
       },
       paint: {
-        'text-color': '#667073',
+        'text-color': '#7b8588',
         'text-halo-color': '#f8f9f7',
-        'text-halo-width': 1.5,
+        'text-halo-width': 1.2,
       },
     },
     {
@@ -1613,6 +1671,7 @@ export function MapView() {
     let modelDataRevision = 0;
     let lastModelUpdateSignature: string | undefined;
     const modelVectorSourceId = USE_LOCAL_MAP_DATA ? 'tampere' : OPENFREEMAP_SOURCE_ID;
+    const processedBuildingColors = new globalThis.Map<string, { base: string; alt: string; band: string }>();
 
     const setTerrainSource = (sourceId: string) => {
       const sourceChanged = terrainSourceRef.current !== sourceId;
@@ -1754,19 +1813,26 @@ export function MapView() {
       globalLabelPitchBucket = nextBucket;
 
       const opacityByLayer: Array<[string, [number, number, number]]> = [
-        ['global-transit-line-labels', [1, 0.95, 0.88]],
-        ['global-cycleway-labels', [1, 0.92, 0.84]],
-        ['global-road-labels', [0.96, 0.88, 0.78]],
-        ['global-water-labels', [1, 0.94, 0.84]],
-        ['global-park-labels', [1, 0.9, 0.8]],
-        ['global-railway-station-labels', [1, 0.9, 0.82]],
-        ['global-poi-labels', [1, 0.6, 0.24]],
+        ['global-transit-line-labels', [1, 1, 1]],
+        ['global-cycleway-labels', [1, 1, 1]],
+        ['global-road-labels', [1, 1, 1]],
+        ['global-water-labels', [1, 1, 1]],
+        ['global-park-labels', [1, 1, 1]],
+        ['global-railway-station-labels', [1, 1, 1]],
+        ['global-poi-labels', [1, 1, 1]],
       ];
       opacityByLayer.forEach(([layerId, opacity]) => {
         if (map.getLayer(layerId)) {
           map.setPaintProperty(layerId, 'text-opacity', opacity[nextBucket]);
         }
       });
+      if (map.getLayer('global-poi-labels')) {
+        map.setLayoutProperty(
+          'global-poi-labels',
+          'visibility',
+          nextBucket === 2 ? 'none' : 'visible',
+        );
+      }
       if (map.getLayer('global-housenumbers')) {
         map.setLayoutProperty(
           'global-housenumbers',
@@ -1817,9 +1883,38 @@ export function MapView() {
       modelDataRevision += 1;
       scheduleTreeUpdate();
     };
+    const updatePastelBuildingColors = () => {
+      if (USE_LOCAL_MAP_DATA || !map.isStyleLoaded()) return;
+      let changed = false;
+      for (const feature of map.querySourceFeatures(OPENFREEMAP_SOURCE_ID, {
+        sourceLayer: 'building',
+      })) {
+        if (feature.id === undefined || feature.id === null) continue;
+        const value = feature.properties?.colour ?? feature.properties?.color;
+        const base = pastelBuildingColor(value, 0.32);
+        const alt = pastelBuildingColor(value, 0.42);
+        const band = pastelBuildingColor(value, 0.50);
+        if (!base || !alt || !band) continue;
+        const key = String(feature.id);
+        const previous = processedBuildingColors.get(key);
+        if (previous?.base === base && previous.alt === alt && previous.band === band) continue;
+        processedBuildingColors.set(key, { base, alt, band });
+        map.setFeatureState(
+          { source: OPENFREEMAP_SOURCE_ID, sourceLayer: 'building', id: feature.id },
+          {
+            pastelBuildingColor: base,
+            pastelBuildingColorAlt: alt,
+            pastelBuildingBandColor: band,
+          },
+        );
+        changed = true;
+      }
+      if (changed) map.triggerRepaint();
+    };
     const handleModelSourceData = (event: MapSourceDataEvent) => {
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
       modelDataRevision += 1;
+      updatePastelBuildingColors();
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     map.once('load', () => {
@@ -1846,6 +1941,7 @@ export function MapView() {
     });
     const handleMoveEnd = () => {
       updateGlobalRoadWidths();
+      updatePastelBuildingColors();
       scheduleTreeUpdate();
       scheduleTerrainResolutionUpdate();
     };
@@ -1857,6 +1953,7 @@ export function MapView() {
     // a pan/zoom is still filling the viewport. moveend handles interaction;
     // idle handles the final set of newly loaded tiles.
     map.on('idle', scheduleTreeUpdate);
+    map.on('idle', updatePastelBuildingColors);
     map.on('error', (event) => {
       const message = event.error?.message ?? 'The map style could not be loaded.';
       // MapLibre can emit this while backfilling a missing edge DEM tile. It
@@ -1884,6 +1981,7 @@ export function MapView() {
       map.off('moveend', handleMoveEnd);
       map.off('sourcedata', handleModelSourceData);
       map.off('idle', scheduleTreeUpdate);
+      map.off('idle', updatePastelBuildingColors);
       map.remove();
       mapRef.current = null;
       treeRefreshRef.current = null;

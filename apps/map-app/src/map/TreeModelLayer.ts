@@ -724,7 +724,7 @@ export class TreeModelLayer implements CustomLayerInterface {
       const canopyRadius = tree.height
         // Slightly broader crowns create fuller parks without adding another
         // instance or increasing the existing per-zoom tree budgets.
-        * (isShrub ? 0.56 : isConifer ? 0.19 : 0.235)
+        * (isShrub ? 0.58 : isConifer ? 0.21 : 0.27)
         * tree.widthScale;
 
       // A compact shadow under each crown acts as fake ambient occlusion. It
@@ -751,7 +751,7 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       if (isConifer) {
         coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
-        this.color.setHSL(0.31, 0.42, 0.27 + tree.colorVariation * 0.08);
+        this.color.setHSL(0.31, 0.36, 0.29 + tree.colorVariation * 0.08);
         coniferMesh.setColorAt(coniferCount, this.color);
         coniferCount += 1;
       } else if (isShrub) {
@@ -761,7 +761,7 @@ export class TreeModelLayer implements CustomLayerInterface {
         shrubCount += 1;
       } else {
         broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
-        this.color.setHSL(0.29 + tree.colorVariation * 0.035, 0.46, 0.34 + tree.colorVariation * 0.1);
+        this.color.setHSL(0.29 + tree.colorVariation * 0.035, 0.4, 0.36 + tree.colorVariation * 0.1);
         broadleafMesh.setColorAt(broadleafCount, this.color);
         broadleafCount += 1;
       }

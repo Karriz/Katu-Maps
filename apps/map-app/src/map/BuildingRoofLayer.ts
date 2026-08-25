@@ -184,7 +184,7 @@ function topStoreyColor(properties: Record<string, unknown>, id: SourceFeature['
 
 function roofColor(properties: Record<string, unknown>, id: SourceFeature['id']) {
   if (typeof properties.roof_color === 'string' && properties.roof_color) {
-    return properties.roof_color;
+    return pastelizeColor(properties.roof_color, DEFAULT_ROOF_COLOR);
   }
   const levels = Number(properties.levels);
   if (Number.isFinite(levels) && levels >= 10 && !isReligiousBuilding(properties)) {
@@ -195,7 +195,22 @@ function roofColor(properties: Record<string, unknown>, id: SourceFeature['id'])
 
 function wallColor(properties: Record<string, unknown>) {
   const value = properties.building_color_alt ?? properties.building_color;
-  return typeof value === 'string' && value ? value : '#ece9e3';
+  return typeof value === 'string' && value ? pastelizeColor(value, '#ece9e3') : '#ece9e3';
+}
+
+// Keep source colours useful without allowing neon or near-black buildings to
+// overwhelm the intentionally quiet map palette.
+function pastelizeColor(value: string, fallback: string) {
+  const color = new THREE.Color();
+  try { color.set(value); } catch { return fallback; }
+  const hsl = { h: 0, s: 0, l: 0 };
+  color.getHSL(hsl);
+  // Preserve enough chroma and mid-tone lightness for the source hue to stay
+  // legible, while still preventing neon and near-black building surfaces.
+  hsl.s = Math.min(hsl.s, 0.36);
+  hsl.l = Math.min(0.84, Math.max(0.46, hsl.l * 0.62 + 0.18));
+  color.setHSL(hsl.h, hsl.s, hsl.l);
+  return `#${color.getHexString()}`;
 }
 
 function isChurchTower(properties: Record<string, unknown>) {
