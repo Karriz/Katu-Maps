@@ -69,6 +69,21 @@ const PATH_BRIDGE_FILTER: ExpressionSpecification = [
   ['==', ['get', 'brunnel'], 'bridge'],
 ] as ExpressionSpecification;
 
+const BRIDGE_PATH_WIDTH_METRES: ExpressionSpecification = [
+  'case',
+  ['==', ['get', 'class'], 'track'], 3,
+  ['==', ['get', 'class'], 'path_construction'], 2,
+  ['all', ['==', ['get', 'class'], 'path'], ['==', ['get', 'subclass'], 'cycleway']], 2.5,
+  1.8,
+] as ExpressionSpecification;
+
+const BRIDGE_PATH_EDGE_COLOR: ExpressionSpecification = [
+  'case',
+  ['all', ['==', ['get', 'class'], 'path'], ['==', ['get', 'subclass'], 'cycleway']], '#b99a91',
+  ['==', ['get', 'class'], 'path_construction'], '#b5a997',
+  '#d8d4ca',
+] as ExpressionSpecification;
+
 const PIER_AREA_FILTER: ExpressionSpecification = [
   'all',
   ['==', ['geometry-type'], 'Polygon'],
@@ -125,6 +140,41 @@ const ROAD_SORT_KEY: ExpressionSpecification = [
     0.3,
   ],
 ] as ExpressionSpecification;
+
+const BRIDGE_DECK_LAYER_IDS = new Set([
+  'global-bridge-deck-shadow',
+  'global-bridge-decks',
+]);
+
+const BRIDGE_OVERLAY_LAYER_IDS = new Set([
+  'global-road-bridge-shadow',
+  'global-road-bridge-casing',
+  'global-road-bridges',
+  'global-path-bridge-shadow',
+  'global-path-bridge-edge',
+  'global-bridge-deck-edge',
+  'global-railway-bridge-shadow',
+  'global-railway-bridge-casing',
+  'global-railway-bridges',
+]);
+
+function orderBridgeLayers(layers: StyleSpecification['layers']): StyleSpecification['layers'] {
+  const bridgeDeckLayers = layers.filter((layer) => BRIDGE_DECK_LAYER_IDS.has(layer.id));
+  const bridgeOverlayLayers = layers.filter((layer) => BRIDGE_OVERLAY_LAYER_IDS.has(layer.id));
+  const layersWithoutBridgeGeometry = layers.filter((layer) => (
+    !BRIDGE_DECK_LAYER_IDS.has(layer.id) && !BRIDGE_OVERLAY_LAYER_IDS.has(layer.id)
+  ));
+  const railwayIndex = layersWithoutBridgeGeometry.findIndex((layer) => layer.id === 'global-railways');
+
+  if (railwayIndex === -1) return layers;
+
+  return [
+    ...layersWithoutBridgeGeometry.slice(0, railwayIndex + 1),
+    ...bridgeDeckLayers,
+    ...bridgeOverlayLayers,
+    ...layersWithoutBridgeGeometry.slice(railwayIndex + 1),
+  ];
+}
 
 export const GLOBAL_ROAD_CASING_LAYER_IDS = [
   'global-road-tunnel-casing',
@@ -259,6 +309,24 @@ export function roadWidthExpression(
   ] as ExpressionSpecification;
 }
 
+function pathWidthExpression(
+  widthMetres: number | ExpressionSpecification,
+  latitude: number,
+  casing = false,
+): ExpressionSpecification {
+  const renderedWidthMetres: number | ExpressionSpecification = casing
+    ? ['+', widthMetres, 0.6] as ExpressionSpecification
+    : widthMetres;
+
+  return [
+    'interpolate', ['exponential', 2], ['zoom'],
+    12, ['max', casing ? 1 : 0.6, ['*', renderedWidthMetres, pixelsPerMetre(12, latitude)]],
+    14, ['*', renderedWidthMetres, pixelsPerMetre(14, latitude)],
+    16, ['*', renderedWidthMetres, pixelsPerMetre(16, latitude)],
+    18, ['*', renderedWidthMetres, pixelsPerMetre(18, latitude) * 0.82],
+  ] as ExpressionSpecification;
+}
+
 export const GLOBAL_MAP_STYLE: StyleSpecification = {
   version: 8,
   name: 'Global OpenFreeMap with Mapterhorn terrain',
@@ -304,7 +372,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       attribution: '<a href="https://mapterhorn.com/attribution/">© Mapterhorn terrain data</a>',
     },
   },
-  layers: [
+  layers: orderBridgeLayers([
     {
       id: 'global-background',
       type: 'background',
@@ -925,7 +993,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.6, 18, 7],
+        'line-width': pathWidthExpression(BRIDGE_PATH_WIDTH_METRES, 61.4981, true),
         'line-translate': [1.5, -1.5],
         'line-translate-anchor': 'map',
         'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.6, 18, 1.2],
@@ -941,8 +1009,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: PATH_BRIDGE_FILTER,
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#87918d',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.2, 18, 6.2],
+        'line-color': BRIDGE_PATH_EDGE_COLOR,
+        'line-width': pathWidthExpression(BRIDGE_PATH_WIDTH_METRES, 61.4981, true),
         'line-opacity': 0.84,
       },
     },
@@ -960,7 +1028,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#d8d4ca',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.3, 18, 4.1],
+        'line-width': pathWidthExpression(
+          ['case', ['==', ['get', 'class'], 'track'], 3, 1.8] as ExpressionSpecification,
+          61.4981,
+          true,
+        ),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.42],
       },
     },
@@ -978,7 +1050,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#f3f0e9',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.35, 18, 5],
+        'line-width': pathWidthExpression(2.5, 61.4981, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.66],
       },
     },
@@ -1016,7 +1088,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#b99a91',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 18, 3.8],
+        'line-width': pathWidthExpression(2.5, 61.4981),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.76],
       },
     },
@@ -1039,7 +1111,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'unpaved', '#a99578',
           '#a99c86',
         ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.65],
+        'line-width': pathWidthExpression(1.8, 61.4981),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.52],
       },
     },
@@ -1893,5 +1965,5 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-halo-width': 1,
       },
     },
-  ],
+  ]),
 };
