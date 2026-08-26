@@ -1,0 +1,20 @@
+{
+  "name": "Tampere 3D Map",
+  "short_name": "Tampere Map",
+  "description": "A 3D map with transit stops, live departures, and route planning.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07111c",
+  "theme_color": "#0e1726",
+  "orientation": "any",
+  "categories": ["navigation", "travel"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

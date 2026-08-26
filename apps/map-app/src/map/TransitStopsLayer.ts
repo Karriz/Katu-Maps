@@ -7,7 +7,7 @@ import type {
   Point,
   SymbolLayerSpecification,
 } from 'maplibre-gl';
-import { BusFront, Navigation, TrainFront, TrainFrontTunnel, TramFront } from 'lucide-react';
+import { BusFront, ChevronUp, TrainFront, TrainFrontTunnel, TramFront } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
@@ -68,7 +68,7 @@ type EstimatedTripLeg = {
   realTime: boolean;
 };
 
-type SelectedTrip = { tripId: string; mode: string; color: string };
+type SelectedTrip = { tripId: string; mode: string; color: string; showRoute: boolean };
 
 export type TransitVehiclePose = {
   mode: string;
@@ -281,8 +281,9 @@ function decodePolyline(points: string, precision: number): [number, number][] {
 }
 
 function timestamp(value: unknown) {
-  if (typeof value !== 'string') return undefined;
-  const parsed = new Date(value).getTime();
+  const parsed = typeof value === 'number'
+    ? value < 10_000_000_000 ? value * 1000 : value
+    : typeof value === 'string' ? new Date(value).getTime() : NaN;
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
@@ -364,13 +365,14 @@ function buildEstimatedTripLeg(leg: TripLeg, coordinates: [number, number][]) {
 
 function estimatedDistance(leg: EstimatedTripLeg, time: number) {
   const { anchors } = leg;
-  if (time < anchors[0].time || time > anchors[anchors.length - 1].time) return undefined;
-  let nextAnchorIndex = anchors.findIndex((anchor) => anchor.time >= time);
+  if (!anchors.length) return undefined;
+  const clampedTime = Math.max(anchors[0].time, Math.min(anchors[anchors.length - 1].time, time));
+  let nextAnchorIndex = anchors.findIndex((anchor) => anchor.time >= clampedTime);
   if (nextAnchorIndex < 0) nextAnchorIndex = anchors.length - 1;
   const nextAnchor = anchors[nextAnchorIndex];
   const previousAnchor = anchors[Math.max(0, nextAnchorIndex - 1)];
   const duration = nextAnchor.time - previousAnchor.time;
-  const progress = duration > 0 ? (time - previousAnchor.time) / duration : 1;
+  const progress = duration > 0 ? (clampedTime - previousAnchor.time) / duration : 1;
   return previousAnchor.distance
     + (nextAnchor.distance - previousAnchor.distance) * Math.max(0, Math.min(1, progress));
 }
@@ -469,7 +471,7 @@ export class TransitStopsLayer {
       addTransitIcon(map, TRANSIT_ICON_IDS.tram, TramFront, '#8554c7'),
       addTransitIcon(map, TRANSIT_ICON_IDS.metro, TrainFrontTunnel, METRO_COLOR),
       addTransitIcon(map, TRANSIT_ICON_IDS.train, TrainFront, '#4f9b70'),
-      addTransitIcon(map, TRANSIT_ICON_IDS.vehicle, Navigation),
+      addTransitIcon(map, TRANSIT_ICON_IDS.vehicle, ChevronUp),
     ]);
     if (this.map !== map) return;
 
@@ -486,7 +488,7 @@ export class TransitStopsLayer {
       filter: ['in', ['get', 'mode'], ['literal', modes]],
       layout: {
         'icon-image': iconImage,
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.1, 14, 1.35, 18, 1.55],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.25, 14, 1.5, 18, 1.7],
         'icon-padding': 8,
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
@@ -494,7 +496,7 @@ export class TransitStopsLayer {
     });
     const icons = [
       // Rail stops carry the city-scale network, so they appear first.
-      iconLayer('transitous-train-stop-icons', 9, TRANSIT_ICON_IDS.train, [
+      iconLayer('transitous-train-stop-icons', 10, TRANSIT_ICON_IDS.train, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
       ]),
       iconLayer('transitous-metro-stop-icons', 10, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
@@ -621,7 +623,7 @@ export class TransitStopsLayer {
       id: 'transitous-estimated-vehicle-halo',
       type: 'circle',
       source: ESTIMATED_VEHICLE_SOURCE_ID,
-      maxzoom: 13,
+      minzoom: 5,
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 0, 12, 14, 15, 18, 18],
         'circle-color': ['get', 'color'],
@@ -634,10 +636,13 @@ export class TransitStopsLayer {
       id: 'transitous-estimated-vehicle-icon',
       type: 'symbol',
       source: ESTIMATED_VEHICLE_SOURCE_ID,
-      maxzoom: 13,
+      minzoom: 5,
       layout: {
         'icon-image': TRANSIT_ICON_IDS.vehicle,
         'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 0.85, 14, 1, 18, 1.15],
+        'icon-rotate': ['get', 'heading'],
+        'icon-rotation-alignment': 'map',
+        'icon-pitch-alignment': 'map',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
@@ -718,13 +723,18 @@ export class TransitStopsLayer {
     this.clearSelectedTrip();
   }
 
-  selectTrip(tripId: string, mode: string, color: string) {
+  selectSearchStop(stop: TransitStopSelection) {
+    this.selectStop(stop);
+  }
+
+  selectTrip(tripId: string, mode: string, color: string, showRoute = true) {
     if (!this.map || !tripId) return;
     this.clearSelectedTrip();
     this.selectedTrip = {
       tripId,
       mode,
       color: mode === 'SUBWAY' ? METRO_COLOR : routeColor(color, stopColor(mode)),
+      showRoute,
     };
     void this.loadSelectedTrip();
     this.vehicleTimer = window.setInterval(() => this.updateEstimatedVehicle(), 250);
@@ -745,14 +755,17 @@ export class TransitStopsLayer {
     });
 
     try {
-      const response = await fetch(`${TRANSIT_TRIP_API_URL}?${params}`, { signal: controller.signal });
+      const response = await fetch(`${TRANSIT_TRIP_API_URL}?${params}`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
+      });
       if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
       const payload = await response.json() as { legs?: TripLeg[] };
       if (controller.signal.aborted || !this.map || this.selectedTrip?.tripId !== selection.tripId) return;
 
       const estimatedLegs: EstimatedTripLeg[] = [];
       const features = (payload.legs ?? []).flatMap((leg): RouteLineFeature[] => {
-        if (leg.tripId !== selection.tripId) return [];
+        if (String(leg.tripId ?? '') !== selection.tripId) return [];
         const points = leg.legGeometry?.points;
         const precision = leg.legGeometry?.precision;
         if (typeof points !== 'string' || typeof precision !== 'number') return [];
@@ -768,7 +781,7 @@ export class TransitStopsLayer {
       });
       this.estimatedTripLegs = estimatedLegs;
       const source = this.map.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
-      source?.setData({ type: 'FeatureCollection', features });
+      source?.setData(selection.showRoute ? { type: 'FeatureCollection', features } : emptyRouteCollection());
       this.updateEstimatedVehicle();
     } catch (error) {
       if ((error as { name?: string }).name !== 'AbortError') {
@@ -783,7 +796,8 @@ export class TransitStopsLayer {
     const now = Date.now();
     const activeLeg = this.estimatedTripLegs.find((leg) => (
       now >= leg.anchors[0].time && now <= leg.anchors[leg.anchors.length - 1].time
-    ));
+    )) ?? this.estimatedTripLegs.find((leg) => now < leg.anchors[0].time)
+      ?? this.estimatedTripLegs[this.estimatedTripLegs.length - 1];
     const pose = activeLeg
       ? estimatedVehiclePose(
         activeLeg,
@@ -806,6 +820,7 @@ export class TransitStopsLayer {
         properties: {
           color: this.selectedTrip.color,
           label: activeLeg.realTime ? 'Estimated · realtime' : 'Estimated · schedule',
+          heading: pose.parts[Math.floor(pose.parts.length / 2)].heading * 180 / Math.PI,
         },
       }],
     });
@@ -833,6 +848,10 @@ export class TransitStopsLayer {
     selectedSource?.setData(emptyCollection());
   }
 
+  clearTrip() {
+    this.clearSelectedTrip();
+  }
+
   async update(bounds: { getSouth: () => number; getWest: () => number; getNorth: () => number; getEast: () => number }, zoom: number) {
     if (!this.map || zoom < MIN_TRANSIT_ZOOM) return;
 
@@ -851,7 +870,7 @@ export class TransitStopsLayer {
     try {
       const response = await fetch(`${TRANSIT_API_URL}?${params}`, {
         signal: controller.signal,
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
       });
       if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
       const payload: unknown = await response.json();

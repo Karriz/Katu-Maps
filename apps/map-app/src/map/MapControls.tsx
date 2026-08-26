@@ -6,6 +6,7 @@ import {
   Droplets,
   Globe2,
   Layers3,
+  Route,
   Mountain,
   Minus,
   Plus,
@@ -95,6 +96,8 @@ export function MapControls({
   onResetOrientation,
   onZoomIn,
   onZoomOut,
+  onRouteOpen,
+  routeOpen,
   orientationChanged,
   notice,
 }: {
@@ -115,6 +118,8 @@ export function MapControls({
   onResetOrientation: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onRouteOpen: () => void;
+  routeOpen: boolean;
   orientationChanged: boolean;
   notice: string | null;
 }) {
@@ -135,7 +140,7 @@ export function MapControls({
 
   return (
     <>
-      <div className="location-search">
+      {!routeOpen && <div className="location-search">
         <form
           className="location-search-form"
           role="search"
@@ -181,7 +186,7 @@ export function MapControls({
             <div className="location-search-attribution">Powered by Photon</div>
           </div>
         )}
-      </div>
+      </div>}
 
       <div className={`map-tools${layersOpen ? ' layers-open' : ''}`}>
         <div className="map-tool-dock" aria-label="Map tools">
@@ -195,6 +200,16 @@ export function MapControls({
             onClick={() => onLayersOpenChange(!layersOpen)}
           >
             <Layers3 aria-hidden="true" />
+          </button>
+          <button
+            className={`map-tool-route${routeOpen ? ' active' : ''}`}
+            type="button"
+            aria-label="Plan a route"
+            aria-pressed={routeOpen}
+            title="Plan a route"
+            onClick={onRouteOpen}
+          >
+            <Route aria-hidden="true" />
           </button>
           <button className="map-tool-locate" type="button" aria-label="Find my location" title="Find my location" onClick={onLocate}>
             <Crosshair aria-hidden="true" />

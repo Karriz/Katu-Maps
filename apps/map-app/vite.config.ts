@@ -2,6 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
+  // Relative URLs allow the app to work both at / and at a GitLab project
+  // Pages path such as /group/project/.
+  base: './',
   plugins: [react()],
   build: {
     rollupOptions: {

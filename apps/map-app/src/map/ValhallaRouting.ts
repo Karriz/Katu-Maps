@@ -1,9 +1,22 @@
-export type RouteMode = 'pedestrian' | 'bicycle' | 'auto';
+export type RouteMode = 'pedestrian' | 'bicycle' | 'auto' | 'transit';
 
 export type RouteResult = {
   geometry: GeoJSON.LineString;
   distanceKm: number;
   durationSeconds: number;
+  transitLegs?: Array<{
+    mode: string;
+    tripId?: string;
+    realTime?: boolean;
+    cancelled?: boolean;
+    delaySeconds?: number;
+    route?: string;
+    headsign?: string;
+    from?: string;
+    to?: string;
+    startTime?: string;
+    endTime?: string;
+  }>;
 };
 
 type ValhallaShape = string | GeoJSON.LineString | { type: 'LineString'; coordinates: number[][] } | number[][];
@@ -65,13 +78,21 @@ export async function fetchValhallaRoute(
   mode: RouteMode,
   signal?: AbortSignal,
 ): Promise<RouteResult> {
-  const response = await fetch(VALHALLA_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-client-id': 'tampere-3d-map',
-    },
-    body: JSON.stringify({
+  let response: Response | undefined;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 20_000);
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      response = await fetch(VALHALLA_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-client-id': 'tampere-3d-map',
+        },
+        body: JSON.stringify({
       locations: [
         { lon: origin[0], lat: origin[1] },
         { lon: destination[0], lat: destination[1] },
@@ -80,9 +101,20 @@ export async function fetchValhallaRoute(
       units: 'kilometers',
       shape_format: 'geojson',
       directions_options: { units: 'kilometers' },
-    }),
-    signal,
-  });
+        }),
+        signal: controller.signal,
+      });
+      if (response.ok || response.status < 500) break;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    }
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  }
+  if (!response) throw lastError instanceof Error ? lastError : new Error('Routing request timed out');
 
   const payload = await response.json() as ValhallaResponse;
   if (!response.ok || !payload.trip) {
