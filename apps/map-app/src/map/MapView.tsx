@@ -792,7 +792,10 @@ export function MapView() {
       // Keep the default view focused on an area a few hundred metres across;
       // closer views make screen-space MapLibre roads dominate the scene.
       maxZoom: 18,
-      attributionControl: { compact: true },
+      attributionControl: {
+        compact: true,
+        customAttribution: '<a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+      },
     });
 
     const treeLayer = new TreeModelLayer({
@@ -1085,6 +1088,14 @@ export function MapView() {
     };
     let longPressTimer: number | undefined;
     let longPressStart: { x: number; y: number } | undefined;
+    const activeTouchPointers = new Set<number>();
+    let touchGestureActive = false;
+    let lastTouchInteractionAt = 0;
+    const cancelLongPressTimer = () => {
+      if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
+      longPressTimer = undefined;
+      longPressStart = undefined;
+    };
     const showRouteContextMenu = (point: Point, coordinates: [number, number]) => {
       const container = map.getContainer();
       setRouteContextMenu({
@@ -1095,6 +1106,11 @@ export function MapView() {
     };
     const handleMapContextMenu = (event: MapMouseEvent) => {
       event.originalEvent.preventDefault();
+      // Touch long-presses are handled explicitly below. MapLibre/browser
+      // contextmenu events can also arrive during a pinch, so never turn a
+      // touch-generated contextmenu event into a route menu.
+      if (('pointerType' in event.originalEvent && event.originalEvent.pointerType === 'touch')
+        || Date.now() - lastTouchInteractionAt < 1000) return;
       showRouteContextMenu(event.point, [event.lngLat.lng, event.lngLat.lat]);
     };
     const handlePointerDown = (event: PointerEvent) => {
@@ -1102,8 +1118,23 @@ export function MapView() {
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
       if (event.pointerType !== 'touch') return;
+      lastTouchInteractionAt = Date.now();
+      activeTouchPointers.add(event.pointerId);
+      if (activeTouchPointers.size > 1) {
+        // A second finger means this is a pinch/rotate gesture, never a
+        // long-press. This also covers the common case where the second
+        // pointer does not move far enough to trip the movement threshold.
+        touchGestureActive = true;
+        cancelLongPressTimer();
+        return;
+      }
+      touchGestureActive = false;
       longPressStart = { x: event.clientX, y: event.clientY };
       longPressTimer = window.setTimeout(() => {
+        if (touchGestureActive || activeTouchPointers.size !== 1) {
+          cancelLongPressTimer();
+          return;
+        }
         const rect = map.getCanvas().getBoundingClientRect();
         const point = new maplibregl.Point(event.clientX - rect.left, event.clientY - rect.top);
         const lngLat = map.unproject(point);
@@ -1112,20 +1143,26 @@ export function MapView() {
       }, 600);
     };
     const handleWheel = () => {
+      cancelLongPressTimer();
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
     };
     const cancelLongPress = (event: PointerEvent) => {
-      if (longPressStart && Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > 12) {
-        if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-        longPressTimer = undefined;
+      if (event.pointerType === 'touch' && event.type === 'pointermove' && activeTouchPointers.size > 1) {
+        touchGestureActive = true;
+        cancelLongPressTimer();
+      } else if (longPressStart && Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > 12) {
+        cancelLongPressTimer();
       }
       if (event.type !== 'pointermove') {
-        if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-        longPressTimer = undefined;
-        longPressStart = undefined;
+        if (event.pointerType === 'touch') activeTouchPointers.delete(event.pointerId);
+        if (activeTouchPointers.size === 0) {
+          touchGestureActive = false;
+          cancelLongPressTimer();
+        }
       }
     };
+    const handleMapGestureStart = () => cancelLongPressTimer();
     map.once('load', async () => {
       // MapLibre uses image pixelRatio when determining pattern spacing. A
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
@@ -1277,8 +1314,10 @@ export function MapView() {
         setOrientationChanged(nextOrientationChanged);
       }
     };
-    map.on('move', handleCameraMove);
-    map.on('moveend', handleMoveEnd);
+      map.on('move', handleCameraMove);
+      map.on('moveend', handleMoveEnd);
+    map.on('zoomstart', handleMapGestureStart);
+    map.on('dragstart', handleMapGestureStart);
     map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
@@ -1310,6 +1349,8 @@ export function MapView() {
       terrainCoverageGeneration += 1;
       map.off('move', handleCameraMove);
       map.off('moveend', handleMoveEnd);
+      map.off('zoomstart', handleMapGestureStart);
+      map.off('dragstart', handleMapGestureStart);
       map.off('sourcedata', handleModelSourceData);
       map.off('click', handleLocationClick);
       map.off('contextmenu', handleMapContextMenu);
@@ -2081,14 +2122,6 @@ export function MapView() {
               )}
             </aside>
           )}
-          <a
-            className="transitous-attribution"
-            href="https://transitous.org/sources/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Transit data by Transitous
-          </a>
         </>
       )}
     </div>

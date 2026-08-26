@@ -230,8 +230,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-context-menu strong { border-bottom: 1px solid var(--color-line); color: var(--color-muted); font-size: 0.68rem; letter-spacing: 0.06em; padding: 10px 13px 8px; text-transform: uppercase; }
 .map-context-menu button { background: transparent; border: 0; color: var(--color-ink); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 11px 13px; text-align: left; }
 .map-context-menu button:hover, .map-context-menu button:focus-visible { background: var(--surface-hover); color: var(--color-accent); outline: 0; }
-.transitous-attribution { background: rgb(255 255 255 / 86%); border: 1px solid #d9ddd9; border-radius: 7px; bottom: 16px; color: #527777; font-size: 0.68rem; padding: 6px 8px; position: absolute; right: 16px; text-decoration: none; z-index: 1; }
-.transitous-attribution:hover { background: #fff; color: #315d5d; }
 .terrain-toggle { background: #f4fbff; border: 1px solid #86aac2; border-radius: 8px; color: #163047; cursor: pointer; font: inherit; font-size: 0.8rem; padding: 8px 10px; position: absolute; right: 16px; top: 84px; z-index: 1; }
 .terrain-toggle:hover { background: #dff3ff; }
 .terrain-toggle[aria-pressed='true'] { background: #b9e6ff; border-color: #4f9ac5; }
@@ -342,7 +340,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .route-sheet-grabber:active { cursor: grabbing; }
   .route-sheet-grabber span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 38px; }
   .route-panel.route-sheet-collapsed { max-height: 92px; overflow: hidden; }
-  .transitous-attribution { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); right: 8px; }
   @keyframes mobile-sheet-enter {
     from { opacity: 0; transform: translateY(24px); }
     to { opacity: 1; transform: translateY(0); }
