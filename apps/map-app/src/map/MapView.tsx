@@ -353,64 +353,6 @@ function createWaterPattern(size: number) {
   return { width: size, height: size, data };
 }
 
-const BUILDING_COLOR_NAMES: Record<string, string> = {
-  black: '#202522', white: '#f1f2ed', gray: '#808080', grey: '#808080',
-  lightgray: '#d3d3d3', lightgrey: '#d3d3d3', silver: '#c0c0c0',
-  red: '#b94a48', green: '#4f8a5b', blue: '#3366aa', brown: '#8b5a3c',
-  beige: '#d8c9a7', orange: '#e58a3a', pink: '#e69aaa', maroon: '#7f3038',
-  yellow: '#e5c34b',
-};
-
-function pastelBuildingColor(value: unknown, blend = 0.28) {
-  if (typeof value !== 'string') return undefined;
-  const normalized = value.trim().toLowerCase().replace(/^#/, '');
-  const hex = BUILDING_COLOR_NAMES[normalized]?.slice(1) ?? (
-    normalized.length === 3
-      ? normalized.split('').map((part) => `${part}${part}`).join('')
-      : normalized
-  );
-  if (!/^[0-9a-f]{6}$/.test(hex)) return undefined;
-  const red = Number.parseInt(hex.slice(0, 2), 16) / 255;
-  const green = Number.parseInt(hex.slice(2, 4), 16) / 255;
-  const blue = Number.parseInt(hex.slice(4, 6), 16) / 255;
-  const max = Math.max(red, green, blue);
-  const min = Math.min(red, green, blue);
-  const lightness = (max + min) / 2;
-  const delta = max - min;
-  let hue = 0;
-  if (delta > 0) {
-    if (max === red) hue = ((green - blue) / delta) % 6;
-    else if (max === green) hue = (blue - red) / delta + 2;
-    else hue = (red - green) / delta + 4;
-    hue /= 6;
-    if (hue < 0) hue += 1;
-  }
-  const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
-  const hueSaturationScale = (hue >= 0.2 && hue <= 0.45)
-    ? 0.62 // greens read especially strongly against ivory buildings
-    : (hue <= 0.08 || hue >= 0.92)
-      ? 0.68 // reds
-      : (hue > 0.08 && hue < 0.18)
-        ? 0.72 // orange and brown
-        : 1;
-  const nextSaturation = Math.min(saturation * hueSaturationScale, 0.22);
-  const nextLightness = saturation <= 0.18 && lightness >= 0.46 && lightness <= 0.88
-    ? lightness
-    : Math.min(0.84, Math.max(0.46, lightness * (1 - blend) + 0.62 * blend));
-  const chroma = (1 - Math.abs(2 * nextLightness - 1)) * nextSaturation;
-  const second = nextLightness - chroma / 2;
-  const huePart = (hue * 6) % 2;
-  const x = chroma * (1 - Math.abs(huePart - 1));
-  const [r, g, b] = hue < 1 / 6 ? [chroma, x, 0]
-    : hue < 2 / 6 ? [x, chroma, 0]
-      : hue < 3 / 6 ? [0, chroma, x]
-        : hue < 4 / 6 ? [0, x, chroma]
-          : hue < 5 / 6 ? [x, 0, chroma]
-            : [chroma, 0, x];
-  const channel = (part: number) => Math.round((part + second) * 255).toString(16).padStart(2, '0');
-  return `#${channel(r)}${channel(g)}${channel(b)}`;
-}
-
 function globalWaterPatternLayer(): FillLayerSpecification {
   return {
     id: 'global-water-pattern',
@@ -567,7 +509,6 @@ export function MapView() {
     let modelDataRevision = 0;
     let lastModelUpdateSignature: string | undefined;
     const modelVectorSourceId = OPENFREEMAP_SOURCE_ID;
-    const processedBuildingColors = new globalThis.Map<string, { base: string; alt: string; band: string }>();
 
     const setTerrainSource = (sourceId: string) => {
       const sourceChanged = terrainSourceRef.current !== sourceId;
@@ -792,38 +733,9 @@ export function MapView() {
       modelDataRevision += 1;
       scheduleTreeUpdate();
     };
-    const updatePastelBuildingColors = () => {
-      if (!map.isStyleLoaded()) return;
-      let changed = false;
-      for (const feature of map.querySourceFeatures(OPENFREEMAP_SOURCE_ID, {
-        sourceLayer: 'building',
-      })) {
-        if (feature.id === undefined || feature.id === null) continue;
-        const value = feature.properties?.colour ?? feature.properties?.color;
-        const base = pastelBuildingColor(value, 0.32);
-        const alt = pastelBuildingColor(value, 0.42);
-        const band = pastelBuildingColor(value, 0.50);
-        if (!base || !alt || !band) continue;
-        const key = String(feature.id);
-        const previous = processedBuildingColors.get(key);
-        if (previous?.base === base && previous.alt === alt && previous.band === band) continue;
-        processedBuildingColors.set(key, { base, alt, band });
-        map.setFeatureState(
-          { source: OPENFREEMAP_SOURCE_ID, sourceLayer: 'building', id: feature.id },
-          {
-            pastelBuildingColor: base,
-            pastelBuildingColorAlt: alt,
-            pastelBuildingBandColor: band,
-          },
-        );
-        changed = true;
-      }
-      if (changed) map.triggerRepaint();
-    };
     const handleModelSourceData = (event: MapSourceDataEvent) => {
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
       modelDataRevision += 1;
-      updatePastelBuildingColors();
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
@@ -936,7 +848,6 @@ export function MapView() {
     });
     const handleMoveEnd = () => {
       updateGlobalRoadWidths();
-      updatePastelBuildingColors();
       scheduleTreeUpdate();
       scheduleTerrainResolutionUpdate();
       scheduleTransitStopsUpdate();
@@ -956,7 +867,6 @@ export function MapView() {
     // a pan/zoom is still filling the viewport. moveend handles interaction;
     // idle handles the final set of newly loaded tiles.
     map.on('idle', scheduleTreeUpdate);
-    map.on('idle', updatePastelBuildingColors);
     map.on('error', (event) => {
       const message = event.error?.message ?? 'The map style could not be loaded.';
       // MapLibre can emit this while backfilling a missing edge DEM tile. It
@@ -988,7 +898,6 @@ export function MapView() {
       map.off('mouseenter', 'location-poi-icons', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.off('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
       map.off('idle', scheduleTreeUpdate);
-      map.off('idle', updatePastelBuildingColors);
       transitStopsLayer.dispose();
       map.remove();
       mapRef.current = null;

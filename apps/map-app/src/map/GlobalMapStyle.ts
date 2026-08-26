@@ -1,6 +1,5 @@
 import type {
   ExpressionSpecification,
-  FillExtrusionLayerSpecification,
   StyleSpecification,
 } from 'maplibre-gl';
 import {
@@ -140,21 +139,11 @@ export const GLOBAL_ROAD_LAYER_IDS = [
   'global-road-bridges',
 ];
 
-const GLOBAL_BUILDING_DETAIL_START_ZOOM = 16.5;
-const GLOBAL_BUILDING_DETAIL_FULL_ZOOM = 17.5;
-const GLOBAL_BUILDING_MAX_ESTIMATED_STORIES = 34;
-const GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES = 6;
-const GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES = 100;
-const GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES = 0.4;
+const GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES = 5.5;
 const GLOBAL_MAP_SUN_COLOR = MAP_COLORS.sun;
 
 export const GLOBAL_BUILDING_FACADE_LAYER_IDS = [
   'global-building-ground-storeys',
-  'global-building-lower-facades',
-  'global-building-lower-detail-bands',
-  'global-building-middle-facades',
-  'global-building-upper-detail-bands',
-  'global-building-upper-facades',
 ];
 
 export const GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID = 'global-building-footprints';
@@ -171,77 +160,8 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
   ...GLOBAL_BUILDING_3D_LAYER_IDS,
 ];
 
-const TAGGED_BUILDING_COLOR: ExpressionSpecification = [
-  'match', ['downcase', ['to-string', ['coalesce', ['get', 'colour'], ['get', 'color'], '']]],
-  'black', '#a3a8a5',
-  'red', '#d2ada8',
-  'green', '#c4cec0',
-  'blue', '#b3cfdb',
-  'brown', '#c8b6a5',
-  'beige', '#dfd0ad',
-  'orange', '#dfb18a',
-  'pink', '#ddb5bd',
-  'maroon', '#b99396',
-  'silver', '#c7ccca',
-  'yellow', '#dfcb91',
-  'white', '#f1f2ed',
-  'lightgray', '#d7dcda',
-  'lightgrey', '#d7dcda',
-  'grey', '#d6dbd8',
-  'gray', '#d6dbd8',
-  '#e3e6e1',
-] as ExpressionSpecification;
-
-// Temporary visual experiment: keep the building material system and facade
-// depth, but remove source-specific building colors so we can judge the map's
-// hierarchy and lighting independently of landmark colors.
-const SHOW_SOURCE_BUILDING_COLORS = false;
-
-const GLOBAL_BUILDING_SOURCE_COLOR: ExpressionSpecification = [
-  'case',
-  ['any', ['has', 'colour'], ['has', 'color']],
-  TAGGED_BUILDING_COLOR,
-  MAP_COLORS.building,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_COLOR: ExpressionSpecification = [
-  'case',
-  SHOW_SOURCE_BUILDING_COLORS,
-  ['coalesce', ['feature-state', 'pastelBuildingColor'], GLOBAL_BUILDING_SOURCE_COLOR],
-  MAP_COLORS.building,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_SOURCE_COLOR_ALT: ExpressionSpecification = [
-  'case',
-  ['any', ['has', 'colour'], ['has', 'color']],
-  TAGGED_BUILDING_COLOR,
-  MAP_COLORS.buildingAlt,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_COLOR_ALT: ExpressionSpecification = [
-  'case',
-  SHOW_SOURCE_BUILDING_COLORS,
-  ['coalesce', ['feature-state', 'pastelBuildingColorAlt'], GLOBAL_BUILDING_SOURCE_COLOR_ALT],
-  MAP_COLORS.buildingAlt,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_DETAIL_BAND_SOURCE_COLOR: ExpressionSpecification = [
-  'case',
-  ['any', ['has', 'colour'], ['has', 'color']],
-  [
-    'interpolate', ['linear'], 0.16,
-    0, TAGGED_BUILDING_COLOR,
-    1, '#87918e',
-  ],
-  MAP_COLORS.buildingBand,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_DETAIL_BAND_COLOR: ExpressionSpecification = [
-  'case',
-  SHOW_SOURCE_BUILDING_COLORS,
-  ['coalesce', ['feature-state', 'pastelBuildingBandColor'], GLOBAL_BUILDING_DETAIL_BAND_SOURCE_COLOR],
-  MAP_COLORS.buildingBand,
-] as ExpressionSpecification;
+const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
+const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
 
 const GLOBAL_BUILDING_BASE: ExpressionSpecification = [
   'coalesce', ['get', 'render_min_height'], 0,
@@ -255,136 +175,26 @@ const GLOBAL_BUILDING_BODY_HEIGHT: ExpressionSpecification = [
   'max', 0, ['-', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_BASE],
 ] as ExpressionSpecification;
 
-function animatedBuildingHeight(height: ExpressionSpecification): ExpressionSpecification {
-  return [
-    'interpolate', ['linear'], ['zoom'],
-    13, GLOBAL_BUILDING_BASE,
-    13.6, height,
-  ] as ExpressionSpecification;
-}
-
 const GLOBAL_ESTIMATED_BUILDING_STORIES: ExpressionSpecification = [
-  'min',
-  GLOBAL_BUILDING_MAX_ESTIMATED_STORIES,
-  ['max', 1, ['round', ['/', GLOBAL_BUILDING_BODY_HEIGHT, 3]]],
+  'max', 1, ['round', ['/', GLOBAL_BUILDING_BODY_HEIGHT, 3]],
 ] as ExpressionSpecification;
 
 const GLOBAL_BUILDING_STORY_HEIGHT: ExpressionSpecification = [
   '/', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_ESTIMATED_BUILDING_STORIES,
 ] as ExpressionSpecification;
 
-function buildingStoryTop(storyCount: number): ExpressionSpecification {
-  return [
-    'min',
-    GLOBAL_BUILDING_HEIGHT,
-    [
-      '+',
-      GLOBAL_BUILDING_BASE,
-      ['*', GLOBAL_BUILDING_STORY_HEIGHT, storyCount],
-    ],
-  ] as ExpressionSpecification;
-}
+const GLOBAL_BUILDING_FIRST_STORY_TOP: ExpressionSpecification = [
+  'min',
+  GLOBAL_BUILDING_HEIGHT,
+  ['+', GLOBAL_BUILDING_BASE, GLOBAL_BUILDING_STORY_HEIGHT],
+] as ExpressionSpecification;
 
-const GLOBAL_BUILDING_FIRST_STORY_TOP = buildingStoryTop(1);
-const GLOBAL_BUILDING_SECOND_STORY_TOP = buildingStoryTop(2);
-const GLOBAL_BUILDING_FIFTH_STORY_TOP = buildingStoryTop(5);
-const GLOBAL_BUILDING_LOWER_BAND_BASE: ExpressionSpecification = [
-  'max',
+const GLOBAL_BUILDING_UPPER_BASE: ExpressionSpecification = [
+  'case',
+  ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
   GLOBAL_BUILDING_FIRST_STORY_TOP,
-  ['-', GLOBAL_BUILDING_SECOND_STORY_TOP, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
+  GLOBAL_BUILDING_BASE,
 ] as ExpressionSpecification;
-const GLOBAL_BUILDING_UPPER_BAND_BASE: ExpressionSpecification = [
-  'max',
-  buildingStoryTop(4),
-  ['-', GLOBAL_BUILDING_FIFTH_STORY_TOP, GLOBAL_BUILDING_DETAIL_BAND_HEIGHT_METRES],
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_GROUND_COLOR: ExpressionSpecification = [
-  'interpolate', ['linear'], ['zoom'],
-  GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
-  GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_COLOR_ALT,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_BAND_COLOR: ExpressionSpecification = [
-  'interpolate', ['linear'], ['zoom'],
-  GLOBAL_BUILDING_DETAIL_START_ZOOM, GLOBAL_BUILDING_COLOR,
-  GLOBAL_BUILDING_DETAIL_FULL_ZOOM, GLOBAL_BUILDING_DETAIL_BAND_COLOR,
-] as ExpressionSpecification;
-
-function globalBuildingFacadeLayer(
-  id: string,
-  base: ExpressionSpecification,
-  height: ExpressionSpecification,
-  color: ExpressionSpecification,
-  minimumStories: number,
-): FillExtrusionLayerSpecification {
-  return {
-    id,
-    type: 'fill-extrusion',
-    source: OPENFREEMAP_SOURCE_ID,
-    'source-layer': 'building',
-    minzoom: 13,
-    filter: [
-      'all',
-      ['!', ['==', ['get', 'hide_3d'], true]],
-      ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES],
-      ['<=', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES],
-      ['>=', GLOBAL_ESTIMATED_BUILDING_STORIES, minimumStories],
-    ],
-    paint: {
-      'fill-extrusion-color': color,
-      'fill-extrusion-height': animatedBuildingHeight(height),
-      'fill-extrusion-base': animatedBuildingHeight(base),
-      'fill-extrusion-opacity': [
-        'interpolate', ['linear'], ['zoom'],
-        13, 0,
-        13.45, 0.96,
-        18, 1,
-      ],
-      'fill-extrusion-vertical-gradient': true,
-    },
-  };
-}
-
-function globalBuildingFacadeLayers(): FillExtrusionLayerSpecification[] {
-  const middleFacadeTop: ExpressionSpecification = [
-    'case',
-    ['>=', GLOBAL_ESTIMATED_BUILDING_STORIES, 5],
-    GLOBAL_BUILDING_UPPER_BAND_BASE,
-    GLOBAL_BUILDING_HEIGHT,
-  ];
-
-  return [
-    globalBuildingFacadeLayer(
-      GLOBAL_BUILDING_FACADE_LAYER_IDS[0],
-      GLOBAL_BUILDING_BASE,
-      GLOBAL_BUILDING_FIRST_STORY_TOP,
-      GLOBAL_BUILDING_GROUND_COLOR,
-      1,
-    ),
-    globalBuildingFacadeLayer(
-      GLOBAL_BUILDING_FACADE_LAYER_IDS[1],
-      GLOBAL_BUILDING_FIRST_STORY_TOP,
-      middleFacadeTop,
-      GLOBAL_BUILDING_COLOR,
-      2,
-    ),
-    globalBuildingFacadeLayer(
-      GLOBAL_BUILDING_FACADE_LAYER_IDS[4],
-      GLOBAL_BUILDING_UPPER_BAND_BASE,
-      GLOBAL_BUILDING_FIFTH_STORY_TOP,
-      GLOBAL_BUILDING_BAND_COLOR,
-      5,
-    ),
-    globalBuildingFacadeLayer(
-      GLOBAL_BUILDING_FACADE_LAYER_IDS[5],
-      GLOBAL_BUILDING_FIFTH_STORY_TOP,
-      GLOBAL_BUILDING_HEIGHT,
-      GLOBAL_BUILDING_COLOR,
-      6,
-    ),
-  ];
-}
 
 const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = [
   'case',
@@ -1638,30 +1448,22 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
-      id: 'global-buildings',
+      id: GLOBAL_BUILDING_FACADE_LAYER_IDS[0],
       type: 'fill-extrusion',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'building',
       minzoom: 13,
-      // Ordinary buildings use the story slices below at every zoom. Keeping
-      // this single extrusion exclusive to unbanded structures prevents the
-      // coplanar surfaces that caused flickering during the former LOD blend.
       filter: [
         'all',
         ['!', ['==', ['get', 'hide_3d'], true]],
-        [
-          'any',
-          ['<', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MARKED_HEIGHT_METRES],
-          ['>', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_MAX_MARKED_HEIGHT_METRES],
-        ],
+        ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
       ],
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_COLOR,
-        'fill-extrusion-height': [
-          'interpolate', ['linear'], ['zoom'],
-          13, GLOBAL_BUILDING_BASE,
-          13.6, GLOBAL_BUILDING_HEIGHT,
-        ],
+        'fill-extrusion-color': GLOBAL_BUILDING_GROUND_COLOR,
+        // Keep the real height present while the layer fades in. The opacity
+        // transition below handles the low-zoom handoff from footprints;
+        // animating height here makes pitched, distant buildings look flat.
+        'fill-extrusion-height': GLOBAL_BUILDING_FIRST_STORY_TOP,
         'fill-extrusion-base': GLOBAL_BUILDING_BASE,
         'fill-extrusion-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1672,7 +1474,28 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'fill-extrusion-vertical-gradient': true,
       },
     },
-    ...globalBuildingFacadeLayers(),
+    {
+      id: 'global-buildings',
+      type: 'fill-extrusion',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'building',
+      minzoom: 13,
+      filter: ['!', ['==', ['get', 'hide_3d'], true]],
+      paint: {
+        'fill-extrusion-color': GLOBAL_BUILDING_COLOR,
+        'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,
+        // Multi-storey buildings begin above the darker ground floor. Short
+        // buildings remain a single extrusion from their normal base.
+        'fill-extrusion-base': GLOBAL_BUILDING_UPPER_BASE,
+        'fill-extrusion-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          13, 0,
+          13.45, 0.96,
+          18, 1,
+        ],
+        'fill-extrusion-vertical-gradient': true,
+      },
+    },
     {
       id: 'global-bus-stops',
       type: 'circle',
