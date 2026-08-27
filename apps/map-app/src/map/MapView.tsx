@@ -690,6 +690,7 @@ export function MapView() {
   };
 
   const openRoute = () => {
+    const isMobile = window.innerWidth <= 760;
     setRouteContextMenu(null);
     setRouteOpen(true);
     setLayersOpen(false);
@@ -697,8 +698,10 @@ export function MapView() {
     setSearchOpen(false);
     setSearchQuery('');
     setShowSearchResultsOnMap(false);
-    transitStopsLayerRef.current?.clearSelection();
-    setSelectedTransitStop(null);
+    if (isMobile) {
+      transitStopsLayerRef.current?.clearSelection();
+      setSelectedTransitStop(null);
+    }
     vehicleFollowEnabledRef.current = false;
     setVehicleFollowing(false);
     setVehicleFollowAvailable(false);
@@ -706,11 +709,13 @@ export function MapView() {
       routeOriginRef.current = null;
       setRouteOriginSelection({ name: 'Your location', category: 'Current location', coordinates: [0, 0], source: 'map' });
     }
-    setSelectedLocation(null);
-    locationDetailsAbortRef.current?.abort();
-    (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-      type: 'FeatureCollection', features: [],
-    });
+    if (isMobile) {
+      setSelectedLocation(null);
+      locationDetailsAbortRef.current?.abort();
+      (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+        type: 'FeatureCollection', features: [],
+      });
+    }
   };
 
   const setRouteEndpoint = (kind: 'origin' | 'destination', selection: LocationSelection) => {
@@ -1369,6 +1374,9 @@ export function MapView() {
       map.on('mouseleave', 'location-poi-labels', () => { map.getCanvas().style.cursor = ''; });
       void transitStopsLayer.install(map, (stop) => {
         setVehicleFollowAvailable(false);
+        locationDetailsAbortRef.current?.abort();
+        setLocationDetailsLoading(false);
+        setSelectedLocation(null);
         setSelectedTransitStop(stop);
       map.easeTo({
         center: stop.coordinates,
