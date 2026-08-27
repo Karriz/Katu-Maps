@@ -3,41 +3,13 @@ import { ArrowLeft, BusFront, ChevronRight, LocateFixed, RefreshCw, TrainFront, 
 import { cn } from '../lib/utils';
 import { MAP_COLORS } from './MapPalette';
 import type { TransitStopSelection } from './TransitStopsLayer';
-
-const STOP_TIMES_API_URL = 'https://api.transitous.org/api/v6/stoptimes';
-const TRANSIT_TRIP_API_URL = 'https://api.transitous.org/api/v6/trip';
-
-type StopTime = {
-  mode?: unknown;
-  routeId?: unknown;
-  tripId?: unknown;
-  routeShortName?: unknown;
-  displayName?: unknown;
-  routeLongName?: unknown;
-  headsign?: unknown;
-  routeColor?: unknown;
-  routeTextColor?: unknown;
-  cancelled?: unknown;
-  place?: { departure?: unknown; scheduledDeparture?: unknown };
-};
-
-type Departure = StopTime & { departure: string };
-
-type TripPlace = {
-  name?: unknown;
-  stopName?: unknown;
-  scheduledArrival?: unknown;
-  scheduledDeparture?: unknown;
-  arrival?: unknown;
-  departure?: unknown;
-};
-
-type TripLeg = {
-  tripId?: unknown;
-  from?: TripPlace;
-  to?: TripPlace;
-  intermediateStops?: unknown;
-};
+import {
+  fetchTransitDepartures,
+  fetchTransitTrip,
+  transitProviderLabel,
+  type TransitDeparture as Departure,
+  type TransitTripPlace as TripPlace,
+} from './transit';
 
 function text(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback;
@@ -68,12 +40,6 @@ function modeColor(mode: string) {
   if (mode === 'BUS') return MAP_COLORS.transitBlue;
   if (mode === 'SUBWAY') return '#e87524';
   return '#4f9b70';
-}
-
-function isRailMode(mode: string) {
-  return [
-    'RAIL', 'SUBURBAN', 'SUBWAY', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
-  ].includes(mode);
 }
 
 function formatDeparture(value: string) {
@@ -115,7 +81,13 @@ export function TransitDeparturesPanel({
 }: {
   stop: TransitStopSelection;
   onClose: () => void;
-  onDepartureSelect: (departure: { tripId: string; mode: string; color: string }) => void;
+  onDepartureSelect: (departure: {
+    tripId: string;
+    mode: string;
+    color: string;
+    provider: Departure['provider'];
+    serviceDate?: string;
+  }) => void;
   onFollowRequest?: () => void;
   onSetDestination?: () => void;
   isFollowing?: boolean;
@@ -147,17 +119,14 @@ export function TransitDeparturesPanel({
     const controller = new AbortController();
     setRouteStopsLoading(true);
     setRouteStopsError(null);
-    const params = new URLSearchParams({ tripId, detailedLegs: 'true', joinInterlinedLegs: 'false' });
-    fetch(`${TRANSIT_TRIP_API_URL}?${params}`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
-        return response.json() as Promise<{ legs?: TripLeg[] }>;
-      })
+    fetchTransitTrip(
+      selectedDeparture.provider,
+      tripId,
+      selectedDeparture.serviceDate,
+      controller.signal,
+    )
       .then((payload) => {
-        const stops = (payload.legs ?? [])
+        const stops = payload.legs
           .filter((leg) => String(leg.tripId ?? '') === tripId)
           .flatMap((leg) => [
             leg.from,
@@ -186,38 +155,8 @@ export function TransitDeparturesPanel({
     setLoading(true);
     setError(null);
     setDepartures([]);
-    const params = new URLSearchParams({
-      stopId: stop.stopId,
-      n: '10',
-      mode: 'TRANSIT',
-      realtimeMode: 'REALTIME',
-      withAlerts: 'false',
-      language: typeof navigator !== 'undefined' ? navigator.language : 'en',
-    });
-    if (!isRailMode(stop.mode)) {
-      // Transitous otherwise includes parent/children and similarly named
-      // nearby stops. Platform and roadside stop panels should be exact.
-      params.set('radius', '0');
-      params.set('exactRadius', 'true');
-    }
-
-    fetch(`${STOP_TIMES_API_URL}?${params}`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
-        return response.json() as Promise<{ stopTimes?: StopTime[] }>;
-      })
-      .then((payload) => {
-        const next = (payload.stopTimes ?? [])
-          .map((item) => ({
-            ...item,
-            departure: text(item.place?.departure ?? item.place?.scheduledDeparture),
-          }))
-          .filter((item): item is Departure => Boolean(item.departure));
-        setDepartures(next);
-      })
+    fetchTransitDepartures(stop, controller.signal)
+      .then(setDepartures)
       .catch((requestError: unknown) => {
         if ((requestError as { name?: string }).name !== 'AbortError') {
           setError('Departures are temporarily unavailable.');
@@ -318,7 +257,7 @@ export function TransitDeparturesPanel({
         <h2>{stop.name}</h2>
         <div className="transit-panel-status">
           <span aria-hidden="true" />
-          Live timetable from Transitous
+          Live timetable from {transitProviderLabel(stop.provider)}
         </div>
         <button className="transit-stop-destination-button" type="button" onClick={onSetDestination}>
           Use this stop as destination
@@ -367,7 +306,13 @@ export function TransitDeparturesPanel({
                   if (!tripId) return;
                   setSelectedDepartureKey(departureKey);
                   setSelectedDeparture(departure);
-                  onDepartureSelect({ tripId, mode, color: routeColor });
+                  onDepartureSelect({
+                    tripId,
+                    mode,
+                    color: routeColor,
+                    provider: departure.provider,
+                    serviceDate: departure.serviceDate,
+                  });
                 }}
                 style={cardStyle}
                 type="button"

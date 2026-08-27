@@ -16,6 +16,8 @@ export type RouteResult = {
     to?: string;
     startTime?: string;
     endTime?: string;
+    provider?: 'digitransit' | 'transitous';
+    serviceDate?: string;
   }>;
 };
 

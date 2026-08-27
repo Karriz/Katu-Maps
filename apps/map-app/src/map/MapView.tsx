@@ -40,6 +40,7 @@ import { TransitDeparturesPanel } from './TransitDeparturesPanel';
 import type { TransitStopSelection } from './TransitStopsLayer';
 import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
+import { searchTransitStops, type TransitProviderId } from './transit';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -145,6 +146,7 @@ type PhotonFeature = {
     country?: string;
     transitStopId?: string;
     transitMode?: string;
+    transitProvider?: TransitProviderId;
     [key: string]: unknown;
   };
 };
@@ -156,6 +158,7 @@ type LocationSelection = {
   coordinates: [number, number];
   source: 'search' | 'map';
   transitStopId?: string;
+  transitStopProvider?: TransitProviderId;
   openingHours?: string;
   phone?: string;
   email?: string;
@@ -602,7 +605,14 @@ export function MapView() {
       candidate.tripId && !['WALK', 'FOOT'].includes(candidate.mode)
     ));
     if (leg?.tripId) {
-      void transitStopsLayerRef.current?.selectTrip(leg.tripId, leg.mode, MAP_COLORS.transitBlue, false);
+      void transitStopsLayerRef.current?.selectTrip(
+        leg.tripId,
+        leg.mode,
+        MAP_COLORS.transitBlue,
+        false,
+        leg.provider ?? 'transitous',
+        leg.serviceDate,
+      );
     }
   };
 
@@ -620,12 +630,15 @@ export function MapView() {
       let result: RouteResult;
       if (routeMode === 'transit') {
         const options = await fetchTransitRoutes(origin, destination, {
+          originStopId: routeOriginSelection?.transitStopId,
+          originStopProvider: routeOriginSelection?.transitStopProvider,
           destinationStopId: routeDestinationSelection?.transitStopId,
+          destinationStopProvider: routeDestinationSelection?.transitStopProvider,
           time: transitDateTime ? new Date(transitDateTime).toISOString() : undefined,
           arriveBy: transitTimeMode === 'arrive',
           signal: controller.signal,
         });
-        if (!options[0]) throw new Error('Transitous returned no route options');
+        if (!options[0]) throw new Error('No transit route options were returned');
         setTransitRouteOptions(options);
         result = options[0];
       } else {
@@ -794,7 +807,7 @@ export function MapView() {
       maxZoom: 18,
       attributionControl: {
         compact: true,
-        customAttribution: '<a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+        customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
       },
     });
 
@@ -1286,7 +1299,7 @@ export function MapView() {
         });
       }).then(() => {
         if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
-        map.moveLayer(transitVehicleLayer.id, 'transitous-estimated-vehicle-label');
+        map.moveLayer(transitVehicleLayer.id, 'transit-estimated-vehicle-label');
         updateTransitStops();
       });
       ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels', 'global-poi-labels', 'poi-labels'].forEach((layerId) => {
@@ -1389,7 +1402,7 @@ export function MapView() {
     setVisibility(
       (map.getStyle().layers ?? [])
         .map((layer) => layer.id)
-        .filter((layerId) => layerId.startsWith('transitous-') || layerId === 'transit-vehicle-model-3d'),
+        .filter((layerId) => layerId.startsWith('transit-') || layerId === 'transit-vehicle-model-3d'),
       layerToggles.transit,
     );
     setVisibility(BUILDING_3D_LAYER_IDS, layerToggles.buildings);
@@ -1478,53 +1491,33 @@ export function MapView() {
         const data = await response.json() as { features?: PhotonFeature[] };
         const photonResults = data.features ?? [];
         const transitResults: PhotonFeature[] = [];
-        // Transitous has no global text-search endpoint. Search an adaptive
-        // area around the map center instead of only the visible viewport:
-        // this covers the user's city while avoiding a global stop download.
+        // Search the provider selected by the map center over an adaptive area
+        // instead of downloading a country's complete stop set.
         if (map && layerToggles.transit) {
           const center = map.getCenter();
           const zoom = map.getZoom();
           const radiusDegrees = zoom >= 12 ? 0.35 : zoom >= 9 ? 0.75 : 1.5;
-          const transitParams = new URLSearchParams({
-            min: `${Math.max(-85, center.lat - radiusDegrees)},${center.lng - radiusDegrees}`,
-            max: `${Math.min(85, center.lat + radiusDegrees)},${center.lng + radiusDegrees}`,
-            grouped: 'false',
-            modes: 'TRANSIT',
-            language: typeof navigator !== 'undefined' ? navigator.language : 'en',
-          });
-          const transitResponse = await fetch(
-          `https://api.transitous.org/api/v6/map/stops?${transitParams.toString()}`,
-            {
-              signal: controller.signal,
-              headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
-            },
-          );
-          if (transitResponse.ok) {
-            const stops = await transitResponse.json() as Array<{
-              name?: unknown;
-              stopId?: unknown;
-              lat?: unknown;
-              lon?: unknown;
-              modes?: unknown;
-            }>;
-            stops
-              .filter((stop) => typeof stop.name === 'string' && typeof stop.stopId === 'string')
-              .filter((stop) => String(stop.name).toLocaleLowerCase().includes(query.toLocaleLowerCase()))
-              .slice(0, 6)
-              .forEach((stop) => {
-                if (typeof stop.lat !== 'number' || typeof stop.lon !== 'number') return;
-                const modes = Array.isArray(stop.modes)
-                  ? stop.modes.filter((mode): mode is string => typeof mode === 'string').join(', ')
-                  : '';
-                transitResults.push({
-                  geometry: { coordinates: [stop.lon, stop.lat] },
-                  properties: {
-                    name: stop.name as string,
-                    transitStopId: stop.stopId as string,
-                    transitMode: modes,
-                  },
-                });
+          try {
+            const stops = await searchTransitStops(query, {
+              south: Math.max(-85, center.lat - radiusDegrees),
+              west: center.lng - radiusDegrees,
+              north: Math.min(85, center.lat + radiusDegrees),
+              east: center.lng + radiusDegrees,
+            }, controller.signal);
+            stops.forEach((stop) => {
+              transitResults.push({
+                geometry: { coordinates: stop.coordinates },
+                properties: {
+                  name: stop.name,
+                  transitStopId: stop.stopId,
+                  transitMode: stop.mode,
+                  transitProvider: stop.provider,
+                },
               });
+            });
+          } catch (transitError) {
+            if ((transitError as Error).name === 'AbortError') throw transitError;
+            console.warn('Transit stop search unavailable.', transitError);
           }
         }
         const results = [...transitResults, ...photonResults];
@@ -1630,6 +1623,7 @@ export function MapView() {
         name: feature.properties.name ?? 'Transit stop',
         mode: feature.properties.transitMode?.split(',')[0] || 'TRANSIT',
         coordinates,
+        provider: feature.properties.transitProvider ?? 'transitous',
       };
       transitStopsLayerRef.current?.selectSearchStop(stop);
       setSelectedTransitStop(stop);
@@ -1845,11 +1839,18 @@ export function MapView() {
           {selectedTransitStop && (
             <TransitDeparturesPanel
               stop={selectedTransitStop}
-              onDepartureSelect={({ tripId, mode, color }) => {
+              onDepartureSelect={({ tripId, mode, color, serviceDate }) => {
                 vehicleFollowEnabledRef.current = true;
                 setVehicleFollowing(true);
                 setVehicleFollowAvailable(true);
-                void transitStopsLayerRef.current?.selectTrip(tripId, mode, color);
+                void transitStopsLayerRef.current?.selectTrip(
+                  tripId,
+                  mode,
+                  color,
+                  true,
+                  selectedTransitStop.provider,
+                  serviceDate,
+                );
               }}
               onFollowRequest={() => {
                 vehicleFollowEnabledRef.current = true;
@@ -1862,6 +1863,7 @@ export function MapView() {
                   coordinates: selectedTransitStop.coordinates,
                   source: 'map',
                   transitStopId: selectedTransitStop.stopId,
+                  transitStopProvider: selectedTransitStop.provider,
                 };
                 openRoute();
                 setRouteEndpoint('destination', destination);

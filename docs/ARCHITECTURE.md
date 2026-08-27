@@ -12,11 +12,14 @@ The application uses one hosted map-data path:
 - OpenFreeMap vector tiles using the OpenMapTiles schema.
 - Mapterhorn Terrarium DEM tiles, including runtime probing for regional detail.
 - Photon for place search and Nominatim for optional place details.
-- Transitous for stops, departures, route geometry, and vehicle progress.
+- A provider-neutral transit service: Digitransit for locations in Finland and
+  Transitous elsewhere, for stops, departures, route geometry, and vehicle
+  progress.
 - Valhalla for pedestrian, bicycle, and car routes.
 
-There is no application-owned tile server, local Tilemaker schema, MBTiles
-pipeline, or provider-selection environment variable.
+There is no application-owned tile server, local Tilemaker schema, or MBTiles
+pipeline. Transit provider selection is geographic and centralized in
+`apps/map-app/src/map/transit/`.
 
 ## Rendering boundaries
 
@@ -44,7 +47,8 @@ docs/
 ## Operational expectations
 
 - Deployment is a static Vite build.
-- Runtime providers are hosted services and do not require application API keys.
+- Runtime map providers are hosted services and do not require application API
+  keys. Digitransit transit requests require the local Vite API-key variable.
 - MapLibre attribution must remain visible.
 - Provider failures should remain recoverable where cached parent tiles or a
   lower-resolution terrain source are available.

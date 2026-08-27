@@ -11,24 +11,21 @@ import { BusFront, ChevronUp, TrainFront, TrainFrontTunnel, TramFront } from 'lu
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
+import {
+  fetchTransitStops,
+  fetchTransitTrip,
+  type TransitProviderId,
+  type TransitStop,
+  type TransitStopSelection,
+  type TransitTripLeg,
+  type TransitTripPlace,
+} from './transit';
 
-const TRANSIT_API_URL = 'https://api.transitous.org/api/v6/map/stops';
-const TRANSIT_TRIP_API_URL = 'https://api.transitous.org/api/v6/trip';
-const TRANSIT_SOURCE_ID = 'transitous-stops';
-const SELECTED_STOP_SOURCE_ID = 'transitous-selected-stop';
-const SELECTED_ROUTES_SOURCE_ID = 'transitous-selected-routes';
-const ESTIMATED_VEHICLE_SOURCE_ID = 'transitous-estimated-vehicle';
+const TRANSIT_SOURCE_ID = 'transit-stops';
+const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
+const SELECTED_ROUTES_SOURCE_ID = 'transit-selected-routes';
+const ESTIMATED_VEHICLE_SOURCE_ID = 'transit-estimated-vehicle';
 const MIN_TRANSIT_ZOOM = 9;
-
-type TransitousStop = {
-  name?: unknown;
-  stopId?: unknown;
-  parentId?: unknown;
-  lat?: unknown;
-  lon?: unknown;
-  importance?: unknown;
-  modes?: unknown;
-};
 
 type TransitFeature = {
   type: 'Feature';
@@ -40,25 +37,8 @@ type TransitFeature = {
     parentId?: string;
     importance: number;
     mode: string;
+    provider: TransitProviderId;
   };
-};
-
-type TripLeg = {
-  tripId?: unknown;
-  startTime?: unknown;
-  endTime?: unknown;
-  realTime?: unknown;
-  from?: TransitPlace;
-  to?: TransitPlace;
-  intermediateStops?: unknown;
-  legGeometry?: { points?: unknown; precision?: unknown };
-};
-
-type TransitPlace = {
-  lat?: unknown;
-  lon?: unknown;
-  arrival?: unknown;
-  departure?: unknown;
 };
 
 type EstimatedTripLeg = {
@@ -68,7 +48,14 @@ type EstimatedTripLeg = {
   realTime: boolean;
 };
 
-type SelectedTrip = { tripId: string; mode: string; color: string; showRoute: boolean };
+type SelectedTrip = {
+  tripId: string;
+  mode: string;
+  color: string;
+  showRoute: boolean;
+  provider: TransitProviderId;
+  serviceDate?: string;
+};
 
 export type TransitVehiclePose = {
   mode: string;
@@ -86,19 +73,14 @@ type RouteLineFeature = {
   properties: { color: string };
 };
 
-export type TransitStopSelection = {
-  stopId: string;
-  name: string;
-  mode: string;
-  coordinates: [number, number];
-};
+export type { TransitStopSelection } from './transit';
 
 const TRANSIT_ICON_IDS = {
-  bus: 'transitous-bus-icon',
-  tram: 'transitous-tram-icon',
-  metro: 'transitous-metro-icon',
-  train: 'transitous-train-icon',
-  vehicle: 'transitous-estimated-vehicle-icon',
+  bus: 'transit-bus-icon',
+  tram: 'transit-tram-icon',
+  metro: 'transit-metro-icon',
+  train: 'transit-train-icon',
+  vehicle: 'transit-estimated-vehicle-icon',
 } as const;
 
 const METRO_COLOR = '#e87524';
@@ -136,26 +118,18 @@ function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function asMode(value: unknown): string {
-  if (!Array.isArray(value)) return 'TRANSIT';
-  const modes = value.filter((mode): mode is string => typeof mode === 'string');
-  return modes[0] ?? 'TRANSIT';
-}
-
-function toFeature(stop: TransitousStop, index: number): TransitFeature | undefined {
-  if (!isNumber(stop.lat) || !isNumber(stop.lon) || typeof stop.name !== 'string') return undefined;
-  if (stop.lat < -90 || stop.lat > 90 || stop.lon < -180 || stop.lon > 180) return undefined;
-
+function toFeature(stop: TransitStop): TransitFeature {
   return {
     type: 'Feature',
-    id: typeof stop.stopId === 'string' ? stop.stopId : `${stop.lon}:${stop.lat}:${index}`,
-    geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
+    id: `${stop.provider}:${stop.stopId}`,
+    geometry: { type: 'Point', coordinates: stop.coordinates },
     properties: {
       name: stop.name,
-      stopId: typeof stop.stopId === 'string' ? stop.stopId : `${stop.lon}:${stop.lat}:${index}`,
-      parentId: typeof stop.parentId === 'string' ? stop.parentId : undefined,
-      importance: isNumber(stop.importance) ? stop.importance : 0,
-      mode: asMode(stop.modes),
+      stopId: stop.stopId,
+      parentId: stop.parentId,
+      importance: stop.importance,
+      mode: stop.mode,
+      provider: stop.provider,
     },
   };
 }
@@ -179,6 +153,18 @@ function distanceInMeters(first: [number, number], second: [number, number]) {
   const haversine = Math.sin(latitudeDelta / 2) ** 2
     + Math.cos(firstLatitude) * Math.cos(secondLatitude) * Math.sin(longitudeDelta / 2) ** 2;
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+// Digitransit can expose the same physical station through multiple feeds.
+// The VR_bussit feed contains coach stops, while digitraffic contains the
+// railway timetable data used by the departures query. Prefer the latter when
+// choosing the representative for a visually merged station.
+function railFeedPriority(feature: TransitFeature) {
+  if (feature.properties.provider !== 'digitransit') return 0;
+  const stopId = feature.properties.stopId;
+  if (stopId.startsWith('digitraffic:')) return 2;
+  if (stopId.startsWith('VR_bussit:')) return 1;
+  return 1;
 }
 
 function groupRailPlatforms(features: TransitFeature[]) {
@@ -222,8 +208,17 @@ function groupRailPlatforms(features: TransitFeature[]) {
     ));
     if (duplicateIndex === -1) {
       result.push(feature);
-    } else if (feature.properties.importance > result[duplicateIndex].properties.importance) {
-      result[duplicateIndex] = feature;
+    } else {
+      const existing = result[duplicateIndex];
+      const featurePriority = railFeedPriority(feature);
+      const existingPriority = railFeedPriority(existing);
+      if (
+        featurePriority > existingPriority
+        || (featurePriority === existingPriority
+          && feature.properties.importance > existing.properties.importance)
+      ) {
+        result[duplicateIndex] = feature;
+      }
     }
   });
   return result;
@@ -250,36 +245,6 @@ function stopColor(mode: string) {
   return '#4f9b70';
 }
 
-function decodePolyline(points: string, precision: number): [number, number][] {
-  const coordinates: [number, number][] = [];
-  const factor = 10 ** precision;
-  let index = 0;
-  let latitude = 0;
-  let longitude = 0;
-  while (index < points.length) {
-    let result = 0;
-    let shift = 0;
-    let byte: number;
-    do {
-      byte = points.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index < points.length);
-    latitude += result & 1 ? ~(result >> 1) : result >> 1;
-
-    result = 0;
-    shift = 0;
-    do {
-      byte = points.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index < points.length);
-    longitude += result & 1 ? ~(result >> 1) : result >> 1;
-    coordinates.push([longitude / factor, latitude / factor]);
-  }
-  return coordinates;
-}
-
 function timestamp(value: unknown) {
   const parsed = typeof value === 'number'
     ? value < 10_000_000_000 ? value * 1000 : value
@@ -287,7 +252,7 @@ function timestamp(value: unknown) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function placeCoordinates(place: TransitPlace | undefined): [number, number] | undefined {
+function placeCoordinates(place: TransitTripPlace | undefined): [number, number] | undefined {
   return place && isNumber(place.lon) && isNumber(place.lat) ? [place.lon, place.lat] : undefined;
 }
 
@@ -316,11 +281,11 @@ function nearestPathIndex(
   return nearestIndex;
 }
 
-function buildEstimatedTripLeg(leg: TripLeg, coordinates: [number, number][]) {
+function buildEstimatedTripLeg(leg: TransitTripLeg, coordinates: [number, number][]) {
   if (coordinates.length < 2) return undefined;
   const distances = cumulativeDistances(coordinates);
   const intermediateStops = Array.isArray(leg.intermediateStops)
-    ? leg.intermediateStops as TransitPlace[]
+    ? leg.intermediateStops
     : [];
   const places = [leg.from, ...intermediateStops, leg.to];
   const anchors: Array<{ distance: number; time: number }> = [];
@@ -496,12 +461,12 @@ export class TransitStopsLayer {
     });
     const icons = [
       // Rail stops carry the city-scale network, so they appear first.
-      iconLayer('transitous-train-stop-icons', 10, TRANSIT_ICON_IDS.train, [
+      iconLayer('transit-train-stop-icons', 10, TRANSIT_ICON_IDS.train, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
       ]),
-      iconLayer('transitous-metro-stop-icons', 10, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
-      iconLayer('transitous-tram-stop-icons', 12, TRANSIT_ICON_IDS.tram, ['TRAM']),
-      iconLayer('transitous-bus-stop-icons', 14, TRANSIT_ICON_IDS.bus, ['BUS']),
+      iconLayer('transit-metro-stop-icons', 10, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
+      iconLayer('transit-tram-stop-icons', 12, TRANSIT_ICON_IDS.tram, ['TRAM']),
+      iconLayer('transit-bus-stop-icons', 14, TRANSIT_ICON_IDS.bus, ['BUS']),
     ];
     const hitLayer = (
       id: string,
@@ -521,12 +486,12 @@ export class TransitStopsLayer {
       },
     });
     const hitLayers = [
-      hitLayer('transitous-train-stop-hit-targets', 9, [
+      hitLayer('transit-train-stop-hit-targets', 9, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
       ]),
-      hitLayer('transitous-metro-stop-hit-targets', 10, ['SUBWAY']),
-      hitLayer('transitous-tram-stop-hit-targets', 12, ['TRAM']),
-      hitLayer('transitous-bus-stop-hit-targets', 14, ['BUS']),
+      hitLayer('transit-metro-stop-hit-targets', 10, ['SUBWAY']),
+      hitLayer('transit-tram-stop-hit-targets', 12, ['TRAM']),
+      hitLayer('transit-bus-stop-hit-targets', 14, ['BUS']),
     ];
     const labelLayer = (
       id: string,
@@ -554,12 +519,12 @@ export class TransitStopsLayer {
       },
     });
     const labels = [
-      labelLayer('transitous-train-stop-labels', 11, [
+      labelLayer('transit-train-stop-labels', 11, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
       ]),
-      labelLayer('transitous-metro-stop-labels', 12, ['SUBWAY']),
-      labelLayer('transitous-tram-stop-labels', 14, ['TRAM']),
-      labelLayer('transitous-bus-stop-labels', 16, ['BUS']),
+      labelLayer('transit-metro-stop-labels', 12, ['SUBWAY']),
+      labelLayer('transit-tram-stop-labels', 14, ['TRAM']),
+      labelLayer('transit-bus-stop-labels', 16, ['BUS']),
     ];
     // Keep transit symbols below the app's close-zoom POI labels when the
     // style provides that anchor, otherwise let MapLibre append them.
@@ -567,7 +532,7 @@ export class TransitStopsLayer {
       ? 'global-poi-labels'
       : undefined;
     const routeCasing: LineLayerSpecification = {
-      id: 'transitous-selected-route-casing',
+      id: 'transit-selected-route-casing',
       type: 'line',
       source: SELECTED_ROUTES_SOURCE_ID,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -578,7 +543,7 @@ export class TransitStopsLayer {
       },
     };
     const routeLines: LineLayerSpecification = {
-      id: 'transitous-selected-routes',
+      id: 'transit-selected-routes',
       type: 'line',
       source: SELECTED_ROUTES_SOURCE_ID,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -589,7 +554,7 @@ export class TransitStopsLayer {
       },
     };
     const selectedStopHalo: CircleLayerSpecification = {
-      id: 'transitous-selected-stop-halo',
+      id: 'transit-selected-stop-halo',
       type: 'circle',
       source: SELECTED_STOP_SOURCE_ID,
       paint: {
@@ -601,7 +566,7 @@ export class TransitStopsLayer {
       },
     };
     const selectedStopIcon: SymbolLayerSpecification = {
-      id: 'transitous-selected-stop-icon',
+      id: 'transit-selected-stop-icon',
       type: 'symbol',
       source: SELECTED_STOP_SOURCE_ID,
       layout: {
@@ -620,7 +585,7 @@ export class TransitStopsLayer {
       },
     };
     const estimatedVehicleHalo: CircleLayerSpecification = {
-      id: 'transitous-estimated-vehicle-halo',
+      id: 'transit-estimated-vehicle-halo',
       type: 'circle',
       source: ESTIMATED_VEHICLE_SOURCE_ID,
       minzoom: 5,
@@ -633,7 +598,7 @@ export class TransitStopsLayer {
       },
     };
     const estimatedVehicleIcon: SymbolLayerSpecification = {
-      id: 'transitous-estimated-vehicle-icon',
+      id: 'transit-estimated-vehicle-icon',
       type: 'symbol',
       source: ESTIMATED_VEHICLE_SOURCE_ID,
       minzoom: 5,
@@ -648,7 +613,7 @@ export class TransitStopsLayer {
       },
     };
     const estimatedVehicleLabel: SymbolLayerSpecification = {
-      id: 'transitous-estimated-vehicle-label',
+      id: 'transit-estimated-vehicle-label',
       type: 'symbol',
       source: ESTIMATED_VEHICLE_SOURCE_ID,
       minzoom: 13,
@@ -689,6 +654,7 @@ export class TransitStopsLayer {
         name: String(properties.name ?? 'Transit stop'),
         mode: String(properties.mode ?? 'TRANSIT'),
         coordinates,
+        provider: properties.provider === 'digitransit' ? 'digitransit' : 'transitous',
       };
       this.selectStop(selection);
       onStopClick(selection);
@@ -717,6 +683,7 @@ export class TransitStopsLayer {
           stopId: stop.stopId,
           name: stop.name,
           mode: stop.mode,
+          provider: stop.provider,
         },
       }],
     });
@@ -727,7 +694,14 @@ export class TransitStopsLayer {
     this.selectStop(stop);
   }
 
-  selectTrip(tripId: string, mode: string, color: string, showRoute = true) {
+  selectTrip(
+    tripId: string,
+    mode: string,
+    color: string,
+    showRoute = true,
+    provider: TransitProviderId = 'transitous',
+    serviceDate?: string,
+  ) {
     if (!this.map || !tripId) return;
     this.clearSelectedTrip();
     this.selectedTrip = {
@@ -735,6 +709,8 @@ export class TransitStopsLayer {
       mode,
       color: mode === 'SUBWAY' ? METRO_COLOR : routeColor(color, stopColor(mode)),
       showRoute,
+      provider,
+      serviceDate,
     };
     void this.loadSelectedTrip();
     this.vehicleTimer = window.setInterval(() => this.updateEstimatedVehicle(), 250);
@@ -747,29 +723,26 @@ export class TransitStopsLayer {
     this.tripController?.abort();
     const controller = new AbortController();
     this.tripController = controller;
-    const params = new URLSearchParams({
-      tripId: selection.tripId,
-      detailedLegs: 'true',
-      joinInterlinedLegs: 'false',
-      language: typeof navigator !== 'undefined' ? navigator.language : 'en',
-    });
 
     try {
-      const response = await fetch(`${TRANSIT_TRIP_API_URL}?${params}`, {
-        signal: controller.signal,
-        headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
-      });
-      if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
-      const payload = await response.json() as { legs?: TripLeg[] };
-      if (controller.signal.aborted || !this.map || this.selectedTrip?.tripId !== selection.tripId) return;
+      const payload = await fetchTransitTrip(
+        selection.provider,
+        selection.tripId,
+        selection.serviceDate,
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted
+        || !this.map
+        || this.selectedTrip?.tripId !== selection.tripId
+        || this.selectedTrip.provider !== selection.provider
+        || this.selectedTrip.serviceDate !== selection.serviceDate
+      ) return;
 
       const estimatedLegs: EstimatedTripLeg[] = [];
-      const features = (payload.legs ?? []).flatMap((leg): RouteLineFeature[] => {
+      const features = payload.legs.flatMap((leg): RouteLineFeature[] => {
         if (String(leg.tripId ?? '') !== selection.tripId) return [];
-        const points = leg.legGeometry?.points;
-        const precision = leg.legGeometry?.precision;
-        if (typeof points !== 'string' || typeof precision !== 'number') return [];
-        const coordinates = decodePolyline(points, precision);
+        const coordinates = leg.coordinates;
         if (coordinates.length < 2) return [];
         const estimatedLeg = buildEstimatedTripLeg(leg, coordinates);
         if (estimatedLeg) estimatedLegs.push(estimatedLeg);
@@ -785,7 +758,7 @@ export class TransitStopsLayer {
       this.updateEstimatedVehicle();
     } catch (error) {
       if ((error as { name?: string }).name !== 'AbortError') {
-        console.warn('Transitous trip lookup failed.', error);
+        console.warn(`${selection.provider} trip lookup failed.`, error);
       }
     }
   }
@@ -859,28 +832,22 @@ export class TransitStopsLayer {
     const controller = new AbortController();
     this.requestController = controller;
     const generation = ++this.requestGeneration;
-    const params = new URLSearchParams({
-      min: `${bounds.getSouth()},${bounds.getWest()}`,
-      max: `${bounds.getNorth()},${bounds.getEast()}`,
-      grouped: 'false',
-      modes: 'TRANSIT',
-      language: typeof navigator !== 'undefined' ? navigator.language : 'en',
-    });
+    const requestBounds = {
+      south: bounds.getSouth(),
+      west: bounds.getWest(),
+      north: bounds.getNorth(),
+      east: bounds.getEast(),
+    };
 
     try {
-      const response = await fetch(`${TRANSIT_API_URL}?${params}`, {
-        signal: controller.signal,
-        headers: { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' },
-      });
-      if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
-      const payload: unknown = await response.json();
-      if (!Array.isArray(payload) || generation !== this.requestGeneration || !this.map) return;
+      const stops = await fetchTransitStops(requestBounds, controller.signal);
+      if (generation !== this.requestGeneration || !this.map) return;
 
       const seen = new Set<string>();
-      const features = payload
-        .map((item, index) => toFeature(item as TransitousStop, index))
-        .filter((feature): feature is TransitFeature => {
-          if (!feature || seen.has(feature.id)) return false;
+      const features = stops
+        .map(toFeature)
+        .filter((feature) => {
+          if (seen.has(feature.id)) return false;
           seen.add(feature.id);
           return true;
         });
@@ -889,7 +856,7 @@ export class TransitStopsLayer {
       source?.setData({ type: 'FeatureCollection', features: stationFeatures });
     } catch (error) {
       if ((error as { name?: string }).name !== 'AbortError') {
-        console.warn('Transitous stop lookup failed.', error);
+        console.warn('Transit stop lookup failed.', error);
       }
     }
   }
