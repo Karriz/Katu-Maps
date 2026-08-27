@@ -10,7 +10,7 @@ vegetation and transit vehicle models.
 The application uses one hosted map-data path:
 
 - OpenFreeMap vector tiles using the OpenMapTiles schema.
-- Mapterhorn Terrarium DEM tiles, including runtime probing for regional detail.
+- Mapterhorn Terrarium DEM tiles capped at zoom 12 and overzoomed at close range.
 - Photon for place search and Nominatim for optional place details.
 - A provider-neutral transit service: Digitransit for locations in Finland and
   Transitous elsewhere, for stops, departures, route geometry, and vehicle
@@ -24,8 +24,8 @@ pipeline. Transit provider selection is geographic and centralized in
 ## Rendering boundaries
 
 - `GlobalMapStyle.ts` defines the MapLibre style and its hosted sources.
-- `TerrainCoverage.ts` discovers detailed terrain coverage and falls back to
-  the guaranteed global DEM range.
+- `GlobalMapStyle.ts` defines a single z12-limited terrain source, preventing
+  regional-detail probes and higher-zoom DEM requests.
 - `TreeModelLayer.ts` samples hosted vegetation polygons into deterministic,
   instanced Three.js trees.
 - `TransitStopsLayer.ts` manages stop markers, selected routes, and estimated
