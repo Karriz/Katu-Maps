@@ -169,6 +169,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-search-field > svg { color: var(--color-accent); flex: 0 0 auto; height: 17px; width: 17px; }
 .route-search-field input { background: transparent; border: 0; color: #24466e; font: inherit; font-size: 0.84rem; min-width: 0; outline: 0; width: 100%; }
 .route-search-field input::placeholder { color: #64748b; }
+.route-field-clear { align-items: center; background: transparent; border: 0; border-radius: 6px; color: #94a3b8; cursor: pointer; display: flex; flex: 0 0 auto; justify-content: center; padding: 5px; }
+.route-field-clear:hover, .route-field-clear:focus-visible { background: #e8eef5; color: #334155; outline: 0; }
+.route-field-clear svg { height: 15px; width: 15px; }
 .route-map-button { background: #eef5ff; border: 1px solid #c5daf8; border-radius: 7px; color: var(--color-accent); cursor: pointer; flex: 0 0 auto; font: inherit; font-size: 0.7rem; font-weight: 700; padding: 7px 8px; }
 .route-map-button:hover { background: #dceaff; }
 .route-endpoint-current { color: #64748b; font-size: 0.68rem; overflow: hidden; padding: 4px 12px 0 39px; text-overflow: ellipsis; white-space: nowrap; }
@@ -266,6 +269,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-search-form > svg { color: var(--color-accent); flex: 0 0 auto; height: 25px; stroke-width: 2; width: 25px; }
 .location-search-form input { background: transparent; border: 0; color: var(--color-ink); font: inherit; font-size: 1rem; font-weight: 520; min-width: 0; outline: 0; width: 100%; }
 .location-search-form input::placeholder { color: #7f8da0; }
+.location-search-clear { align-items: center; background: transparent; border: 0; border-radius: 7px; color: #7f8da0; cursor: pointer; display: flex; flex: 0 0 auto; justify-content: center; padding: 5px; }
+.location-search-clear:hover, .location-search-clear:focus-visible { background: #edf2f7; color: #334155; outline: 0; }
+.location-search-clear svg { height: 18px; width: 18px; }
 .location-search-shortcut { align-items: center; background: #f4f6f8; border: 1px solid #dce2e8; border-radius: 7px; box-shadow: 0 1px 2px rgb(20 40 65 / 8%); color: #6e7b8a; display: flex; flex: 0 0 auto; font-family: inherit; font-size: 0.74rem; gap: 2px; line-height: 1; padding: 6px 7px; }
 .location-search-spinner { animation: location-search-spin 700ms linear infinite; border: 2px solid #dce8f8; border-radius: 50%; border-top-color: var(--color-accent); flex: 0 0 auto; height: 18px; width: 18px; }
 @keyframes location-search-spin { to { transform: rotate(360deg); } }
