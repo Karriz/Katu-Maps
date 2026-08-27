@@ -3,7 +3,6 @@ import maplibregl, {
   type ExpressionSpecification,
   type FillLayerSpecification,
   type FilterSpecification,
-  type HillshadeLayerSpecification,
   type Map,
   type MapGeoJSONFeature,
   type MapMouseEvent,
@@ -53,19 +52,11 @@ import {
   GLOBAL_MAP_STYLE,
   GLOBAL_ROAD_CASING_LAYER_IDS,
   GLOBAL_ROAD_LAYER_IDS,
-  MAPTERHORN_DETAIL_SOURCE_ID,
   OPENFREEMAP_SOURCE_ID,
   roadWidthExpression,
 } from './GlobalMapStyle';
-import {
-  DETAIL_TERRAIN_MAX_ZOOM,
-  detailedTerrainSource,
-  detailedTerrainZoom,
-  GLOBAL_TERRAIN_MAX_ZOOM,
-} from './TerrainCoverage';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
-const DETAIL_HILLSHADE_LAYER_ID = 'terrain-hillshade-detail';
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
 const BUILDING_SHADOW_LAYER_IDS = [
@@ -871,10 +862,6 @@ export function MapView() {
     transitStopsLayerRef.current = transitStopsLayer;
     let treeUpdateTimer: number | undefined;
     let transitStopsTimer: number | undefined;
-    let terrainCoverageTimer: number | undefined;
-    let terrainCoverageGeneration = 0;
-    let detailTerrainMaxZoom: number | undefined;
-    let lowZoomTerrainProbeComplete = false;
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
     let globalLabelDensitySignature: string | undefined;
@@ -882,121 +869,6 @@ export function MapView() {
     let modelDataRevision = 0;
     let lastModelUpdateSignature: string | undefined;
     const modelVectorSourceId = OPENFREEMAP_SOURCE_ID;
-
-    const setTerrainSource = (sourceId: string) => {
-      const sourceChanged = terrainSourceRef.current !== sourceId;
-      terrainSourceRef.current = sourceId;
-      if (sourceChanged) {
-        treeLayer.invalidateTerrain();
-        modelDataRevision += 1;
-      }
-      // Reapplying the same terrain specification makes MapLibre recalculate
-      // its terrain-clamped camera and can look like a small backward zoom.
-      if (terrainEnabledRef.current && sourceChanged) {
-        map.setTerrain({ source: sourceId, exaggeration: 1 });
-      }
-      if (map.getLayer('terrain-hillshade')) {
-        map.setLayoutProperty(
-          'terrain-hillshade',
-          'visibility',
-          terrainEnabledRef.current && sourceId === 'terrain' ? 'visible' : 'none',
-        );
-      }
-      if (map.getLayer(DETAIL_HILLSHADE_LAYER_ID)) {
-        map.setLayoutProperty(
-          DETAIL_HILLSHADE_LAYER_ID,
-          'visibility',
-          terrainEnabledRef.current && sourceId === MAPTERHORN_DETAIL_SOURCE_ID
-            ? 'visible'
-            : 'none',
-        );
-      }
-    };
-
-    const installDetailedTerrain = (maxzoom: number) => {
-      if (detailTerrainMaxZoom === maxzoom && map.getSource(MAPTERHORN_DETAIL_SOURCE_ID)) {
-        setTerrainSource(MAPTERHORN_DETAIL_SOURCE_ID);
-        return;
-      }
-
-      // A raster-dem source cannot change maxzoom in place. Move terrain back
-      // to the guaranteed global source before replacing the regional source.
-      if (map.getSource(MAPTERHORN_DETAIL_SOURCE_ID)) {
-        map.setTerrain(terrainEnabledRef.current
-          ? { source: 'terrain', exaggeration: 1 }
-          : null);
-        terrainSourceRef.current = 'terrain';
-        if (map.getLayer(DETAIL_HILLSHADE_LAYER_ID)) {
-          map.removeLayer(DETAIL_HILLSHADE_LAYER_ID);
-        }
-        map.removeSource(MAPTERHORN_DETAIL_SOURCE_ID);
-      }
-
-      map.addSource(MAPTERHORN_DETAIL_SOURCE_ID, detailedTerrainSource(maxzoom));
-      const detailHillshade: HillshadeLayerSpecification = {
-        id: DETAIL_HILLSHADE_LAYER_ID,
-        type: 'hillshade',
-        source: MAPTERHORN_DETAIL_SOURCE_ID,
-        layout: { visibility: 'none' },
-        paint: {
-          'hillshade-exaggeration': 0.32,
-          'hillshade-illumination-direction': CARTOON_SUN_AZIMUTH_DEGREES,
-          'hillshade-illumination-anchor': 'map',
-          'hillshade-shadow-color': '#7d8e82',
-          'hillshade-highlight-color': '#fffbea',
-          'hillshade-accent-color': '#b3c0b5',
-        },
-      };
-      map.addLayer(detailHillshade, 'global-water-edge-shade');
-      detailTerrainMaxZoom = maxzoom;
-      setTerrainSource(MAPTERHORN_DETAIL_SOURCE_ID);
-    };
-
-    const updateTerrainResolution = async (generation: number) => {
-      if (!map.isStyleLoaded()) return;
-      const isLowZoomProbe = map.getZoom() < GLOBAL_TERRAIN_MAX_ZOOM + 0.25;
-      // Probe the initial center while the globe is still zoomed out, where a
-      // one-time source installation is visually inert. Once installed, the
-      // same source can serve both its global z0-z12 tiles and regional detail.
-      if (isLowZoomProbe && lowZoomTerrainProbeComplete) return;
-
-      const bounds = map.getBounds();
-      const samplePoints = isLowZoomProbe
-        ? [map.getCenter()]
-        : [
-            map.getCenter(),
-            bounds.getNorthWest(),
-            bounds.getNorthEast(),
-            bounds.getSouthWest(),
-            bounds.getSouthEast(),
-          ];
-      try {
-        // Discover the regional ceiling in one pass. Incrementally replacing
-        // the DEM source at every integer camera zoom causes visible jumps.
-        const maxzoom = await detailedTerrainZoom(samplePoints, DETAIL_TERRAIN_MAX_ZOOM);
-        if (generation !== terrainCoverageGeneration) return;
-        if (isLowZoomProbe) lowZoomTerrainProbeComplete = true;
-        if (maxzoom > GLOBAL_TERRAIN_MAX_ZOOM) {
-          installDetailedTerrain(maxzoom);
-        } else {
-          setTerrainSource('terrain');
-        }
-      } catch (error) {
-        if (generation !== terrainCoverageGeneration) return;
-        if (isLowZoomProbe) lowZoomTerrainProbeComplete = true;
-        console.warn('Detailed terrain coverage check failed; using global terrain.', error);
-        setTerrainSource('terrain');
-      }
-    };
-
-    const scheduleTerrainResolutionUpdate = () => {
-      if (terrainCoverageTimer !== undefined) window.clearTimeout(terrainCoverageTimer);
-      terrainCoverageGeneration += 1;
-      const generation = terrainCoverageGeneration;
-      terrainCoverageTimer = window.setTimeout(() => {
-        void updateTerrainResolution(generation);
-      }, 180);
-    };
 
     const updateGlobalRoadWidths = () => {
       const latitude = map.getCenter().lat;
@@ -1400,7 +1272,6 @@ export function MapView() {
       updateGlobalRoadWidths();
       updateGlobalLabelDensity();
       scheduleTreeUpdate();
-      scheduleTerrainResolutionUpdate();
       scheduleTransitStopsUpdate();
       initialLoadComplete = true;
       setMapLoaded(true);
@@ -1408,7 +1279,6 @@ export function MapView() {
     const handleMoveEnd = () => {
       updateGlobalRoadWidths();
       scheduleTreeUpdate();
-      scheduleTerrainResolutionUpdate();
       scheduleTransitStopsUpdate();
     };
     const handleCameraMove = () => {
@@ -1450,8 +1320,6 @@ export function MapView() {
     return () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
-      if (terrainCoverageTimer !== undefined) window.clearTimeout(terrainCoverageTimer);
-      terrainCoverageGeneration += 1;
       map.off('move', handleCameraMove);
       map.off('moveend', handleMoveEnd);
       map.off('zoomstart', handleMapGestureStart);
@@ -1520,15 +1388,6 @@ export function MapView() {
         'terrain-hillshade',
         'visibility',
         layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none',
-      );
-    }
-    if (map.getLayer(DETAIL_HILLSHADE_LAYER_ID)) {
-      map.setLayoutProperty(
-        DETAIL_HILLSHADE_LAYER_ID,
-        'visibility',
-        layerToggles.terrain && terrainSourceRef.current === MAPTERHORN_DETAIL_SOURCE_ID
-          ? 'visible'
-          : 'none',
       );
     }
     treeRefreshRef.current?.();

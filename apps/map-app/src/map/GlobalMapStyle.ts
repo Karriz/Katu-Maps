@@ -12,7 +12,6 @@ import { MAP_COLORS } from './MapPalette';
 
 export const OPENFREEMAP_SOURCE_ID = 'openfreemap';
 export const MAPTERHORN_SOURCE_ID = 'terrain';
-export const MAPTERHORN_DETAIL_SOURCE_ID = 'terrain-detail';
 
 const browserLanguage = typeof navigator === 'undefined'
   ? 'en'
@@ -365,9 +364,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       // contract if the TileJSON source is later replaced with our own URL.
       tileSize: 512,
       encoding: 'terrarium',
-      // Mapterhorn guarantees full-planet coverage through z12. The runtime
-      // probes the visible area before installing a separate z13+ source;
-      // keeping this source capped makes the fallback deterministic.
+      // This experiment intentionally caps DEM requests at z12. MapLibre
+      // overzooms these globally available tiles at closer camera zooms.
       maxzoom: 12,
       attribution: '<a href="https://mapterhorn.com/attribution/">© Mapterhorn terrain data</a>',
     },

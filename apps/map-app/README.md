@@ -38,12 +38,11 @@ inland-water polygons provide the blue surface. Between zooms 10 and 12 the
 at that close-map scale, where the existing 3D rendering remains compatible.
 The Globe control can switch the global view to a conventional Mercator map.
 
-Mapterhorn guarantees full-planet terrain through zoom 12. The app probes the
-initial center for the regional terrain ceiling while still zoomed out, then
-checks the center and corners after close-range moves. It keeps an installed
-source when its resolution is unchanged and otherwise falls back to the global
-source. Water is drawn above hillshade so lakes and oceans remain visually flat
-even when surrounding terrain is enabled.
+The experimental terrain configuration caps Mapterhorn DEM tiles at zoom 12.
+MapLibre overzooms that globally available terrain at closer camera zooms,
+avoiding regional-detail probes and z13-z18 DEM requests. Water is drawn above
+hillshade so lakes and oceans remain visually flat even when surrounding
+terrain is enabled.
 
 The production build separates the application, React, Three.js, MapLibre, and
 other dependencies into independently cacheable chunks. This keeps ordinary

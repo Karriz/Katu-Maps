@@ -8,7 +8,7 @@ toggle the major visual layers without running local map infrastructure.
 
 - [x] TypeScript and Vite production build.
 - [x] Hosted OpenFreeMap vector map with adaptive globe projection.
-- [x] Mapterhorn terrain with regional detail probing and fallback.
+- [x] Experimental z12-limited Mapterhorn terrain with close-range overzooming.
 - [x] Extruded buildings and deterministic instanced vegetation.
 - [x] Place search and OpenStreetMap place details.
 - [x] Transit stops, departure times, selected routes, and vehicle progress.
