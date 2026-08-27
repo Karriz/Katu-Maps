@@ -88,6 +88,7 @@ export function MapControls({
   searchError,
   searchResults,
   onQueryChange,
+  onSearchClear,
   onSearchFocus,
   onSearchSubmit,
   onSearchResultSelect,
@@ -113,6 +114,7 @@ export function MapControls({
   searchError: string | null;
   searchResults: SearchResult[];
   onQueryChange: (query: string) => void;
+  onSearchClear: () => void;
   onSearchFocus: () => void;
   onSearchSubmit: () => void;
   onSearchResultSelect: (index: number) => void;
@@ -167,9 +169,23 @@ export function MapControls({
             onChange={(event) => onQueryChange(event.target.value)}
             onFocus={onSearchFocus}
           />
+          {query && (
+            <button
+              className="location-search-clear"
+              type="button"
+              aria-label="Clear search"
+              title="Clear search"
+              onClick={() => {
+                onSearchClear();
+                searchInputRef.current?.focus();
+              }}
+            >
+              <X aria-hidden="true" />
+            </button>
+          )}
           {searchLoading ? (
             <span className="location-search-spinner" aria-label="Searching" />
-          ) : (
+          ) : !query && (
             <kbd className="location-search-shortcut"><span>{shortcutModifier}</span>K</kbd>
           )}
         </form>

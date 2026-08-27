@@ -22,6 +22,7 @@ import {
   Landmark,
   Palette,
   MapPin,
+  X,
   Clock3,
   ShoppingBag,
   Store,
@@ -1914,6 +1915,14 @@ export function MapView() {
               setSearchOpen(true);
               setLayersOpen(false);
             }}
+            onSearchClear={() => {
+              selectedSearchQueryRef.current = null;
+              setSearchQuery('');
+              setSearchResults([]);
+              setSearchError(null);
+              setSearchOpen(false);
+              setShowSearchResultsOnMap(false);
+            }}
             onSearchFocus={() => {
               setSearchOpen(true);
               setLayersOpen(false);
@@ -2157,6 +2166,36 @@ export function MapView() {
                             setSearchOpen(false);
                           }}
                         />
+                        {(routeSearchTarget === kind ? searchQuery : selection?.name) && (
+                          <button
+                            type="button"
+                            className="route-field-clear"
+                            aria-label={`Clear ${label.toLowerCase()}`}
+                            title={`Clear ${label.toLowerCase()}`}
+                            onClick={() => {
+                              if (kind === 'origin') {
+                                routeOriginRef.current = null;
+                                setRouteOriginSelection(null);
+                              } else {
+                                routeDestinationRef.current = null;
+                                setRouteDestinationSelection(null);
+                              }
+                              routeAbortRef.current?.abort();
+                              setRouteLoading(false);
+                              setRouteResult(null);
+                              setTransitRouteOptions([]);
+                              setRouteError(null);
+                              setRouteGeometry(null);
+                              setSearchQuery('');
+                              setSearchResults([]);
+                              setSearchError(null);
+                              setRouteSearchTarget(kind);
+                              routePickingRef.current = kind;
+                            }}
+                          >
+                            <X aria-hidden="true" />
+                          </button>
+                        )}
                         <button type="button" className="route-map-button" onClick={() => pickRouteEndpoint(kind)}>
                           Map
                         </button>
