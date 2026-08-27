@@ -1154,9 +1154,12 @@ export function MapView() {
     };
     let longPressTimer: number | undefined;
     let longPressStart: { x: number; y: number } | undefined;
-    const activeTouchPointers = new Set<number>();
-    let touchGestureActive = false;
-    let lastTouchInteractionAt = 0;
+    const activeLongPressPointers = new Set<number>();
+    let multiPointerGestureActive = false;
+    let lastTouchOrPenInteractionAt = 0;
+    const supportsLongPress = (event: PointerEvent) => (
+      event.pointerType === 'touch' || event.pointerType === 'pen'
+    );
     const cancelLongPressTimer = () => {
       if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
       longPressTimer = undefined;
@@ -1172,32 +1175,33 @@ export function MapView() {
     };
     const handleMapContextMenu = (event: MapMouseEvent) => {
       event.originalEvent.preventDefault();
-      // Touch long-presses are handled explicitly below. MapLibre/browser
+      // Touch and pen long-presses are handled explicitly below. MapLibre/browser
       // contextmenu events can also arrive during a pinch, so never turn a
-      // touch-generated contextmenu event into a route menu.
-      if (('pointerType' in event.originalEvent && event.originalEvent.pointerType === 'touch')
-        || Date.now() - lastTouchInteractionAt < 1000) return;
+      // pointer-generated contextmenu event into a second route menu.
+      if (('pointerType' in event.originalEvent
+          && (event.originalEvent.pointerType === 'touch' || event.originalEvent.pointerType === 'pen'))
+        || Date.now() - lastTouchOrPenInteractionAt < 1000) return;
       showRouteContextMenu(event.point, [event.lngLat.lng, event.lngLat.lat]);
     };
     const handlePointerDown = (event: PointerEvent) => {
       // Let manual map gestures take ownership from vehicle following.
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
-      if (event.pointerType !== 'touch') return;
-      lastTouchInteractionAt = Date.now();
-      activeTouchPointers.add(event.pointerId);
-      if (activeTouchPointers.size > 1) {
-        // A second finger means this is a pinch/rotate gesture, never a
+      if (!supportsLongPress(event)) return;
+      lastTouchOrPenInteractionAt = Date.now();
+      activeLongPressPointers.add(event.pointerId);
+      if (activeLongPressPointers.size > 1) {
+        // A second contact means this is a pinch/rotate gesture, never a
         // long-press. This also covers the common case where the second
         // pointer does not move far enough to trip the movement threshold.
-        touchGestureActive = true;
+        multiPointerGestureActive = true;
         cancelLongPressTimer();
         return;
       }
-      touchGestureActive = false;
+      multiPointerGestureActive = false;
       longPressStart = { x: event.clientX, y: event.clientY };
       longPressTimer = window.setTimeout(() => {
-        if (touchGestureActive || activeTouchPointers.size !== 1) {
+        if (multiPointerGestureActive || activeLongPressPointers.size !== 1) {
           cancelLongPressTimer();
           return;
         }
@@ -1214,16 +1218,16 @@ export function MapView() {
       setVehicleFollowing(false);
     };
     const cancelLongPress = (event: PointerEvent) => {
-      if (event.pointerType === 'touch' && event.type === 'pointermove' && activeTouchPointers.size > 1) {
-        touchGestureActive = true;
+      if (supportsLongPress(event) && event.type === 'pointermove' && activeLongPressPointers.size > 1) {
+        multiPointerGestureActive = true;
         cancelLongPressTimer();
       } else if (longPressStart && Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > 12) {
         cancelLongPressTimer();
       }
       if (event.type !== 'pointermove') {
-        if (event.pointerType === 'touch') activeTouchPointers.delete(event.pointerId);
-        if (activeTouchPointers.size === 0) {
-          touchGestureActive = false;
+        if (supportsLongPress(event)) activeLongPressPointers.delete(event.pointerId);
+        if (activeLongPressPointers.size === 0) {
+          multiPointerGestureActive = false;
           cancelLongPressTimer();
         }
       }
