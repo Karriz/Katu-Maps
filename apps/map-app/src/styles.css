@@ -209,18 +209,45 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-summary strong { color: #1e293b; font-size: 1.2rem; }
 .route-summary span { color: #64748b; font-size: 0.84rem; }
 .transit-route-legs { border-top: 1px solid #edf0f3; display: grid; gap: 0; margin-top: 12px; padding-top: 8px; }
+.transit-transfer-marker { align-items: center; color: #64748b; display: flex; font-size: 0.66rem; font-weight: 750; gap: 6px; margin: 4px 0 5px 1px; }
+.transit-transfer-marker svg { background: #fff7df; border: 1px solid #e8c66d; border-radius: 50%; color: #a56a00; height: 18px; padding: 3px; width: 18px; }
 .transit-route-details-toggle { align-items: center; background: transparent; border: 0; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.72rem; font-weight: 750; justify-content: space-between; margin-top: 9px; padding: 7px 0; width: 100%; }
 .transit-route-details-toggle span { font-size: 1rem; line-height: 1; }
-.transit-route-leg { align-items: flex-start; display: flex; gap: 9px; min-height: 48px; position: relative; }
-.transit-route-leg:not(:last-child)::after { background: #cbd5e1; content: ''; left: 5px; position: absolute; top: 15px; bottom: -1px; width: 2px; }
-.transit-route-leg-marker { background: var(--color-accent); border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--color-accent); flex: 0 0 auto; height: 12px; margin-top: 3px; position: relative; width: 12px; z-index: 1; }
+.transit-route-leg { align-items: flex-start; display: flex; gap: 9px; min-height: 68px; position: relative; }
+.transit-route-leg:not(:last-child)::after { background: #cbd5e1; content: ''; left: 8px; position: absolute; top: 23px; bottom: -8px; width: 2px; }
+.transit-route-leg-marker { align-items: center; background: var(--color-accent); border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--color-accent); color: #fff; display: flex; flex: 0 0 auto; font-size: 0.57rem; font-weight: 800; height: 18px; justify-content: center; margin-top: 1px; position: relative; width: 18px; z-index: 1; }
 .transit-route-leg.walking .transit-route-leg-marker { background: #94a3b8; box-shadow: 0 0 0 1px #94a3b8; }
-.transit-route-leg-copy { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
-.transit-route-leg-copy strong { color: #263449; font-size: 0.76rem; }
-.transit-route-leg-copy span { color: #64748b; font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.transit-route-leg.vehicle .transit-route-leg-copy span { color: #1769e8; }
-.transit-route-leg time { color: #64748b; flex: 0 0 auto; font-size: 0.66rem; font-variant-numeric: tabular-nums; padding-top: 2px; }
+.transit-route-leg-copy { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
+.transit-route-leg-title { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+.transit-route-leg-title strong { color: #263449; font-size: 0.78rem; }
+.transit-route-leg-title time { color: #64748b; flex: 0 0 auto; font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+.transit-route-leg-headsign { color: #1769e8; font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transit-route-stations { display: grid; gap: 2px; margin-top: 1px; }
+.transit-route-stations div:not(.transit-route-station-line) { display: grid; gap: 1px; grid-template-columns: 48px minmax(0, 1fr); }
+.transit-route-stations small { color: #94a3b8; font-size: 0.59rem; font-weight: 750; text-transform: uppercase; }
+.transit-route-stations strong { color: #475569; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transit-route-station-line { border-left: 1px solid #cbd5e1; height: 4px; margin-left: 24px; }
 .route-retry-button { margin: 14px 0 0; }
+
+@media (min-width: 761px) {
+  /* Keep map chrome together on the left; the active information surface lives
+     on the opposite side so it never competes with search or map controls. */
+  .location-search {
+    left: 28px;
+  }
+  .map-tools.route-open {
+    display: none;
+  }
+  .route-panel {
+    left: 28px;
+    max-height: calc(100% - 50px);
+    overflow-y: auto;
+    right: auto;
+    top: 28px;
+    width: min(380px, calc(100% - 56px));
+  }
+}
+
 .map-status { background: rgb(14 23 38 / 92%); border: 1px solid #41627f; border-radius: 10px; color: #d6e5f5; display: flex; flex-direction: column; gap: 8px; left: 50%; max-width: min(90%, 360px); padding: 16px; position: absolute; text-align: center; top: 50%; transform: translate(-50%, -50%); z-index: 2; }
 .map-status-error { border-color: #a85d5d; }
 .map-status-error strong { color: #ffb4b4; }
@@ -361,12 +388,14 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .map-tool-dock button { border-radius: 13px; height: 50px; width: 50px; }
   .map-tool-dock svg { height: 22px; width: 22px; }
   .map-tool-layers,
+  .map-tool-mode,
   .map-tool-route,
   .map-tool-locate,
   .map-tool-compass,
   .map-tool-zoom { position: absolute; }
   .map-tool-layers { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(78px + env(safe-area-inset-top, 0px)); }
-  .map-tool-route { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(136px + env(safe-area-inset-top, 0px)); }
+  .map-tool-mode { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(136px + env(safe-area-inset-top, 0px)); }
+  .map-tool-route { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(194px + env(safe-area-inset-top, 0px)); }
   .map-tool-locate { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
   .map-tool-compass { bottom: calc(128px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
   .map-tool-compass:not(.orientation-active) { display: none; }
@@ -389,6 +418,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   }
   .layer-panel-heading { padding-top: 28px; }
   .map-tool-notice { bottom: calc(128px + env(safe-area-inset-bottom, 0px)); left: auto; right: calc(70px + env(safe-area-inset-right, 0px)); top: auto; }
+  .map-tools.content-panel-open { display: none; }
   .location-info-panel {
     padding: 26px calc(18px + env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) calc(18px + env(safe-area-inset-left, 0px));
   }

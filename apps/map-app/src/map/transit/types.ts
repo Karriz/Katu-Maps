@@ -75,6 +75,7 @@ export type TransitRouteResult = {
   provider: TransitProviderId;
   transitLegs: Array<{
     mode: string;
+    geometry?: GeoJSON.LineString;
     tripId?: string;
     realTime?: boolean;
     cancelled?: boolean;

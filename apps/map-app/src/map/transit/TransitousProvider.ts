@@ -225,7 +225,8 @@ export const transitousProvider: TransitProvider = {
     }
     return itineraries.flatMap((itinerary): TransitRouteResult[] => {
       const legs = itinerary.legs ?? [];
-      const coordinates = legs.flatMap((leg) => tripLeg(leg).coordinates);
+      const legRoutes = legs.map((leg) => tripLeg(leg));
+      const coordinates = legRoutes.flatMap((leg) => leg.coordinates);
       if (coordinates.length < 2) return [];
       const startTime = absoluteTime(itinerary.startTime);
       const endTime = absoluteTime(itinerary.endTime);
@@ -243,6 +244,7 @@ export const transitousProvider: TransitProvider = {
         provider: 'transitous',
         transitLegs: legs.map((leg) => ({
           mode: text(leg.mode, 'TRANSIT'),
+          geometry: { type: 'LineString', coordinates: legRoutes[legs.indexOf(leg)].coordinates },
           tripId: text(leg.tripId) || undefined,
           realTime: leg.realTime === true,
           cancelled: leg.cancelled === true,

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import {
   Building2,
+  Box,
   Compass,
   Crosshair,
   Droplets,
@@ -25,6 +26,7 @@ export type MapLayerKey =
   | 'buildings'
   | 'trees'
   | 'transit'
+  | 'transitModels'
   | 'shadows';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
@@ -47,6 +49,7 @@ const primaryLayers: LayerDefinition[] = [
   { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
   { key: 'trees', label: 'Trees', description: 'Vegetation', icon: Trees },
   { key: 'transit', label: 'Transit', description: 'Routes & stops', icon: TrainFront },
+  { key: 'transitModels', label: '3D vehicles', description: 'Live vehicle models', icon: Box },
 ];
 
 const advancedLayers: LayerDefinition[] = [
@@ -98,6 +101,9 @@ export function MapControls({
   onZoomOut,
   onRouteOpen,
   routeOpen,
+  contentPanelOpen,
+  is3dMode,
+  onToggle3dMode,
   orientationChanged,
   notice,
 }: {
@@ -120,6 +126,9 @@ export function MapControls({
   onZoomOut: () => void;
   onRouteOpen: () => void;
   routeOpen: boolean;
+  contentPanelOpen: boolean;
+  is3dMode: boolean;
+  onToggle3dMode: () => void;
   orientationChanged: boolean;
   notice: string | null;
 }) {
@@ -188,7 +197,7 @@ export function MapControls({
         )}
       </div>}
 
-      <div className={`map-tools${layersOpen ? ' layers-open' : ''}`}>
+      <div className={`map-tools${layersOpen ? ' layers-open' : ''}${routeOpen ? ' route-open' : ''}${contentPanelOpen ? ' content-panel-open' : ''}`}>
         <div className="map-tool-dock" aria-label="Map tools">
           <button
             className={`map-tool-layers${layersOpen ? ' active' : ''}`}
@@ -200,6 +209,16 @@ export function MapControls({
             onClick={() => onLayersOpenChange(!layersOpen)}
           >
             <Layers3 aria-hidden="true" />
+          </button>
+          <button
+            className={`map-tool-mode${is3dMode ? ' active' : ''}`}
+            type="button"
+            aria-label={is3dMode ? 'Switch to 2D map' : 'Switch to 3D map'}
+            aria-pressed={is3dMode}
+            title={is3dMode ? 'Switch to 2D map' : 'Switch to 3D map'}
+            onClick={onToggle3dMode}
+          >
+            <Box aria-hidden="true" />
           </button>
           <button
             className={`map-tool-route${routeOpen ? ' active' : ''}`}

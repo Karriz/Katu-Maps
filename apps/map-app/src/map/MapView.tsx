@@ -13,6 +13,7 @@ import maplibregl, {
 import {
   Beer,
   BookOpen,
+  ArrowDown,
   Church,
   Coffee,
   GraduationCap,
@@ -70,6 +71,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-shadow',
   'global-building-contact-shadow',
 ];
+const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
 
 function closeRangeCameraOffset(): [number, number] {
   if (window.innerWidth > 760) return [0, 0];
@@ -485,6 +487,7 @@ export function MapView() {
   const [vehicleFollowing, setVehicleFollowing] = useState(false);
   const [vehicleFollowAvailable, setVehicleFollowAvailable] = useState(false);
   const userLocationRef = useRef<[number, number] | null>(null);
+  const userLocationWatchRef = useRef<number | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [mapToolNotice, setMapToolNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -492,6 +495,7 @@ export function MapView() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [showSearchResultsOnMap, setShowSearchResultsOnMap] = useState(false);
   const selectedSearchQueryRef = useRef<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationSelection | null>(null);
   const [locationDetailsLoading, setLocationDetailsLoading] = useState(false);
@@ -521,21 +525,38 @@ export function MapView() {
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
   const transitSearchCacheRef = useRef(new globalThis.Map<string, PhotonFeature[]>());
   const nominatimLastRequestRef = useRef(0);
-  const [layerToggles, setLayerToggles] = useState<MapLayerState>({
-    globe: true,
-    trees: true,
-    buildings: true,
-    terrain: true,
-    transit: true,
-    waterEffect: true,
-    shadows: true,
+  const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
+    const mobileDefault2d = typeof window !== 'undefined' && window.innerWidth <= 760;
+    const defaults: MapLayerState = {
+      globe: true,
+      trees: !mobileDefault2d,
+      buildings: !mobileDefault2d,
+      terrain: !mobileDefault2d,
+      transit: true,
+      transitModels: !mobileDefault2d,
+      waterEffect: true,
+      shadows: !mobileDefault2d,
+    };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
+      return saved ? { ...defaults, ...saved } : defaults;
+    } catch { return defaults; }
   });
 
   const setRouteGeometry = (result: RouteResult | null) => {
     const source = mapRef.current?.getSource('selected-route') as { setData: (data: unknown) => void } | undefined;
-    source?.setData(result
-      ? { type: 'Feature', geometry: result.geometry, properties: {} }
-      : { type: 'FeatureCollection', features: [] });
+    if (!result) {
+      source?.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+    const legFeatures = result.transitLegs?.filter((leg) => leg.geometry && leg.geometry.coordinates.length > 1).map((leg) => ({
+      type: 'Feature',
+      geometry: leg.geometry,
+      properties: { mode: leg.mode },
+    })) ?? [];
+    source?.setData(legFeatures.length
+      ? { type: 'FeatureCollection', features: legFeatures }
+      : { type: 'Feature', geometry: result.geometry, properties: {} });
   };
 
   const setRoutePoints = () => {
@@ -648,7 +669,6 @@ export function MapView() {
       setRouteResult(result);
       showTransitLegVehicle(result);
       setRouteGeometry(result);
-      fitRouteInView(result);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         setRouteResult(null);
@@ -667,7 +687,6 @@ export function MapView() {
     setRouteResult(option);
     showTransitLegVehicle(option);
     setRouteGeometry(option);
-    fitRouteInView(option);
   };
 
   const openRoute = () => {
@@ -677,6 +696,12 @@ export function MapView() {
     setRouteError(null);
     setSearchOpen(false);
     setSearchQuery('');
+    setShowSearchResultsOnMap(false);
+    transitStopsLayerRef.current?.clearSelection();
+    setSelectedTransitStop(null);
+    vehicleFollowEnabledRef.current = false;
+    setVehicleFollowing(false);
+    setVehicleFollowAvailable(false);
     if (!routeOriginSelection) {
       routeOriginRef.current = null;
       setRouteOriginSelection({ name: 'Your location', category: 'Current location', coordinates: [0, 0], source: 'map' });
@@ -725,6 +750,15 @@ export function MapView() {
       if (!navigator.geolocation) {
         setRouteError('Your location is not available in this browser.');
         return;
+      }
+      if (userLocationWatchRef.current === null) {
+        userLocationWatchRef.current = navigator.geolocation.watchPosition(({ coords }) => {
+          const coordinates: [number, number] = [coords.longitude, coords.latitude];
+          userLocationRef.current = coordinates;
+          (mapRef.current?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+            type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: {} }],
+          });
+        }, () => undefined, { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 });
       }
       setRouteLoading(true);
       navigator.geolocation.getCurrentPosition(
@@ -1073,7 +1107,7 @@ export function MapView() {
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
       setRouteContextMenu(null);
-      const locationLayers = ['location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
+      const locationLayers = ['search-result-icons', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
       const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
       if (routePickingRef.current) {
         const kind = routePickingRef.current;
@@ -1089,6 +1123,19 @@ export function MapView() {
       if (!feature || feature.layer.id === 'selected-location-icon') return;
       const selection = locationSelectionFromFeature(feature);
       if (selection.coordinates[0] === 0 && selection.coordinates[1] === 0) return;
+      if (selection.transitStopId) {
+        const stop: TransitStopSelection = {
+          stopId: selection.transitStopId,
+          name: selection.name,
+          mode: selection.transitStopProvider ? String(feature.properties.transitMode ?? 'TRANSIT').split(',')[0] : 'TRANSIT',
+          coordinates: selection.coordinates,
+          provider: selection.transitStopProvider ?? 'transitous',
+        };
+        transitStopsLayerRef.current?.selectSearchStop(stop);
+        setSelectedTransitStop(stop);
+        setSelectedLocation(null);
+        return;
+      }
       transitStopsLayerRef.current?.clearSelection();
       setSelectedTransitStop(null);
       setSelectedLocation(selection);
@@ -1194,6 +1241,10 @@ export function MapView() {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+      map.addSource('search-results', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
       map.addSource('user-location', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -1218,7 +1269,18 @@ export function MapView() {
         type: 'line',
         source: 'selected-route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': MAP_COLORS.transitBlue, 'line-width': 5, 'line-opacity': 0.98 },
+        paint: {
+          'line-color': [
+            'match', ['get', 'mode'],
+            'WALK', '#64748b', 'FOOT', '#64748b',
+            'TRAM', '#8b5cf6', 'BUS', '#1769e8',
+            'SUBWAY', '#f97316', 'RAIL', '#16a34a',
+            'REGIONAL_RAIL', '#16a34a', '#0ea5e9',
+          ] as unknown as ExpressionSpecification,
+          'line-width': 5,
+          'line-opacity': 0.98,
+          'line-dasharray': ['match', ['get', 'mode'], 'WALK', ['literal', [1.2, 1.2]], 'FOOT', ['literal', [1.2, 1.2]], ['literal', [1, 0]]] as unknown as ExpressionSpecification,
+        },
       });
       map.addLayer({
         id: 'route-endpoint-halo',
@@ -1240,6 +1302,23 @@ export function MapView() {
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
         },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'search-result-icons',
+        type: 'symbol',
+        source: 'search-results',
+        layout: {
+          'icon-image': 'location-shop-icon',
+          'icon-size': 1.25,
+          'icon-allow-overlap': true,
+          'text-field': ['get', 'name'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': 11,
+          'text-offset': [0, 1.35],
+          'text-anchor': 'top',
+          'text-optional': true,
+        },
+        paint: { 'text-color': MAP_COLORS.label, 'text-halo-color': MAP_COLORS.labelHalo, 'text-halo-width': 1.3 },
       }, poiLayers.before);
       map.addLayer({
         id: 'selected-location-halo', type: 'circle', source: 'selected-location',
@@ -1402,9 +1481,10 @@ export function MapView() {
     setVisibility(
       (map.getStyle().layers ?? [])
         .map((layer) => layer.id)
-        .filter((layerId) => layerId.startsWith('transit-') || layerId === 'transit-vehicle-model-3d'),
+        .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'),
       layerToggles.transit,
     );
+    setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
     setVisibility(BUILDING_3D_LAYER_IDS, layerToggles.buildings);
     setVisibility(
       [GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID],
@@ -1539,6 +1619,21 @@ export function MapView() {
     };
   }, [searchQuery, layerToggles.transit]);
 
+  useEffect(() => {
+    const source = mapRef.current?.getSource('search-results') as { setData: (data: unknown) => void } | undefined;
+    if (!source) return;
+    source.setData({
+      type: 'FeatureCollection',
+      features: showSearchResultsOnMap
+        ? searchResults.map((feature) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: feature.geometry.coordinates },
+            properties: { ...feature.properties, name: photonResultLabel(feature).primary },
+          }))
+        : [],
+    });
+  }, [searchResults, showSearchResultsOnMap, mapLoaded]);
+
   const enrichLocationDetails = async (selection: LocationSelection) => {
     const lookupKey = selection.osmType && selection.osmId
       ? `lookup:${selection.osmType}${selection.osmId}`
@@ -1600,6 +1695,7 @@ export function MapView() {
       : LOCATION_ICON_ALIASES.find(([alias]) => alias === selectedLocation.iconId)?.[1]
   ) || 'shop';
   const SelectedLocationIcon = LOCATION_ICON_DEFINITIONS.find(([id]) => id === selectedIconKey)?.[1] ?? Store;
+  const is3dMode = layerToggles.terrain && layerToggles.buildings && layerToggles.trees && layerToggles.transitModels;
 
   useEffect(() => {
     setRoutePoints();
@@ -1616,6 +1712,7 @@ export function MapView() {
   const selectSearchResult = (feature: PhotonFeature) => {
     const map = mapRef.current;
     if (!map) return;
+    (document.activeElement as HTMLElement | null)?.blur();
     if (feature.properties.transitStopId) {
       const coordinates = feature.geometry.coordinates;
       const stop: TransitStopSelection = {
@@ -1683,6 +1780,7 @@ export function MapView() {
     setSearchQuery(primary);
     setSearchResults([]);
     setSearchOpen(false);
+    setShowSearchResultsOnMap(false);
   };
 
   const locateUser = () => {
@@ -1691,16 +1789,26 @@ export function MapView() {
       return;
     }
     setMapToolNotice('Finding your location…');
+    const updateUserLocation = (coords: GeolocationCoordinates) => {
+      const map = mapRef.current;
+      const coordinates: [number, number] = [coords.longitude, coords.latitude];
+      userLocationRef.current = coordinates;
+      (map?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+        type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: {} }],
+      });
+      return { map, coordinates };
+    };
+    if (userLocationWatchRef.current === null) {
+      userLocationWatchRef.current = navigator.geolocation.watchPosition(
+        ({ coords }) => { updateUserLocation(coords); },
+        () => undefined,
+        { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
+      );
+    }
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        const map = mapRef.current;
+        const { map, coordinates } = updateUserLocation(coords);
         if (!map) return;
-        const coordinates: [number, number] = [coords.longitude, coords.latitude];
-        userLocationRef.current = coordinates;
-        (map.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-          type: 'FeatureCollection',
-          features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: {} }],
-        });
         map.flyTo({
           center: coordinates,
           zoom: Math.max(map.getZoom(), 14),
@@ -1713,6 +1821,20 @@ export function MapView() {
       { enableHighAccuracy: true, timeout: 10000 },
     );
   };
+
+  useEffect(() => () => {
+    if (userLocationWatchRef.current !== null) navigator.geolocation.clearWatch(userLocationWatchRef.current);
+  }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(LAYER_STORAGE_KEY, JSON.stringify(layerToggles)); } catch { /* storage can be disabled */ }
+  }, [layerToggles]);
+
+  useEffect(() => {
+    if (!routeOpen || !routeResult) return;
+    const frame = window.requestAnimationFrame(() => fitRouteInView(routeResult));
+    return () => window.cancelAnimationFrame(frame);
+  }, [routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
 
   const resetMapOrientation = () => {
     vehicleFollowEnabledRef.current = false;
@@ -1780,6 +1902,7 @@ export function MapView() {
             })}
             onQueryChange={(query) => {
               setSearchQuery(query);
+              setShowSearchResultsOnMap(false);
               setSearchOpen(true);
               setLayersOpen(false);
             }}
@@ -1788,7 +1911,12 @@ export function MapView() {
               setLayersOpen(false);
             }}
             onSearchSubmit={() => {
-              if (searchResults[0]) selectSearchResult(searchResults[0]);
+              if (!searchResults[0]) return;
+              setShowSearchResultsOnMap(true);
+              setSearchOpen(false);
+              (document.activeElement as HTMLElement | null)?.blur();
+              const bounds = searchResults.reduce((current, feature) => current.extend(feature.geometry.coordinates), new maplibregl.LngLatBounds(searchResults[0].geometry.coordinates, searchResults[0].geometry.coordinates));
+              mapRef.current?.fitBounds(bounds, { padding: 90, maxZoom: 15, duration: 700 });
             }}
             onSearchResultSelect={(index) => {
               if (searchResults[index]) selectSearchResult(searchResults[index]);
@@ -1803,12 +1931,18 @@ export function MapView() {
               ...current,
               [key]: enabled,
             }))}
+            is3dMode={is3dMode}
+            onToggle3dMode={() => setLayerToggles((current) => {
+              const enabled = !(current.terrain && current.buildings && current.trees && current.transitModels);
+              return { ...current, terrain: enabled, buildings: enabled, trees: enabled, transit: true, transitModels: enabled };
+            })}
             onLocate={locateUser}
             onResetOrientation={resetMapOrientation}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
             onRouteOpen={openRoute}
             routeOpen={routeOpen}
+            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop)}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
           />
@@ -1851,6 +1985,12 @@ export function MapView() {
                   selectedTransitStop.provider,
                   serviceDate,
                 );
+              }}
+              onDepartureBack={() => {
+                vehicleFollowEnabledRef.current = false;
+                setVehicleFollowing(false);
+                setVehicleFollowAvailable(false);
+                transitStopsLayerRef.current?.clearTrip();
               }}
               onFollowRequest={() => {
                 vehicleFollowEnabledRef.current = true;
@@ -2105,16 +2245,42 @@ export function MapView() {
                   )}
                   {routeMode === 'transit' && transitDetailsOpen && routeResult.transitLegs && (
                     <div className="transit-route-legs" aria-label="Transit route legs">
-                      {routeResult.transitLegs.map((leg, index) => (
-                        <div className={`transit-route-leg ${['WALK', 'FOOT'].includes(leg.mode) ? 'walking' : 'vehicle'}`} key={`${leg.mode}-${leg.route}-${index}`}>
-                          <div className="transit-route-leg-marker" aria-hidden="true" />
-                          <div className="transit-route-leg-copy">
-                            <strong>{['WALK', 'FOOT'].includes(leg.mode) ? 'Walk' : `${transitModeLabel(leg.mode)}${leg.route ? ` ${leg.route}` : ''}`}</strong>
-                            <span>{leg.headsign || [leg.from, leg.to].filter(Boolean).join(' → ') || 'Transit leg'}{leg.cancelled ? ' · Cancelled' : leg.delaySeconds && leg.delaySeconds > 0 ? ` · +${Math.ceil(leg.delaySeconds / 60)} min` : leg.realTime ? ' · Realtime' : ''}</span>
+                      {routeResult.transitLegs.map((leg, index) => {
+                        const walking = ['WALK', 'FOOT'].includes(leg.mode);
+                        const from = leg.from || (index === 0 ? 'Start' : 'Transfer point');
+                        const to = leg.to || (index === routeResult.transitLegs!.length - 1 ? 'Destination' : 'Next stop');
+                        const previousLeg = routeResult.transitLegs![index - 1];
+                        const transfer = index > 0 && !walking && previousLeg && (
+                          !['WALK', 'FOOT'].includes(previousLeg.mode)
+                          || (index > 1 && ['WALK', 'FOOT'].includes(previousLeg.mode)
+                            && !['WALK', 'FOOT'].includes(routeResult.transitLegs![index - 2].mode))
+                        );
+                        return (
+                          <div key={`${leg.mode}-${leg.route}-${index}`}>
+                            {transfer && (
+                              <div className="transit-transfer-marker">
+                                <ArrowDown aria-hidden="true" />
+                                <span>Change at {from}</span>
+                              </div>
+                            )}
+                            <div className={`transit-route-leg ${walking ? 'walking' : 'vehicle'}`}>
+                              <div className="transit-route-leg-marker" aria-hidden="true">{walking ? '·' : index + 1}</div>
+                              <div className="transit-route-leg-copy">
+                                <div className="transit-route-leg-title">
+                                  <strong>{walking ? 'Walk' : `${transitModeLabel(leg.mode)}${leg.route ? ` ${leg.route}` : ''}`}</strong>
+                                  <time>{transitTime(leg.startTime)}{leg.endTime ? `–${transitTime(leg.endTime)}` : ''}</time>
+                                </div>
+                                {!walking && <span className="transit-route-leg-headsign">{leg.headsign || 'Towards destination'}{leg.cancelled ? ' · Cancelled' : leg.delaySeconds && leg.delaySeconds > 0 ? ` · +${Math.ceil(leg.delaySeconds / 60)} min` : leg.realTime ? ' · Realtime' : ''}</span>}
+                                <div className="transit-route-stations">
+                                  <div><small>{walking ? 'From' : 'Board at'}</small><strong>{from}</strong></div>
+                                  <div className="transit-route-station-line" aria-hidden="true" />
+                                  <div><small>{walking ? 'To' : 'Exit at'}</small><strong>{to}</strong></div>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <time>{transitTime(leg.startTime)}{leg.endTime ? `–${transitTime(leg.endTime)}` : ''}</time>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </>

@@ -6,6 +6,7 @@ export type RouteResult = {
   durationSeconds: number;
   transitLegs?: Array<{
     mode: string;
+    geometry?: GeoJSON.LineString;
     tripId?: string;
     realTime?: boolean;
     cancelled?: boolean;

@@ -406,6 +406,7 @@ export const digitransitProvider: TransitProvider = {
         provider: 'digitransit',
         transitLegs: legs.map((leg) => ({
           mode: typeof leg.mode === 'string' ? leg.mode : 'TRANSIT',
+          geometry: { type: 'LineString', coordinates: planLegCoordinates(leg) },
           tripId: typeof leg.trip?.gtfsId === 'string' ? leg.trip.gtfsId : undefined,
           realTime: leg.realTime === true,
           cancelled: leg.realtimeState === 'CANCELED',

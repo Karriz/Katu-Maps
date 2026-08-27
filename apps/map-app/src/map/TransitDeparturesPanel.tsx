@@ -75,6 +75,7 @@ export function TransitDeparturesPanel({
   stop,
   onClose,
   onDepartureSelect,
+  onDepartureBack,
   onFollowRequest,
   onSetDestination,
   isFollowing,
@@ -88,6 +89,7 @@ export function TransitDeparturesPanel({
     provider: Departure['provider'];
     serviceDate?: string;
   }) => void;
+  onDepartureBack?: () => void;
   onFollowRequest?: () => void;
   onSetDestination?: () => void;
   isFollowing?: boolean;
@@ -192,6 +194,7 @@ export function TransitDeparturesPanel({
       <aside className="transit-departures-panel transit-trip-panel" aria-label={`${detailRoute} route details`}>
         <header className="transit-panel-header">
           <button className="transit-panel-back" type="button" onClick={() => {
+            onDepartureBack?.();
             setSelectedDepartureKey(null);
             setSelectedDeparture(null);
           }}>
