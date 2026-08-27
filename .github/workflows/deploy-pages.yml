@@ -38,6 +38,8 @@ jobs:
 
       - name: Build map app
         working-directory: apps/map-app
+        env:
+          VITE_DIGITRANSIT_SUBSCRIPTION_KEY: ${{ secrets.DIGITRANSIT_SUBSCRIPTION_KEY }}
         run: npm run build -- --base="${{ steps.pages.outputs.base_path }}/"
 
       - name: Upload GitHub Pages artifact
