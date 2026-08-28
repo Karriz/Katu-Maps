@@ -117,6 +117,8 @@ async function addTransitIcon(
 
 export const VEHICLE_DIRECTION_ICON_SVG = [
   '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">',
+  // The nose points north at zero degrees. MapLibre then rotates it clockwise
+  // by the route segment heading, so it always points in the direction of travel.
   // A single filled dart stays legible at the 20–28 CSS-pixel MapLibre size.
   // Its furthest corner is over four pixels inside the canvas when rotated 45°.
   '<path d="M36 8 58 58 36 49 14 58Z" fill="#fff"/>',
@@ -406,13 +408,17 @@ function pathPoseAtDistance(leg: EstimatedTripLeg, targetDistance: number) {
     previous[0] + (next[0] - previous[0]) * segmentProgress,
     previous[1] + (next[1] - previous[1]) * segmentProgress,
   ] as [number, number];
-  const averageLatitude = (previous[1] + next[1]) * Math.PI / 360;
-  const east = (next[0] - previous[0]) * Math.cos(averageLatitude);
-  const north = next[1] - previous[1];
   return {
     coordinates: coordinatesAtDistance,
-    heading: Math.atan2(east, north),
+    heading: vehicleHeadingRadians(previous, next),
   };
+}
+
+export function vehicleHeadingRadians(from: [number, number], to: [number, number]) {
+  const averageLatitude = (from[1] + to[1]) * Math.PI / 360;
+  const east = (to[0] - from[0]) * Math.cos(averageLatitude);
+  const north = to[1] - from[1];
+  return Math.atan2(east, north);
 }
 
 function vehiclePartLayout(mode: string) {

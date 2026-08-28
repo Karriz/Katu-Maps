@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildEstimatedTripLeg, estimatedDistance, VEHICLE_DIRECTION_ICON_SVG } from './TransitStopsLayer';
+import {
+  buildEstimatedTripLeg,
+  estimatedDistance,
+  vehicleHeadingRadians,
+  VEHICLE_DIRECTION_ICON_SVG,
+} from './TransitStopsLayer';
 
 const minute = 60_000;
 const baseTime = Date.UTC(2026, 7, 28, 12);
@@ -57,5 +62,14 @@ describe('transit vehicle direction icon', () => {
     expect(VEHICLE_DIRECTION_ICON_SVG).toContain('d="M36 8 58 58 36 49 14 58Z"');
     expect(VEHICLE_DIRECTION_ICON_SVG).toContain('fill="#fff"');
     expect(VEHICLE_DIRECTION_ICON_SVG).not.toContain('stroke');
+  });
+
+  it.each([
+    ['north', [24, 60], [24, 60.01], 0],
+    ['east', [24, 60], [24.01, 60], 90],
+    ['south', [24, 60], [24, 59.99], 180],
+    ['west', [24, 60], [23.99, 60], -90],
+  ] as const)('rotates the north-facing dart toward %s travel', (_name, from, to, degrees) => {
+    expect(vehicleHeadingRadians([...from], [...to]) * 180 / Math.PI).toBeCloseTo(degrees);
   });
 });

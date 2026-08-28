@@ -37,6 +37,7 @@ import { TreeModelLayer } from './TreeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
+import type { TransitVehiclePose } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitDeparturesPanel } from './TransitDeparturesPanel';
 import type { TransitStopSelection } from './TransitStopsLayer';
@@ -503,6 +504,7 @@ export function MapView() {
   const [orientationChanged, setOrientationChanged] = useState(false);
   const [selectedTransitStop, setSelectedTransitStop] = useState<TransitStopSelection | null>(null);
   const vehicleFollowEnabledRef = useRef(false);
+  const latestVehiclePoseRef = useRef<TransitVehiclePose | null>(null);
   const [vehicleFollowing, setVehicleFollowing] = useState(false);
   const [vehicleFollowAvailable, setVehicleFollowAvailable] = useState(false);
   const userLocationRef = useRef<[number, number] | null>(null);
@@ -889,6 +891,7 @@ export function MapView() {
     treeLayerRef.current = treeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     const transitStopsLayer = new TransitStopsLayer((pose) => {
+      latestVehiclePoseRef.current = pose;
       transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
       if (!pose || !vehicleFollowEnabledRef.current) return;
@@ -1853,6 +1856,16 @@ export function MapView() {
     vehicleFollowEnabledRef.current = false;
     setVehicleFollowing(false);
   };
+  const resumeVehicleFollow = () => {
+    const map = mapRef.current;
+    const pose = latestVehiclePoseRef.current;
+    if (!map || !pose) return;
+    vehicleFollowEnabledRef.current = true;
+    setVehicleFollowing(true);
+    const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
+    map.setCenter(followCameraCenter(map, vehicle.coordinates));
+    if (map.getZoom() < 14.6) map.setZoom(14.6);
+  };
   const zoomIn = () => { pauseVehicleFollow(); mapRef.current?.zoomIn({ duration: 250 }); };
   const zoomOut = () => { pauseVehicleFollow(); mapRef.current?.zoomOut({ duration: 250 }); };
 
@@ -2084,6 +2097,16 @@ export function MapView() {
           )}
           {routeResult && routeOpen && (
             <div className="map-camera-actions" aria-label="Map camera controls">
+              {routeMode === 'transit' && vehicleFollowAvailable && (
+                <button
+                  className="map-floating-action"
+                  type="button"
+                  aria-pressed={vehicleFollowing}
+                  onClick={vehicleFollowing ? pauseVehicleFollow : resumeVehicleFollow}
+                >
+                  {vehicleFollowing ? 'Following vehicle' : 'Follow vehicle'}
+                </button>
+              )}
               <button className="map-floating-action" type="button" onClick={() => {
                 pauseVehicleFollow();
                 fitRouteNow(routeResult);
