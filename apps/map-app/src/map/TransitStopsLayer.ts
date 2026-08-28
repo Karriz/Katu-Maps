@@ -7,7 +7,7 @@ import type {
   Point,
   SymbolLayerSpecification,
 } from 'maplibre-gl';
-import { BusFront, ChevronUp, TrainFront, TrainFrontTunnel, TramFront } from 'lucide-react';
+import { BusFront, TrainFront, TrainFrontTunnel, TramFront } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
@@ -111,6 +111,29 @@ async function addTransitIcon(
   });
   if (!map.hasImage(id)) {
     map.addImage(id, image, { pixelRatio: 2 });
+  }
+}
+
+async function addVehicleDirectionIcon(map: Map, id: string) {
+  if (map.hasImage(id)) return;
+
+  // Use a filled, high-density arrow rather than a stroked icon. The generous
+  // square viewBox keeps every corner inside the image when MapLibre rotates
+  // it, while the stem makes the vehicle's heading unambiguous at small sizes.
+  const svg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">',
+    '<path d="M36 6 60 38H45V62H27V38H12L36 6Z" fill="#fff" ',
+    'stroke="rgba(15,23,42,.28)" stroke-width="2" stroke-linejoin="round"/>',
+    '</svg>',
+  ].join('');
+  const image = new Image();
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error(`Unable to load ${id}`));
+  });
+  if (!map.hasImage(id)) {
+    map.addImage(id, image, { pixelRatio: 3 });
   }
 }
 
@@ -436,7 +459,7 @@ export class TransitStopsLayer {
       addTransitIcon(map, TRANSIT_ICON_IDS.tram, TramFront, '#8554c7'),
       addTransitIcon(map, TRANSIT_ICON_IDS.metro, TrainFrontTunnel, METRO_COLOR),
       addTransitIcon(map, TRANSIT_ICON_IDS.train, TrainFront, '#4f9b70'),
-      addTransitIcon(map, TRANSIT_ICON_IDS.vehicle, ChevronUp),
+      addVehicleDirectionIcon(map, TRANSIT_ICON_IDS.vehicle),
     ]);
     if (this.map !== map) return;
 
