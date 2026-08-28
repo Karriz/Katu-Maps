@@ -2082,24 +2082,14 @@ export function MapView() {
               isFollowing={vehicleFollowing}
             />
           )}
-          {((routeResult && routeOpen) || (vehicleFollowAvailable && selectedTransitStop)) && (
+          {routeResult && routeOpen && (
             <div className="map-camera-actions" aria-label="Map camera controls">
-              {routeResult && routeOpen && (
-                <button className="map-floating-action" type="button" onClick={() => {
-                  pauseVehicleFollow();
-                  fitRouteNow(routeResult);
-                }}>
-                  Fit route
-                </button>
-              )}
-              {vehicleFollowAvailable && (
-                <button className="map-floating-action" type="button" onClick={() => {
-                  vehicleFollowEnabledRef.current = !vehicleFollowing;
-                  setVehicleFollowing(!vehicleFollowing);
-                }} aria-pressed={vehicleFollowing}>
-                  {vehicleFollowing ? 'Following vehicle' : 'Follow vehicle'}
-                </button>
-              )}
+              <button className="map-floating-action" type="button" onClick={() => {
+                pauseVehicleFollow();
+                fitRouteNow(routeResult);
+              }}>
+                Fit route
+              </button>
             </div>
           )}
           {selectedLocation && !selectedTransitStop && (
