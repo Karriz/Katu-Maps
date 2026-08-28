@@ -551,7 +551,6 @@ export function MapView() {
   const routeSheetDragStartRef = useRef<number | null>(null);
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const routeCameraRequestRef = useRef(0);
-  const routeCameraTimersRef = useRef<number[]>([]);
   const routeOriginRef = useRef<[number, number] | null>(null);
   const routeDestinationRef = useRef<[number, number] | null>(null);
   const routePickingRef = useRef<'origin' | 'destination' | null>(null);
@@ -624,11 +623,11 @@ export function MapView() {
     );
     const padding = panelViewportPadding(map, 48, 24);
     map.stop();
-    // fitBounds calculates its target against the map's persistent padding,
-    // but deliberately removes `padding` before applying that target. Keep
-    // the transform and calculation in sync; otherwise a prior zero/base-only
-    // padding value can make the computed route camera appear to do nothing.
-    map.setPadding(padding);
+    // Overlay padding belongs to this camera calculation, not to the map's
+    // persistent transform. Combining setPadding with fitBounds padding makes
+    // MapLibre account for the panels twice and can leave no usable viewport.
+    // Clear padding left by search/panel updates before calculating the fit.
+    map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     map.fitBounds(
       [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
       {
@@ -643,21 +642,27 @@ export function MapView() {
 
   const scheduleRouteFit = (result: RouteResult) => {
     const request = ++routeCameraRequestRef.current;
-    routeCameraTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-    routeCameraTimersRef.current = [];
-    // Fit immediately for desktop and the manual control, then repeat after
-    // the sheet transition and its final layout. The retries are intentional:
-    // CSS transforms do not notify ResizeObserver, and transit option content
-    // can change the sheet height in a later React commit.
-    const delays = window.innerWidth <= 760 ? [0, 280, 650] : [0, 120];
-    routeCameraTimersRef.current = delays.map((delay) => window.setTimeout(() => {
+    // The route panel may be entering, expanding, or collapsing. Wait for its
+    // actual CSS animations and two layout frames rather than starting several
+    // fits whose map.stop() calls interrupt each other.
+    const panels = [...document.querySelectorAll<HTMLElement>('.route-panel')];
+    const animations = panels.flatMap((panel) => panel.getAnimations({ subtree: true }));
+    void Promise.allSettled(animations.map((animation) => animation.finished)).then(() => {
       if (routeCameraRequestRef.current !== request) return;
-      window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
         if (routeCameraRequestRef.current !== request) return;
         mapRef.current?.resize();
         fitRouteInView(result);
-      });
-    }, delay));
+      }));
+    });
+  };
+
+  const fitRouteNow = (result: RouteResult) => {
+    // A manual fit is deliberately synchronous and singular. Repeated button
+    // presses replace the current animation with one newly calculated fit.
+    routeCameraRequestRef.current += 1;
+    mapRef.current?.resize();
+    fitRouteInView(result);
   };
 
   const showTransitLegVehicle = (result: RouteResult) => {
@@ -1785,7 +1790,6 @@ export function MapView() {
 
   useEffect(() => () => {
     routeCameraRequestRef.current += 1;
-    routeCameraTimersRef.current.forEach((timer) => window.clearTimeout(timer));
   }, []);
 
   const resetMapOrientation = () => {
@@ -1805,17 +1809,25 @@ export function MapView() {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     let frame: number | undefined;
-    let refitTimer: number | undefined;
     let recenterTimer: number | undefined;
+    let previousRouteLayout: string | undefined;
     const updatePadding = () => {
       frame = undefined;
-      map.setPadding(visibleViewportPadding(map));
       if (routeOpen && routeResult) {
-        if (refitTimer !== undefined) window.clearTimeout(refitTimer);
-        // Panel animations and orientation changes can alter the usable map
-        // after the initial fit. Refit once the resize burst has settled.
-        refitTimer = window.setTimeout(() => fitRouteInView(routeResult), 120);
+        const padding = panelViewportPadding(map, 48, 24);
+        const layout = [
+          map.getContainer().clientWidth,
+          map.getContainer().clientHeight,
+          padding.top, padding.right, padding.bottom, padding.left,
+        ].join(':');
+        // ResizeObserver can emit repeatedly for a single React/layout pass.
+        // Only request another fit when the measured usable viewport changed.
+        if (previousRouteLayout !== undefined && previousRouteLayout !== layout) {
+          scheduleRouteFit(routeResult);
+        }
+        previousRouteLayout = layout;
       } else {
+        map.setPadding(visibleViewportPadding(map));
         const coordinates = selectedTransitStop?.coordinates ?? selectedLocation?.coordinates;
         if (coordinates) {
           if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
@@ -1837,7 +1849,6 @@ export function MapView() {
     window.addEventListener('resize', schedulePadding);
     return () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
-      if (refitTimer !== undefined) window.clearTimeout(refitTimer);
       if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
       observer?.disconnect();
       window.removeEventListener('resize', schedulePadding);
@@ -2008,7 +2019,7 @@ export function MapView() {
               {routeResult && routeOpen && (
                 <button className="map-floating-action" type="button" onClick={() => {
                   pauseVehicleFollow();
-                  scheduleRouteFit(routeResult);
+                  fitRouteNow(routeResult);
                 }}>
                   Fit route
                 </button>
