@@ -633,6 +633,11 @@ export function MapView() {
         false,
         leg.provider ?? 'transitous',
         leg.serviceDate,
+        leg.startTime && leg.geometry?.coordinates[0] ? {
+          stopId: `route-origin:${leg.tripId}`,
+          coordinates: leg.geometry.coordinates[0] as [number, number],
+          departure: leg.startTime,
+        } : undefined,
       );
     }
   };
@@ -1922,7 +1927,7 @@ export function MapView() {
           {selectedTransitStop && (
             <TransitDeparturesPanel
               stop={selectedTransitStop}
-              onDepartureSelect={({ tripId, mode, color, serviceDate }) => {
+              onDepartureSelect={({ tripId, mode, color, serviceDate, departure }) => {
                 vehicleFollowEnabledRef.current = true;
                 setVehicleFollowing(true);
                 setVehicleFollowAvailable(true);
@@ -1933,6 +1938,11 @@ export function MapView() {
                   true,
                   selectedTransitStop.provider,
                   serviceDate,
+                  {
+                    stopId: selectedTransitStop.stopId,
+                    coordinates: selectedTransitStop.coordinates,
+                    departure,
+                  },
                 );
               }}
               onDepartureBack={() => {

@@ -44,7 +44,7 @@ type TransitFeature = {
 type EstimatedTripLeg = {
   coordinates: [number, number][];
   cumulativeDistances: number[];
-  anchors: Array<{ distance: number; time: number }>;
+  anchors: Array<{ distance: number; time: number; stopId?: string }>;
   realTime: boolean;
 };
 
@@ -55,6 +55,7 @@ type SelectedTrip = {
   showRoute: boolean;
   provider: TransitProviderId;
   serviceDate?: string;
+  boardingStop?: { stopId: string; coordinates: [number, number]; departureTime: number };
 };
 
 export type TransitVehiclePose = {
@@ -304,14 +305,28 @@ function nearestPathIndex(
   return nearestIndex;
 }
 
-function buildEstimatedTripLeg(leg: TransitTripLeg, coordinates: [number, number][]) {
+export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [number, number][]) {
+  let coordinates = inputCoordinates;
   if (coordinates.length < 2) return undefined;
-  const distances = cumulativeDistances(coordinates);
   const intermediateStops = Array.isArray(leg.intermediateStops)
     ? leg.intermediateStops
     : [];
   const places = [leg.from, ...intermediateStops, leg.to];
-  const anchors: Array<{ distance: number; time: number }> = [];
+  // Geometry from different feeds is not guaranteed to use the trip direction.
+  // Pick the orientation which best maps the ordered calls without going backwards.
+  const mappingError = (candidate: [number, number][]) => {
+    let index = 0;
+    return places.reduce((sum, place) => {
+      const point = placeCoordinates(place);
+      if (!point) return sum;
+      index = nearestPathIndex(candidate, point, index);
+      return sum + distanceInMeters(candidate[index], point);
+    }, 0);
+  };
+  const reversed = [...coordinates].reverse();
+  if (mappingError(reversed) < mappingError(coordinates)) coordinates = reversed;
+  const distances = cumulativeDistances(coordinates);
+  const anchors: Array<{ distance: number; time: number; stopId?: string }> = [];
   let pathIndex = 0;
 
   places.forEach((place, placeIndex) => {
@@ -328,7 +343,7 @@ function buildEstimatedTripLeg(leg: TransitTripLeg, coordinates: [number, number
         : [arrival, departure];
     times.forEach((time) => {
       if (time !== undefined && (anchors.length === 0 || time >= anchors[anchors.length - 1].time)) {
-        anchors.push({ distance: distances[pathIndex], time });
+        anchors.push({ distance: distances[pathIndex], time, stopId: place?.stopId });
       }
     });
   });
@@ -351,7 +366,11 @@ function buildEstimatedTripLeg(leg: TransitTripLeg, coordinates: [number, number
   } satisfies EstimatedTripLeg;
 }
 
-function estimatedDistance(leg: EstimatedTripLeg, time: number) {
+export function estimatedDistance(
+  leg: EstimatedTripLeg,
+  time: number,
+  boardingStop?: SelectedTrip['boardingStop'],
+) {
   const { anchors } = leg;
   if (!anchors.length) return undefined;
   const clampedTime = Math.max(anchors[0].time, Math.min(anchors[anchors.length - 1].time, time));
@@ -361,8 +380,14 @@ function estimatedDistance(leg: EstimatedTripLeg, time: number) {
   const previousAnchor = anchors[Math.max(0, nextAnchorIndex - 1)];
   const duration = nextAnchor.time - previousAnchor.time;
   const progress = duration > 0 ? (clampedTime - previousAnchor.time) / duration : 1;
-  return previousAnchor.distance
+  const interpolated = previousAnchor.distance
     + (nextAnchor.distance - previousAnchor.distance) * Math.max(0, Math.min(1, progress));
+  if (!boardingStop || time >= boardingStop.departureTime) return interpolated;
+  const stopAnchor = anchors.find((anchor) => anchor.stopId === boardingStop.stopId);
+  const boardingDistance = stopAnchor?.distance ?? leg.cumulativeDistances[
+    nearestPathIndex(leg.coordinates, boardingStop.coordinates, 0)
+  ];
+  return Math.min(interpolated, boardingDistance);
 }
 
 function pathPoseAtDistance(leg: EstimatedTripLeg, targetDistance: number) {
@@ -403,8 +428,9 @@ function estimatedVehiclePose(
   time: number,
   mode: string,
   color: string,
+  boardingStop?: SelectedTrip['boardingStop'],
 ): TransitVehiclePose | undefined {
-  const distance = estimatedDistance(leg, time);
+  const distance = estimatedDistance(leg, time, boardingStop);
   if (distance === undefined) return undefined;
   const layout = vehiclePartLayout(mode);
   const spacing = layout.length + layout.gap;
@@ -724,6 +750,7 @@ export class TransitStopsLayer {
     showRoute = true,
     provider: TransitProviderId = 'transitous',
     serviceDate?: string,
+    boardingStop?: { stopId: string; coordinates: [number, number]; departure: string },
   ) {
     if (!this.map || !tripId) return;
     this.clearSelectedTrip();
@@ -734,6 +761,11 @@ export class TransitStopsLayer {
       showRoute,
       provider,
       serviceDate,
+      boardingStop: boardingStop ? {
+        stopId: boardingStop.stopId,
+        coordinates: boardingStop.coordinates,
+        departureTime: timestamp(boardingStop.departure) ?? Number.NEGATIVE_INFINITY,
+      } : undefined,
     };
     void this.loadSelectedTrip();
     this.vehicleTimer = window.setInterval(() => this.updateEstimatedVehicle(), 250);
@@ -800,6 +832,7 @@ export class TransitStopsLayer {
         now,
         this.selectedTrip.mode,
         this.selectedTrip.color,
+        this.selectedTrip.boardingStop,
       )
       : undefined;
     if (!activeLeg || !pose) {

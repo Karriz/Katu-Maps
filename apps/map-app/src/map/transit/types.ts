@@ -40,6 +40,7 @@ export type TransitDeparture = {
 };
 
 export type TransitTripPlace = {
+  stopId?: string;
   name?: string;
   stopName?: string;
   lat?: number;

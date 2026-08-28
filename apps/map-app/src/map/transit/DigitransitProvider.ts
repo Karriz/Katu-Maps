@@ -169,7 +169,7 @@ const TRIP_QUERY = `
 `;
 
 type TripCall = {
-  stopLocation?: { name?: unknown; lat?: unknown; lon?: unknown } | null;
+  stopLocation?: { gtfsId?: unknown; name?: unknown; lat?: unknown; lon?: unknown } | null;
   schedule?: { time?: { arrival?: unknown; departure?: unknown } | null } | null;
   realTime?: {
     arrival?: { time?: unknown } | null;
@@ -184,6 +184,7 @@ function tripPlace(call: TripCall): TransitTripPlace | undefined {
   const realtimeArrival = typeof call.realTime?.arrival?.time === 'string' ? call.realTime.arrival.time : undefined;
   const realtimeDeparture = typeof call.realTime?.departure?.time === 'string' ? call.realTime.departure.time : undefined;
   return {
+    stopId: typeof call.stopLocation.gtfsId === 'string' ? call.stopLocation.gtfsId : undefined,
     name: call.stopLocation.name,
     lat: finiteNumber(call.stopLocation.lat) ? call.stopLocation.lat : undefined,
     lon: finiteNumber(call.stopLocation.lon) ? call.stopLocation.lon : undefined,
