@@ -1,4 +1,5 @@
-import maplibregl, {
+import * as maplibregl from 'maplibre-gl';
+import {
   type CustomLayerInterface,
   type CustomRenderMethodInput,
   type Map as MaplibreMap,
