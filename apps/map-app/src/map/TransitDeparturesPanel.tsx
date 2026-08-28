@@ -58,10 +58,23 @@ function formatRelativeDeparture(value: string, now: number) {
   return '';
 }
 
-function formatStopStatus(place: TripPlace, index: number, total: number, now: number) {
-  const rawValue = index === 0
+function tripPlaceDepartureTime(place: TripPlace) {
+  const raw = place.departure ?? place.scheduledDeparture ?? place.arrival ?? place.scheduledArrival;
+  if (typeof raw === 'number') return raw < 10_000_000_000 ? raw * 1000 : raw;
+  const parsed = new Date(text(raw)).getTime();
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatStopStatus(
+  place: TripPlace,
+  index: number,
+  total: number,
+  now: number,
+  boardingDeparture?: string,
+) {
+  const rawValue = boardingDeparture ?? (index === 0
     ? (place.departure ?? place.scheduledDeparture)
-    : (place.arrival ?? place.scheduledArrival);
+    : (place.arrival ?? place.scheduledArrival));
   const value = typeof rawValue === 'number' ? String(rawValue) : text(rawValue);
   const date = new Date(typeof rawValue === 'number' && rawValue < 10_000_000_000 ? rawValue * 1000 : rawValue as string);
   if (Number.isNaN(date.getTime())) return index === 0 ? 'Board here' : index === total - 1 ? 'Terminus' : 'On route';
@@ -71,8 +84,25 @@ function formatStopStatus(place: TripPlace, index: number, total: number, now: n
   return formatDeparture(value);
 }
 
-export function selectedRouteStopIndex(routeStops: TripPlace[], selectedStopId: string) {
-  return routeStops.findIndex((routeStop) => routeStop.stopId === selectedStopId);
+export function selectedRouteStopIndex(
+  routeStops: TripPlace[],
+  selectedStopId: string,
+  selectedDeparture?: string,
+) {
+  const candidates = routeStops.flatMap((routeStop, index) => (
+    routeStop.stopId === selectedStopId || routeStop.parentStopId === selectedStopId ? [index] : []
+  ));
+  const selectedTime = selectedDeparture ? new Date(selectedDeparture).getTime() : NaN;
+  if (candidates.length < 2 || !Number.isFinite(selectedTime)) return candidates[0] ?? -1;
+  return candidates.reduce((closest, candidate) => {
+    const closestTime = tripPlaceDepartureTime(routeStops[closest]);
+    const candidateTime = tripPlaceDepartureTime(routeStops[candidate]);
+    if (candidateTime === undefined) return closest;
+    if (closestTime === undefined) return candidate;
+    return Math.abs(candidateTime - selectedTime) < Math.abs(closestTime - selectedTime)
+      ? candidate
+      : closest;
+  });
 }
 
 export function TransitDeparturesPanel({
@@ -229,7 +259,11 @@ export function TransitDeparturesPanel({
   const detailDestination = selectedDeparture
     ? text(selectedDeparture.headsign, text(selectedDeparture.routeLongName, ''))
     : '';
-  const boardingStopIndex = selectedRouteStopIndex(routeStops, stop.stopId);
+  const boardingStopIndex = selectedRouteStopIndex(
+    routeStops,
+    stop.stopId,
+    selectedDeparture?.departure,
+  );
 
   if (selectedDeparture) {
     const DetailIcon = modeIcon(detailMode);
@@ -275,7 +309,9 @@ export function TransitDeparturesPanel({
           {!routeStopsLoading && !routeStopsError && routeStops.map((routeStop, index) => {
             const isSelectedStop = index === boardingStopIndex;
             const name = text(routeStop.name, text(routeStop.stopName, `Stop ${index + 1}`));
-            const rawTime = index === 0
+            const rawTime = isSelectedStop
+              ? selectedDeparture.departure
+              : index === 0
               ? (routeStop.departure ?? routeStop.scheduledDeparture)
               : (routeStop.arrival ?? routeStop.scheduledArrival);
             const stopTime = typeof rawTime === 'number'
@@ -290,7 +326,13 @@ export function TransitDeparturesPanel({
             >
               <span className="transit-route-stop-marker" aria-hidden="true" />
               <div><strong>{name}</strong><span>{isSelectedStop ? 'Board here' : index === routeStops.length - 1 ? 'Terminus' : 'On route'}</span></div>
-              <time dateTime={text(routeStop.arrival, text(routeStop.departure))}>{formatStopStatus(routeStop, index, routeStops.length, now)}</time>
+              <time dateTime={text(rawTime)}>{formatStopStatus(
+                routeStop,
+                index,
+                routeStops.length,
+                now,
+                isSelectedStop ? selectedDeparture.departure : undefined,
+              )}</time>
             </div>;
           })}
         </div>

@@ -156,7 +156,7 @@ const TRIP_QUERY = `
       tripGeometry { points length }
       onServiceDate(date: $serviceDate) {
         stopCalls {
-          stopLocation { ... on Stop { gtfsId name lat lon } }
+          stopLocation { ... on Stop { gtfsId name lat lon parentStation { gtfsId } } }
           schedule { time { ... on ArrivalDepartureTime { arrival departure } } }
           realTime {
             arrival { time delay }
@@ -169,7 +169,13 @@ const TRIP_QUERY = `
 `;
 
 type TripCall = {
-  stopLocation?: { gtfsId?: unknown; name?: unknown; lat?: unknown; lon?: unknown } | null;
+  stopLocation?: {
+    gtfsId?: unknown;
+    name?: unknown;
+    lat?: unknown;
+    lon?: unknown;
+    parentStation?: { gtfsId?: unknown } | null;
+  } | null;
   schedule?: { time?: { arrival?: unknown; departure?: unknown } | null } | null;
   realTime?: {
     arrival?: { time?: unknown } | null;
@@ -185,6 +191,9 @@ function tripPlace(call: TripCall): TransitTripPlace | undefined {
   const realtimeDeparture = typeof call.realTime?.departure?.time === 'string' ? call.realTime.departure.time : undefined;
   return {
     stopId: typeof call.stopLocation.gtfsId === 'string' ? call.stopLocation.gtfsId : undefined,
+    parentStopId: typeof call.stopLocation.parentStation?.gtfsId === 'string'
+      ? call.stopLocation.parentStation.gtfsId
+      : undefined,
     name: call.stopLocation.name,
     lat: finiteNumber(call.stopLocation.lat) ? call.stopLocation.lat : undefined,
     lon: finiteNumber(call.stopLocation.lon) ? call.stopLocation.lon : undefined,
