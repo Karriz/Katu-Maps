@@ -23,6 +23,10 @@
 
 html, body, #root { height: 100%; min-height: 100%; margin: 0; }
 
+/* Apply this to the root scroller (not only body) so Android browsers do not
+   start their horizontal history-swipe preview over the in-app back stack. */
+html { overscroll-behavior-x: none; }
+
 body { min-width: 320px; background: #f3f4f1; overscroll-behavior: none; }
 button, input, summary { -webkit-tap-highlight-color: transparent; }
 
