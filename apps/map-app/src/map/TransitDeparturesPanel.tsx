@@ -88,6 +88,7 @@ export function TransitDeparturesPanel({
     color: string;
     provider: Departure['provider'];
     serviceDate?: string;
+    departure: string;
   }) => void;
   onDepartureBack?: () => void;
   onFollowRequest?: () => void;
@@ -315,6 +316,7 @@ export function TransitDeparturesPanel({
                     color: routeColor,
                     provider: departure.provider,
                     serviceDate: departure.serviceDate,
+                    departure: departure.departure,
                   });
                 }}
                 style={cardStyle}
