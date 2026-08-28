@@ -17,4 +17,17 @@ describe('selectedRouteStopIndex', () => {
       { stopId: 'second', name: 'Central' },
     ], 'missing')).toBe(-1);
   });
+
+  it('matches a station departure to a stop call at one of its platforms', () => {
+    expect(selectedRouteStopIndex([
+      { stopId: 'digitraffic:platform-1', parentStopId: 'digitraffic:station', name: 'Central' },
+    ], 'digitraffic:station')).toBe(0);
+  });
+
+  it('uses the selected departure time to disambiguate repeated stop calls', () => {
+    expect(selectedRouteStopIndex([
+      { stopId: 'loop-stop', departure: '2026-08-28T12:05:00Z' },
+      { stopId: 'loop-stop', departure: '2026-08-28T12:45:00Z' },
+    ], 'loop-stop', '2026-08-28T12:44:00Z')).toBe(1);
+  });
 });
