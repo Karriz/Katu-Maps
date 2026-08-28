@@ -114,6 +114,17 @@ function panelViewportPadding(map: Map, base = 0, gap = 0) {
   return panelPaddingForRects(mapRect, panelRects, base, gap);
 }
 
+function searchViewportPadding(map: Map) {
+  const mapRect = map.getContainer().getBoundingClientRect();
+  const obscuringRects = [...document.querySelectorAll<HTMLElement>(
+    '.location-search-form, .route-panel, .transit-departures-panel, .location-info-panel',
+  )].map((element) => element.getBoundingClientRect());
+  // Leave room for marker labels and for mobile browser safe areas. The
+  // search box is included even though it closes as the camera animation
+  // starts, so results never finish underneath its persistent input.
+  return panelPaddingForRects(mapRect, obscuringRects, window.innerWidth <= 760 ? 28 : 44, 16);
+}
+
 function routeCoordinates(result: RouteResult): [number, number][] {
   const geometries = [
     result.geometry,
@@ -422,6 +433,14 @@ function locationPoiLayers() {
   };
 }
 
+function searchResultIconExpression() {
+  const icons = [
+    ...LOCATION_ICON_DEFINITIONS.flatMap(([id]) => [id, `location-${id}-icon`]),
+    ...LOCATION_ICON_ALIASES.flatMap(([alias, id]) => [alias, `location-${id === 'ticket' ? 'theatre' : id}-icon`]),
+  ];
+  return ['match', ['get', 'iconId'], ...icons, 'location-shop-icon'] as unknown as ExpressionSpecification;
+}
+
 function createWaterPattern(size: number) {
   const data = new Uint8ClampedArray(size * size * 4);
   const shadow = [92, 171, 194];
@@ -495,7 +514,10 @@ export function MapView() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [showSearchResultsOnMap, setShowSearchResultsOnMap] = useState(false);
+  const [searchResultsQuery, setSearchResultsQuery] = useState('');
+  const [highlightedSearchResults, setHighlightedSearchResults] = useState<PhotonFeature[]>([]);
+  const pendingSearchSubmitRef = useRef<string | null>(null);
+  const lastSearchFitRef = useRef('');
   const selectedSearchQueryRef = useRef<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationSelection | null>(null);
   const [locationDetailsLoading, setLocationDetailsLoading] = useState(false);
@@ -701,7 +723,7 @@ export function MapView() {
     setRouteError(null);
     setSearchOpen(false);
     setSearchQuery('');
-    setShowSearchResultsOnMap(false);
+    setHighlightedSearchResults([]);
     if (isMobile) {
       transitStopsLayerRef.current?.clearSelection();
       setSelectedTransitStop(null);
@@ -1199,19 +1221,33 @@ export function MapView() {
         },
       }, poiLayers.before);
       map.addLayer({
+        id: 'search-result-halo',
+        type: 'circle',
+        source: 'search-results',
+        paint: {
+          'circle-radius': 17,
+          'circle-color': '#ffffff',
+          'circle-opacity': 0.96,
+          'circle-stroke-color': MAP_COLORS.transitBlue,
+          'circle-stroke-width': 3,
+        },
+      }, poiLayers.before);
+      map.addLayer({
         id: 'search-result-icons',
         type: 'symbol',
         source: 'search-results',
         layout: {
-          'icon-image': 'location-shop-icon',
-          'icon-size': 1.25,
+          'icon-image': searchResultIconExpression(),
+          'icon-size': 1.4,
           'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
           'text-field': ['get', 'name'],
           'text-font': ['Noto Sans Regular'],
           'text-size': 11,
           'text-offset': [0, 1.35],
           'text-anchor': 'top',
           'text-optional': true,
+          'text-allow-overlap': false,
         },
         paint: { 'text-color': MAP_COLORS.label, 'text-halo-color': MAP_COLORS.labelHalo, 'text-halo-width': 1.3 },
       }, poiLayers.before);
@@ -1418,6 +1454,7 @@ export function MapView() {
     }
     if (query.length < 2) {
       setSearchResults([]);
+      setSearchResultsQuery('');
       setSearchLoading(false);
       setSearchError(null);
       return;
@@ -1446,6 +1483,7 @@ export function MapView() {
         const cachedResults = transitSearchCacheRef.current.get(cacheKey);
         if (cachedResults) {
           setSearchResults(cachedResults);
+          setSearchResultsQuery(query);
           return;
         }
         const response = await fetch(
@@ -1485,12 +1523,19 @@ export function MapView() {
             console.warn('Transit stop search unavailable.', transitError);
           }
         }
-        const results = [...transitResults, ...photonResults];
+        // Keep the list and map representation in lockstep. Photon can return
+        // malformed points and transit results are prepended, so validate and
+        // cap only after combining both providers.
+        const results = [...transitResults, ...photonResults]
+          .filter((feature) => isValidCoordinate(feature.geometry.coordinates))
+          .slice(0, 6);
         transitSearchCacheRef.current.set(cacheKey, results);
         setSearchResults(results);
+        setSearchResultsQuery(query);
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
           setSearchResults([]);
+          setSearchResultsQuery(query);
           setSearchError('Could not search right now');
         }
       } finally {
@@ -1509,15 +1554,17 @@ export function MapView() {
     if (!source) return;
     source.setData({
       type: 'FeatureCollection',
-      features: showSearchResultsOnMap
-        ? searchResults.map((feature) => ({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: feature.geometry.coordinates },
-            properties: { ...feature.properties, name: photonResultLabel(feature).primary },
-          }))
-        : [],
+      features: highlightedSearchResults.map((feature) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: feature.geometry.coordinates },
+        properties: {
+          ...feature.properties,
+          name: photonResultLabel(feature).primary,
+          iconId: locationIconId(feature.properties),
+        },
+      })),
     });
-  }, [searchResults, showSearchResultsOnMap, mapLoaded]);
+  }, [highlightedSearchResults, mapLoaded]);
 
   const enrichLocationDetails = async (selection: LocationSelection) => {
     const lookupKey = selection.osmType && selection.osmId
@@ -1597,6 +1644,52 @@ export function MapView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeOpen, routePicking, routeSearchTarget, routeOriginSelection, routeDestinationSelection, routeMode, transitTimeMode, transitDateTime]);
 
+  const displaySearchResults = (query: string, results: PhotonFeature[]) => {
+    const map = mapRef.current;
+    if (!map || !query.trim()) return;
+    const validResults = results
+      .filter((feature) => isValidCoordinate(feature.geometry.coordinates))
+      .slice(0, 6);
+    const retainedCoordinates = removeIsolatedCoordinateOutliers(
+      validResults.map((feature) => feature.geometry.coordinates),
+      5,
+    );
+    const retainedKeys = new Set(retainedCoordinates.map((coordinate) => coordinate.join(',')));
+    const displayed = validResults.filter((feature) => retainedKeys.has(feature.geometry.coordinates.join(',')));
+    if (!displayed.length) {
+      setHighlightedSearchResults([]);
+      return;
+    }
+
+    setHighlightedSearchResults(displayed);
+    setSearchOpen(false);
+    (document.activeElement as HTMLElement | null)?.blur();
+    const coordinates = displayed.map((feature) => feature.geometry.coordinates);
+    const signature = coordinates.map((coordinate) => coordinate.join(',')).join('|');
+    if (signature === lastSearchFitRef.current && map.isMoving()) return;
+    lastSearchFitRef.current = signature;
+    map.stop();
+    if (coordinates.length === 1) {
+      map.easeTo({ center: coordinates[0], zoom: Math.min(15, Math.max(map.getZoom(), 14)), duration: 700 });
+      return;
+    }
+    const bounds = coordinateBounds(coordinates);
+    if (!bounds) return;
+    map.fitBounds(
+      [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
+      { padding: searchViewportPadding(map), maxZoom: 15, duration: 700 },
+    );
+  };
+
+  useEffect(() => {
+    const pendingQuery = pendingSearchSubmitRef.current;
+    if (!pendingQuery || searchLoading || searchResultsQuery !== pendingQuery) return;
+    pendingSearchSubmitRef.current = null;
+    displaySearchResults(pendingQuery, searchResults);
+  // displaySearchResults deliberately uses the current map instance.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchLoading, searchResults, searchResultsQuery]);
+
   const selectSearchResult = (feature: PhotonFeature) => {
     const map = mapRef.current;
     if (!map) return;
@@ -1658,7 +1751,7 @@ export function MapView() {
     setSearchQuery(primary);
     setSearchResults([]);
     setSearchOpen(false);
-    setShowSearchResultsOnMap(false);
+    setHighlightedSearchResults([]);
   };
 
   useEffect(() => {
@@ -1835,30 +1928,39 @@ export function MapView() {
               };
             })}
             onQueryChange={(query) => {
+              pendingSearchSubmitRef.current = null;
               setSearchQuery(query);
-              setShowSearchResultsOnMap(false);
+              setHighlightedSearchResults([]);
               setSearchOpen(true);
               setLayersOpen(false);
             }}
             onSearchClear={() => {
+              pendingSearchSubmitRef.current = null;
               selectedSearchQueryRef.current = null;
               setSearchQuery('');
               setSearchResults([]);
               setSearchError(null);
               setSearchOpen(false);
-              setShowSearchResultsOnMap(false);
+              setHighlightedSearchResults([]);
             }}
             onSearchFocus={() => {
               setSearchOpen(true);
               setLayersOpen(false);
             }}
             onSearchSubmit={() => {
-              if (!searchResults[0]) return;
-              setShowSearchResultsOnMap(true);
-              setSearchOpen(false);
-              (document.activeElement as HTMLElement | null)?.blur();
-              const bounds = searchResults.reduce((current, feature) => current.extend(feature.geometry.coordinates), new maplibregl.LngLatBounds(searchResults[0].geometry.coordinates, searchResults[0].geometry.coordinates));
-              mapRef.current?.fitBounds(bounds, { padding: 90, maxZoom: 15, duration: 700 });
+              const query = searchQuery.trim();
+              if (!query) {
+                pendingSearchSubmitRef.current = null;
+                setHighlightedSearchResults([]);
+                return;
+              }
+              if (!searchLoading && searchResultsQuery === query) {
+                displaySearchResults(query, searchResults);
+              } else {
+                // The debounced search effect will finish the current request
+                // and the pending-submit effect will display that exact set.
+                pendingSearchSubmitRef.current = query;
+              }
             }}
             onSearchResultSelect={(index) => {
               if (searchResults[index]) selectSearchResult(searchResults[index]);
@@ -1866,7 +1968,10 @@ export function MapView() {
             layersOpen={layersOpen}
             onLayersOpenChange={(open) => {
               setLayersOpen(open);
-              if (open) setSearchOpen(false);
+              if (open) {
+                setSearchOpen(false);
+                setHighlightedSearchResults([]);
+              }
             }}
             layers={layerToggles}
             onLayerChange={(key, enabled) => setLayerToggles((current) => ({
