@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowLeft, BusFront, ChevronRight, LocateFixed, RefreshCw, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { MAP_COLORS } from './MapPalette';
@@ -71,6 +71,10 @@ function formatStopStatus(place: TripPlace, index: number, total: number, now: n
   return formatDeparture(value);
 }
 
+export function selectedRouteStopIndex(routeStops: TripPlace[], selectedStopId: string) {
+  return routeStops.findIndex((routeStop) => routeStop.stopId === selectedStopId);
+}
+
 export function TransitDeparturesPanel({
   stop,
   onClose,
@@ -111,13 +115,33 @@ export function TransitDeparturesPanel({
   const [routeStopsError, setRouteStopsError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const routeStopScrollRef = useRef<HTMLDivElement>(null);
+  const selectedRouteStopRef = useRef<HTMLDivElement>(null);
+  const hasPositionedRouteRef = useRef(false);
 
   useEffect(() => {
+    hasPositionedRouteRef.current = false;
     setSelectedDepartureKey(null);
     setSelectedDeparture(null);
     setRouteStops([]);
     setShowAll(false);
   }, [stop]);
+
+  useLayoutEffect(() => {
+    if (hasPositionedRouteRef.current || routeStopsLoading || routeStopsError) return;
+    const scrollContainer = routeStopScrollRef.current;
+    const selectedRow = selectedRouteStopRef.current;
+    if (!scrollContainer || !selectedRow) return;
+
+    // Leave context above the boarding stop and upcoming calls below it without
+    // moving the page or map behind the route panel.
+    const contextAboveSelectedStop = 16;
+    scrollContainer.scrollTop = Math.max(
+      0,
+      selectedRow.offsetTop - scrollContainer.offsetTop - contextAboveSelectedStop,
+    );
+    hasPositionedRouteRef.current = true;
+  }, [routeStops, routeStopsError, routeStopsLoading, selectedDepartureKey, stop.stopId]);
 
   useEffect(() => {
     if (!selectedDeparture) return;
@@ -205,6 +229,7 @@ export function TransitDeparturesPanel({
   const detailDestination = selectedDeparture
     ? text(selectedDeparture.headsign, text(selectedDeparture.routeLongName, ''))
     : '';
+  const boardingStopIndex = selectedRouteStopIndex(routeStops, stop.stopId);
 
   if (selectedDeparture) {
     const DetailIcon = modeIcon(detailMode);
@@ -213,8 +238,10 @@ export function TransitDeparturesPanel({
         <header className="transit-panel-header">
           <button className="transit-panel-back" type="button" onClick={() => {
             onDepartureBack?.();
+            hasPositionedRouteRef.current = false;
             setSelectedDepartureKey(null);
             setSelectedDeparture(null);
+            setRouteStops([]);
           }}>
             <ArrowLeft aria-hidden="true" />
             <span>All departures</span>
@@ -241,11 +268,12 @@ export function TransitDeparturesPanel({
           </div>
         </header>
         <div className="transit-trip-stop-heading"><strong>Stops on this route</strong><span>{routeStops.length ? `${routeStops.length} stops` : ''}</span></div>
-        <div className="transit-route-stop-scroll">
+        <div className="transit-route-stop-scroll" ref={routeStopScrollRef}>
           {routeStopsLoading && <div className="transit-panel-state">Loading route stops…</div>}
           {!routeStopsLoading && routeStopsError && <div className="transit-panel-state error">{routeStopsError}</div>}
           {!routeStopsLoading && !routeStopsError && routeStops.length === 0 && <div className="transit-panel-state">No route stops found.</div>}
           {!routeStopsLoading && !routeStopsError && routeStops.map((routeStop, index) => {
+            const isSelectedStop = index === boardingStopIndex;
             const name = text(routeStop.name, text(routeStop.stopName, `Stop ${index + 1}`));
             const rawTime = index === 0
               ? (routeStop.departure ?? routeStop.scheduledDeparture)
@@ -254,9 +282,14 @@ export function TransitDeparturesPanel({
               ? (rawTime < 10_000_000_000 ? rawTime * 1000 : rawTime)
               : new Date(text(rawTime)).getTime();
             const passed = Number.isFinite(stopTime) && stopTime <= now;
-            return <div className={cn('transit-route-stop', index === 0 && 'first', index === routeStops.length - 1 && 'last', passed && 'passed')} key={`${name}-${index}`}>
+            return <div
+              aria-current={isSelectedStop ? 'location' : undefined}
+              className={cn('transit-route-stop', index === 0 && 'first', index === routeStops.length - 1 && 'last', passed && 'passed', isSelectedStop && 'selected')}
+              key={`${text(routeStop.stopId, name)}-${index}`}
+              ref={isSelectedStop ? selectedRouteStopRef : undefined}
+            >
               <span className="transit-route-stop-marker" aria-hidden="true" />
-              <div><strong>{name}</strong><span>{index === 0 ? 'Board here' : index === routeStops.length - 1 ? 'Terminus' : 'On route'}</span></div>
+              <div><strong>{name}</strong><span>{isSelectedStop ? 'Board here' : index === routeStops.length - 1 ? 'Terminus' : 'On route'}</span></div>
               <time dateTime={text(routeStop.arrival, text(routeStop.departure))}>{formatStopStatus(routeStop, index, routeStops.length, now)}</time>
             </div>;
           })}
@@ -325,6 +358,8 @@ export function TransitDeparturesPanel({
                 key={departureKey}
                 onClick={() => {
                   if (!tripId) return;
+                  hasPositionedRouteRef.current = false;
+                  setRouteStops([]);
                   setSelectedDepartureKey(departureKey);
                   setSelectedDeparture(departure);
                   onDepartureSelect({
