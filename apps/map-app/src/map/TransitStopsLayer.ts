@@ -115,37 +115,6 @@ async function addTransitIcon(
   }
 }
 
-export const VEHICLE_DIRECTION_ICON_SVG = [
-  '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">',
-  // The asset has one east-facing triangle and no shadow or second shape.
-  // Its corners remain eight pixels inside the canvas at every rotation.
-  '<path d="M64 36 8 64 8 8Z" fill="#fff"/>',
-  '</svg>',
-].join('');
-
-// MapLibre bearings use north as zero while the marker asset points east.
-// Keeping that fixed conversion explicit avoids coupling route bearings to SVG
-// coordinates and makes the final screen rotation straightforward to test.
-export const VEHICLE_DIRECTION_ROTATION_OFFSET = -90;
-
-export function vehicleMarkerRotation(headingRadians: number) {
-  return headingRadians * 180 / Math.PI + VEHICLE_DIRECTION_ROTATION_OFFSET;
-}
-
-async function addVehicleDirectionIcon(map: Map, id: string) {
-  if (map.hasImage(id)) return;
-
-  const image = new Image();
-  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(VEHICLE_DIRECTION_ICON_SVG)}`;
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error(`Unable to load ${id}`));
-  });
-  if (!map.hasImage(id)) {
-    map.addImage(id, image, { pixelRatio: 3 });
-  }
-}
-
 function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -497,7 +466,7 @@ export class TransitStopsLayer {
       addTransitIcon(map, TRANSIT_ICON_IDS.tram, TramFront, '#8554c7'),
       addTransitIcon(map, TRANSIT_ICON_IDS.metro, TrainFrontTunnel, METRO_COLOR),
       addTransitIcon(map, TRANSIT_ICON_IDS.train, TrainFront, '#4f9b70'),
-      addVehicleDirectionIcon(map, TRANSIT_ICON_IDS.vehicle),
+      addTransitIcon(map, TRANSIT_ICON_IDS.vehicle, BusFront),
     ]);
     if (this.map !== map) return;
 
@@ -666,9 +635,6 @@ export class TransitStopsLayer {
       layout: {
         'icon-image': TRANSIT_ICON_IDS.vehicle,
         'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 0.85, 14, 1, 18, 1.15],
-        'icon-rotate': ['get', 'heading'],
-        'icon-rotation-alignment': 'map',
-        'icon-pitch-alignment': 'map',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
@@ -861,7 +827,6 @@ export class TransitStopsLayer {
         properties: {
           color: this.selectedTrip.color,
           label: activeLeg.realTime ? 'Estimated · realtime' : 'Estimated · schedule',
-          heading: vehicleMarkerRotation(pose.parts[Math.floor(pose.parts.length / 2)].heading),
         },
       }],
     });
