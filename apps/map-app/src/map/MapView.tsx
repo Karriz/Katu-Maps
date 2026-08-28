@@ -153,13 +153,18 @@ function visibleViewportPadding(map: Map) {
 
 function routeCoordinates(result: RouteResult): [number, number][] {
   const legCoordinates = result.transitLegs?.flatMap((leg) => leg.geometry?.coordinates ?? []) ?? [];
-  return [...result.geometry.coordinates, ...legCoordinates].filter(
-    (coordinate): coordinate is [number, number] => (
-      coordinate.length >= 2
-      && Number.isFinite(coordinate[0])
-      && Number.isFinite(coordinate[1])
-    ),
-  );
+  return [...result.geometry.coordinates, ...legCoordinates].filter(isValidCoordinate);
+}
+
+function isValidCoordinate(coordinate: unknown): coordinate is [number, number] {
+  return Array.isArray(coordinate)
+    && coordinate.length >= 2
+    && Number.isFinite(coordinate[0])
+    && Number.isFinite(coordinate[1])
+    && coordinate[0] >= -180
+    && coordinate[0] <= 180
+    && coordinate[1] >= -90
+    && coordinate[1] <= 90;
 }
 
 type PhotonFeature = {
@@ -546,6 +551,7 @@ export function MapView() {
   const routeSheetDragStartRef = useRef<number | null>(null);
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const routeCameraRequestRef = useRef(0);
+  const routeCameraTimersRef = useRef<number[]>([]);
   const routeOriginRef = useRef<[number, number] | null>(null);
   const routeDestinationRef = useRef<[number, number] | null>(null);
   const routePickingRef = useRef<'origin' | 'destination' | null>(null);
@@ -605,8 +611,8 @@ export function MapView() {
       ...routeCoordinates(result),
       routeOriginRef.current,
       routeDestinationRef.current,
-    ].filter((coordinate): coordinate is [number, number] => Boolean(coordinate));
-    if (!map || coordinates.length < 2) return;
+    ].filter(isValidCoordinate);
+    if (!map || coordinates.length < 2 || map.getContainer().clientWidth === 0 || map.getContainer().clientHeight === 0) return;
     const bounds = coordinates.reduce(
       (current, [lng, lat]) => ({
         minLng: Math.min(current.minLng, lng),
@@ -618,6 +624,11 @@ export function MapView() {
     );
     const padding = panelViewportPadding(map, 48, 24);
     map.stop();
+    // fitBounds calculates its target against the map's persistent padding,
+    // but deliberately removes `padding` before applying that target. Keep
+    // the transform and calculation in sync; otherwise a prior zero/base-only
+    // padding value can make the computed route camera appear to do nothing.
+    map.setPadding(padding);
     map.fitBounds(
       [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
       {
@@ -632,20 +643,21 @@ export function MapView() {
 
   const scheduleRouteFit = (result: RouteResult) => {
     const request = ++routeCameraRequestRef.current;
-    // Route results change the height of the route sheet. Waiting for the
-    // mobile entrance transition (and then two layout frames) makes this an
-    // explicit camera action instead of relying on a ResizeObserver firing.
-    const layoutDelay = window.innerWidth <= 760 ? 240 : 0;
-    window.setTimeout(() => {
+    routeCameraTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    routeCameraTimersRef.current = [];
+    // Fit immediately for desktop and the manual control, then repeat after
+    // the sheet transition and its final layout. The retries are intentional:
+    // CSS transforms do not notify ResizeObserver, and transit option content
+    // can change the sheet height in a later React commit.
+    const delays = window.innerWidth <= 760 ? [0, 280, 650] : [0, 120];
+    routeCameraTimersRef.current = delays.map((delay) => window.setTimeout(() => {
       if (routeCameraRequestRef.current !== request) return;
       window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          if (routeCameraRequestRef.current !== request) return;
-          mapRef.current?.resize();
-          fitRouteInView(result);
-        });
+        if (routeCameraRequestRef.current !== request) return;
+        mapRef.current?.resize();
+        fitRouteInView(result);
       });
-    }, layoutDelay);
+    }, delay));
   };
 
   const showTransitLegVehicle = (result: RouteResult) => {
@@ -1769,10 +1781,11 @@ export function MapView() {
   useEffect(() => {
     if (!routeOpen || !routeResult) return;
     scheduleRouteFit(routeResult);
-  }, [routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
+  }, [mapLoaded, routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
 
   useEffect(() => () => {
     routeCameraRequestRef.current += 1;
+    routeCameraTimersRef.current.forEach((timer) => window.clearTimeout(timer));
   }, []);
 
   const resetMapOrientation = () => {
