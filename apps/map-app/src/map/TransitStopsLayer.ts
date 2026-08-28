@@ -117,13 +117,20 @@ async function addTransitIcon(
 
 export const VEHICLE_DIRECTION_ICON_SVG = [
   '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">',
-  // The nose points north at zero degrees. MapLibre then rotates it clockwise
-  // by the route segment heading, so it always points in the direction of travel.
-  // A single filled dart stays legible at the 20–28 CSS-pixel MapLibre size.
-  // Its furthest corner is over four pixels inside the canvas when rotated 45°.
-  '<path d="M36 8 58 58 36 49 14 58Z" fill="#fff"/>',
+  // The asset has one east-facing triangle and no shadow or second shape.
+  // Its corners remain eight pixels inside the canvas at every rotation.
+  '<path d="M64 36 8 64 8 8Z" fill="#fff"/>',
   '</svg>',
 ].join('');
+
+// MapLibre bearings use north as zero while the marker asset points east.
+// Keeping that fixed conversion explicit avoids coupling route bearings to SVG
+// coordinates and makes the final screen rotation straightforward to test.
+export const VEHICLE_DIRECTION_ROTATION_OFFSET = -90;
+
+export function vehicleMarkerRotation(headingRadians: number) {
+  return headingRadians * 180 / Math.PI + VEHICLE_DIRECTION_ROTATION_OFFSET;
+}
 
 async function addVehicleDirectionIcon(map: Map, id: string) {
   if (map.hasImage(id)) return;
@@ -854,7 +861,7 @@ export class TransitStopsLayer {
         properties: {
           color: this.selectedTrip.color,
           label: activeLeg.realTime ? 'Estimated · realtime' : 'Estimated · schedule',
-          heading: pose.parts[Math.floor(pose.parts.length / 2)].heading * 180 / Math.PI,
+          heading: vehicleMarkerRotation(pose.parts[Math.floor(pose.parts.length / 2)].heading),
         },
       }],
     });
