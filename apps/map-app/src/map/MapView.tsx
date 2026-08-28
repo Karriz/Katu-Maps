@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import maplibregl, {
+import * as maplibregl from 'maplibre-gl';
+import {
   type ExpressionSpecification,
   type FillLayerSpecification,
   type FilterSpecification,
@@ -1289,7 +1290,7 @@ export function MapView() {
     // a pan/zoom is still filling the viewport. moveend handles interaction;
     // idle handles the final set of newly loaded tiles.
     map.on('idle', scheduleTreeUpdate);
-    map.on('error', (event) => {
+    map.on('error', (event: maplibregl.ErrorEvent) => {
       const message = event.error?.message ?? 'The map style could not be loaded.';
       // MapLibre can emit this while backfilling a missing edge DEM tile. It
       // is non-fatal when the map is otherwise rendering.

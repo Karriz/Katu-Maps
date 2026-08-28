@@ -11,7 +11,7 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^1.34.0",
-    "maplibre-gl": "^5.24.0",
+    "maplibre-gl": "^6.6.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "tailwind-merge": "^3.6.0",
