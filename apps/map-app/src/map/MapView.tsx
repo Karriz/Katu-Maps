@@ -43,6 +43,7 @@ import type { TransitStopSelection } from './TransitStopsLayer';
 import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
+import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -108,52 +109,19 @@ function followCameraCenter(map: Map, coordinates: [number, number]): [number, n
 
 function panelViewportPadding(map: Map, base = 0, gap = 0) {
   const mapRect = map.getContainer().getBoundingClientRect();
-  const padding = { top: base, right: base, bottom: base, left: base };
-  document.querySelectorAll<HTMLElement>('.route-panel, .transit-departures-panel, .location-info-panel').forEach((panel) => {
-    const panelRect = panel.getBoundingClientRect();
-    const overlaps = panelRect.right > mapRect.left
-      && panelRect.left < mapRect.right
-      && panelRect.bottom > mapRect.top
-      && panelRect.top < mapRect.bottom;
-    if (!overlaps) return;
-    const coversMostOfWidth = panelRect.width >= mapRect.width * 0.75;
-    if (coversMostOfWidth) {
-      if (panelRect.bottom >= mapRect.bottom - 2) {
-        padding.bottom = Math.max(padding.bottom, mapRect.bottom - panelRect.top + gap);
-      } else {
-        padding.top = Math.max(padding.top, panelRect.bottom - mapRect.top + gap);
-      }
-    } else if (panelRect.left <= mapRect.left + mapRect.width / 2) {
-      padding.left = Math.max(padding.left, panelRect.right - mapRect.left + gap);
-    } else {
-      padding.right = Math.max(padding.right, mapRect.right - panelRect.left + gap);
-    }
-  });
-  // MapLibre cannot calculate a camera when padding consumes the entire
-  // viewport. Tall mobile sheets can otherwise make fitBounds silently keep
-  // the previous camera. Keep a useful strip of map available on both axes.
-  const minimumVisibleWidth = Math.min(160, mapRect.width * 0.4);
-  const minimumVisibleHeight = Math.min(160, mapRect.height * 0.4);
-  const horizontalOverflow = Math.max(0, padding.left + padding.right - (mapRect.width - minimumVisibleWidth));
-  const verticalOverflow = Math.max(0, padding.top + padding.bottom - (mapRect.height - minimumVisibleHeight));
-  if (horizontalOverflow > 0) {
-    if (padding.left >= padding.right) padding.left -= horizontalOverflow;
-    else padding.right -= horizontalOverflow;
-  }
-  if (verticalOverflow > 0) {
-    if (padding.bottom >= padding.top) padding.bottom -= verticalOverflow;
-    else padding.top -= verticalOverflow;
-  }
-  return padding;
-}
-
-function visibleViewportPadding(map: Map) {
-  return panelViewportPadding(map);
+  const panelRects = [...document.querySelectorAll<HTMLElement>('.route-panel, .transit-departures-panel, .location-info-panel')]
+    .map((panel) => panel.getBoundingClientRect());
+  return panelPaddingForRects(mapRect, panelRects, base, gap);
 }
 
 function routeCoordinates(result: RouteResult): [number, number][] {
-  const legCoordinates = result.transitLegs?.flatMap((leg) => leg.geometry?.coordinates ?? []) ?? [];
-  return [...result.geometry.coordinates, ...legCoordinates].filter(isValidCoordinate);
+  const geometries = [
+    result.geometry,
+    ...(result.transitLegs?.flatMap((leg) => leg.geometry ? [leg.geometry] : []) ?? []),
+  ];
+  return geometries.flatMap((geometry) => removeIsolatedCoordinateOutliers(
+    geometry.coordinates.filter(isValidCoordinate),
+  ));
 }
 
 function isValidCoordinate(coordinate: unknown): coordinate is [number, number] {
@@ -612,32 +580,19 @@ export function MapView() {
       routeDestinationRef.current,
     ].filter(isValidCoordinate);
     if (!map || coordinates.length < 2 || map.getContainer().clientWidth === 0 || map.getContainer().clientHeight === 0) return;
-    const bounds = coordinates.reduce(
-      (current, [lng, lat]) => ({
-        minLng: Math.min(current.minLng, lng),
-        minLat: Math.min(current.minLat, lat),
-        maxLng: Math.max(current.maxLng, lng),
-        maxLat: Math.max(current.maxLat, lat),
-      }),
-      { minLng: Infinity, minLat: Infinity, maxLng: -Infinity, maxLat: -Infinity },
-    );
+    const bounds = coordinateBounds(coordinates);
+    if (!bounds) return;
     const padding = panelViewportPadding(map, 48, 24);
-    map.stop();
-    // Overlay padding belongs to this camera calculation, not to the map's
-    // persistent transform. Combining setPadding with fitBounds padding makes
-    // MapLibre account for the panels twice and can leave no usable viewport.
-    // Clear padding left by search/panel updates before calculating the fit.
-    map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
-    map.fitBounds(
+    const mapRect = map.getContainer().getBoundingClientRect();
+    const panelRect = document.querySelector<HTMLElement>('.route-panel')?.getBoundingClientRect();
+    const camera = map.cameraForBounds(
       [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
-      {
-        padding,
-        maxZoom: 15,
-        pitch: map.getPitch(),
-        bearing: map.getBearing(),
-        duration: 900,
-      },
+      { padding, maxZoom: 15, pitch: map.getPitch(), bearing: map.getBearing() },
     );
+    console.debug('[route-camera]', { coordinateCount: coordinates.length, bounds, mapRect, panelRect, padding, camera });
+    if (!camera) return;
+    map.stop();
+    map.easeTo({ ...camera, duration: 900 });
   };
 
   const scheduleRouteFit = (result: RouteResult) => {
@@ -658,11 +613,8 @@ export function MapView() {
   };
 
   const fitRouteNow = (result: RouteResult) => {
-    // A manual fit is deliberately synchronous and singular. Repeated button
-    // presses replace the current animation with one newly calculated fit.
-    routeCameraRequestRef.current += 1;
-    mapRef.current?.resize();
-    fitRouteInView(result);
+    if (window.innerWidth <= 760) setRouteSheetCollapsed(true);
+    scheduleRouteFit(result);
   };
 
   const showTransitLegVehicle = (result: RouteResult) => {
@@ -714,6 +666,7 @@ export function MapView() {
         result = await fetchValhallaRoute(origin, destination, routeMode, controller.signal);
       }
       if (controller.signal.aborted) return;
+      if (window.innerWidth <= 760) setRouteSheetCollapsed(true);
       setRouteResult(result);
       showTransitLegVehicle(result);
       setRouteGeometry(result);
@@ -733,6 +686,7 @@ export function MapView() {
     const option = transitRouteOptions[index];
     if (!option) return;
     setSelectedTransitRouteIndex(index);
+    if (window.innerWidth <= 760) setRouteSheetCollapsed(true);
     setRouteResult(option);
     showTransitLegVehicle(option);
     setRouteGeometry(option);
@@ -1722,9 +1676,8 @@ export function MapView() {
         pendingSearchCameraRef.current = null;
         // Measure after the mobile sheet's entrance animation. Its transform
         // changes getBoundingClientRect without triggering ResizeObserver.
-        map.setPadding(visibleViewportPadding(map));
         map.easeTo({
-          center: coordinates,
+          center: followCameraCenter(map, coordinates),
           zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : 14),
           duration: 900,
         });
@@ -1786,7 +1739,7 @@ export function MapView() {
   useEffect(() => {
     if (!routeOpen || !routeResult) return;
     scheduleRouteFit(routeResult);
-  }, [mapLoaded, routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
+  }, [mapLoaded, routeOpen, routeResult]);
 
   useEffect(() => () => {
     routeCameraRequestRef.current += 1;
@@ -1822,17 +1775,17 @@ export function MapView() {
         ].join(':');
         // ResizeObserver can emit repeatedly for a single React/layout pass.
         // Only request another fit when the measured usable viewport changed.
-        if (previousRouteLayout !== undefined && previousRouteLayout !== layout) {
+        const mobileSheetExpanded = window.innerWidth <= 760 && !routeSheetCollapsed;
+        if (!mobileSheetExpanded && previousRouteLayout !== undefined && previousRouteLayout !== layout) {
           scheduleRouteFit(routeResult);
         }
         previousRouteLayout = layout;
       } else {
-        map.setPadding(visibleViewportPadding(map));
         const coordinates = selectedTransitStop?.coordinates ?? selectedLocation?.coordinates;
         if (coordinates) {
           if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
           recenterTimer = window.setTimeout(() => {
-            map.easeTo({ center: coordinates, duration: 250 });
+            map.easeTo({ center: followCameraCenter(map, coordinates), duration: 250 });
           }, 120);
         }
       }
