@@ -86,6 +86,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-route-stop:not(.last)::after { background: #b8c7d8; content: ''; left: 6px; position: absolute; top: 18px; bottom: -4px; width: 2px; }
 .transit-route-stop-marker { background: #fff; border: 3px solid #9fb2c8; border-radius: 50%; flex: 0 0 auto; height: 14px; margin-top: 2px; position: relative; width: 14px; z-index: 1; }
 .transit-route-stop.first .transit-route-stop-marker { background: var(--color-accent); border-color: var(--color-accent); box-shadow: 0 0 0 4px var(--color-accent-soft); }
+.transit-route-stop.selected .transit-route-stop-marker { background: var(--color-accent); border-color: var(--color-accent); box-shadow: 0 0 0 4px var(--color-accent-soft); }
+.transit-route-stop.selected strong { color: var(--color-accent); }
 .transit-route-stop.last .transit-route-stop-marker { border-color: var(--color-ink); }
 .transit-route-stop.passed:not(.last)::after { background: var(--color-accent); }
 .transit-route-stop.passed .transit-route-stop-marker { background: var(--color-accent); border-color: var(--color-accent); }
