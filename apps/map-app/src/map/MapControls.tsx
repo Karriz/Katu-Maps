@@ -4,7 +4,6 @@ import {
   Box,
   Compass,
   Crosshair,
-  Droplets,
   Globe2,
   Layers3,
   Route,
@@ -12,7 +11,6 @@ import {
   Minus,
   Plus,
   Search,
-  Sparkles,
   TrainFront,
   Trees,
   X,
@@ -22,12 +20,10 @@ import {
 export type MapLayerKey =
   | 'globe'
   | 'terrain'
-  | 'waterEffect'
   | 'buildings'
   | 'trees'
   | 'transit'
-  | 'transitModels'
-  | 'shadows';
+  | 'transitModels';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -54,8 +50,6 @@ const primaryLayers: LayerDefinition[] = [
 
 const advancedLayers: LayerDefinition[] = [
   { key: 'globe', label: 'Globe', description: 'World projection', icon: Globe2 },
-  { key: 'waterEffect', label: 'Water texture', description: 'Surface detail', icon: Droplets },
-  { key: 'shadows', label: 'Shadows', description: 'Scene depth', icon: Sparkles },
 ];
 
 function LayerRow({
