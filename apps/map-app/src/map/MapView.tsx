@@ -44,6 +44,7 @@ import { fetchValhallaRoute, type RouteMode, type RouteResult } from './Valhalla
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
+import { useInAppNavigation } from '../lib/useInAppNavigation';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -502,6 +503,8 @@ export function MapView() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [orientationChanged, setOrientationChanged] = useState(false);
   const [selectedTransitStop, setSelectedTransitStop] = useState<TransitStopSelection | null>(null);
+  const [transitDepartureDetailOpen, setTransitDepartureDetailOpen] = useState(false);
+  const [transitNavigationBackSignal, setTransitNavigationBackSignal] = useState(0);
   const vehicleFollowEnabledRef = useRef(false);
   const [vehicleFollowing, setVehicleFollowing] = useState(false);
   const [vehicleFollowAvailable, setVehicleFollowAvailable] = useState(false);
@@ -563,6 +566,50 @@ export function MapView() {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
       return saved ? { ...defaults, ...saved } : defaults;
     } catch { return defaults; }
+  });
+
+  const navigationView = transitDepartureDetailOpen ? 'transit-trip'
+    : selectedTransitStop ? 'departures'
+      : transitDetailsOpen ? 'route-steps'
+        : routeSearchTarget ? 'route-search'
+          : routeResult && routeOpen ? 'route-result'
+            : routeOpen ? 'route'
+              : selectedLocation ? 'place'
+                : layersOpen ? 'layers'
+                  : searchOpen ? 'search' : null;
+
+  useInAppNavigation(navigationView, (parentView) => {
+    if (transitDepartureDetailOpen) {
+      setTransitNavigationBackSignal((value) => value + 1);
+      return;
+    }
+    if (selectedTransitStop) {
+      vehicleFollowEnabledRef.current = false;
+      setVehicleFollowing(false);
+      setVehicleFollowAvailable(false);
+      transitStopsLayerRef.current?.clearSelection();
+      setSelectedTransitStop(null);
+      if (parentView === 'search') setSearchOpen(true);
+      return;
+    }
+    if (transitDetailsOpen) { setTransitDetailsOpen(false); return; }
+    if (routeSearchTarget) { setRouteSearchTarget(null); return; }
+    if (routeResult && routeOpen) {
+      setRouteResult(null);
+      setRouteGeometry(null);
+      return;
+    }
+    if (routeOpen) { cancelRoute(); return; }
+    if (selectedLocation) {
+      setSelectedLocation(null);
+      if (parentView === 'search') setSearchOpen(true);
+      (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+        type: 'FeatureCollection', features: [],
+      });
+      return;
+    }
+    if (layersOpen) { setLayersOpen(false); return; }
+    if (searchOpen) { setSearchOpen(false); }
   });
 
   const setRouteGeometry = (result: RouteResult | null) => {
@@ -2032,6 +2079,8 @@ export function MapView() {
           {selectedTransitStop && (
             <TransitDeparturesPanel
               stop={selectedTransitStop}
+              onDetailOpenChange={setTransitDepartureDetailOpen}
+              navigationBackSignal={transitNavigationBackSignal}
               onDepartureSelect={({ tripId, mode, color, serviceDate, departure }) => {
                 vehicleFollowEnabledRef.current = true;
                 setVehicleFollowing(true);

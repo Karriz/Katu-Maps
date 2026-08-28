@@ -79,6 +79,8 @@ export function TransitDeparturesPanel({
   onFollowRequest,
   onSetDestination,
   isFollowing,
+  onDetailOpenChange,
+  navigationBackSignal = 0,
 }: {
   stop: TransitStopSelection;
   onClose: () => void;
@@ -94,6 +96,8 @@ export function TransitDeparturesPanel({
   onFollowRequest?: () => void;
   onSetDestination?: () => void;
   isFollowing?: boolean;
+  onDetailOpenChange?: (open: boolean) => void;
+  navigationBackSignal?: number;
 }) {
   const [departures, setDepartures] = useState<Departure[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +118,19 @@ export function TransitDeparturesPanel({
     setRouteStops([]);
     setShowAll(false);
   }, [stop]);
+
+  useEffect(() => {
+    if (!selectedDeparture) return;
+    onDepartureBack?.();
+    setSelectedDepartureKey(null);
+    setSelectedDeparture(null);
+  // This signal changes only when browser navigation requests the parent view.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigationBackSignal]);
+
+  useEffect(() => {
+    onDetailOpenChange?.(Boolean(selectedDeparture));
+  }, [onDetailOpenChange, selectedDeparture]);
 
   useEffect(() => {
     if (!selectedDeparture) return;
