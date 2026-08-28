@@ -509,6 +509,7 @@ export function MapView() {
   const [transitTimeControlsOpen, setTransitTimeControlsOpen] = useState(false);
   const [routeSheetCollapsed, setRouteSheetCollapsed] = useState(false);
   const routeSheetDragStartRef = useRef<number | null>(null);
+  const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const routeOriginRef = useRef<[number, number] | null>(null);
   const routeDestinationRef = useRef<[number, number] | null>(null);
   const routePickingRef = useRef<'origin' | 'destination' | null>(null);
@@ -1585,6 +1586,7 @@ export function MapView() {
     (document.activeElement as HTMLElement | null)?.blur();
     if (feature.properties.transitStopId) {
       const coordinates = feature.geometry.coordinates;
+      pendingSearchCameraRef.current = coordinates;
       const stop: TransitStopSelection = {
         stopId: feature.properties.transitStopId,
         name: feature.properties.name ?? 'Transit stop',
@@ -1596,22 +1598,10 @@ export function MapView() {
       setSelectedTransitStop(stop);
       setSelectedLocation(null);
       setSearchOpen(false);
-      map.easeTo({
-        center: coordinates,
-        zoom: Math.max(map.getZoom(), 14.6),
-        offset: closeRangeCameraOffset(),
-        duration: 900,
-      });
       return;
     }
     transitStopsLayerRef.current?.clearSelection();
     setSelectedTransitStop(null);
-    map.flyTo({
-      center: feature.geometry.coordinates,
-      zoom: Math.max(map.getZoom(), 14),
-      offset: closeRangeCameraOffset(),
-      duration: 1200,
-    });
     const { primary } = photonResultLabel(feature);
     const properties = feature.properties as Record<string, unknown>;
     const address = [properties.housenumber, properties.street, properties.city]
@@ -1637,6 +1627,7 @@ export function MapView() {
       });
       setRouteEndpoint(routeTarget, selection);
     } else {
+      pendingSearchCameraRef.current = selection.coordinates;
       setSelectedLocation(selection);
       void enrichLocationDetails(selection);
       const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
@@ -1652,6 +1643,32 @@ export function MapView() {
     setSearchOpen(false);
     setShowSearchResultsOnMap(false);
   };
+
+  useEffect(() => {
+    const coordinates = pendingSearchCameraRef.current;
+    if (!coordinates) return;
+    let secondFrame: number | undefined;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const map = mapRef.current;
+        if (!map || pendingSearchCameraRef.current !== coordinates) return;
+        pendingSearchCameraRef.current = null;
+        // Wait until the mobile information sheet has been laid out, then use
+        // MapLibre's persistent padding so the marker is centered in the part
+        // of the map that is actually visible rather than behind the sheet.
+        map.setPadding(visibleViewportPadding(map));
+        map.easeTo({
+          center: coordinates,
+          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : 14),
+          duration: 900,
+        });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [selectedLocation, selectedTransitStop]);
 
   const locateUser = () => {
     if (!navigator.geolocation) {
@@ -1702,8 +1719,14 @@ export function MapView() {
 
   useEffect(() => {
     if (!routeOpen || !routeResult) return;
-    const frame = window.requestAnimationFrame(() => fitRouteInView(routeResult));
-    return () => window.cancelAnimationFrame(frame);
+    let secondFrame: number | undefined;
+    const frame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => fitRouteInView(routeResult));
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+    };
   }, [routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
 
   const resetMapOrientation = () => {
@@ -1723,9 +1746,16 @@ export function MapView() {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     let frame: number | undefined;
+    let refitTimer: number | undefined;
     const updatePadding = () => {
       frame = undefined;
       map.setPadding(visibleViewportPadding(map));
+      if (routeOpen && routeResult) {
+        if (refitTimer !== undefined) window.clearTimeout(refitTimer);
+        // Panel animations and orientation changes can alter the usable map
+        // after the initial fit. Refit once the resize burst has settled.
+        refitTimer = window.setTimeout(() => fitRouteInView(routeResult), 120);
+      }
     };
     const schedulePadding = () => {
       if (frame === undefined) frame = window.requestAnimationFrame(updatePadding);
@@ -1739,10 +1769,11 @@ export function MapView() {
     window.addEventListener('resize', schedulePadding);
     return () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
+      if (refitTimer !== undefined) window.clearTimeout(refitTimer);
       observer?.disconnect();
       window.removeEventListener('resize', schedulePadding);
     };
-  }, [mapLoaded, routeOpen, selectedTransitStop, routeSheetCollapsed, transitDetailsOpen]);
+  }, [mapLoaded, routeOpen, routeResult, selectedTransitStop, selectedLocation, routeSheetCollapsed, transitDetailsOpen]);
 
   return (
     <div className="map-view">
