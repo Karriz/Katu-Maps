@@ -545,7 +545,7 @@ export function MapView() {
       globe: true,
       trees: !mobileDefault2d,
       buildings: !mobileDefault2d,
-      terrain: false,
+      terrain: !mobileDefault2d,
       transit: true,
       transitModels: !mobileDefault2d,
     };
@@ -1586,7 +1586,10 @@ export function MapView() {
       : LOCATION_ICON_ALIASES.find(([alias]) => alias === selectedLocation.iconId)?.[1]
   ) || 'shop';
   const SelectedLocationIcon = LOCATION_ICON_DEFINITIONS.find(([id]) => id === selectedIconKey)?.[1] ?? Store;
-  const is3dMode = layerToggles.buildings && layerToggles.trees && layerToggles.transitModels;
+  const is3dMode = layerToggles.terrain
+    && layerToggles.buildings
+    && layerToggles.trees
+    && layerToggles.transitModels;
 
   useEffect(() => {
     setRoutePoints();
@@ -1872,8 +1875,15 @@ export function MapView() {
             }))}
             is3dMode={is3dMode}
             onToggle3dMode={() => setLayerToggles((current) => {
-              const enabled = !(current.buildings && current.trees && current.transitModels);
-              return { ...current, buildings: enabled, trees: enabled, transit: true, transitModels: enabled };
+              const enabled = !(current.terrain && current.buildings && current.trees && current.transitModels);
+              return {
+                ...current,
+                terrain: enabled,
+                buildings: enabled,
+                trees: enabled,
+                transit: true,
+                transitModels: enabled,
+              };
             })}
             onLocate={locateUser}
             onResetOrientation={resetMapOrientation}
