@@ -3,6 +3,7 @@ import {
   buildEstimatedTripLeg,
   estimatedDistance,
   vehicleHeadingRadians,
+  vehicleMarkerRotation,
   VEHICLE_DIRECTION_ICON_SVG,
 } from './TransitStopsLayer';
 
@@ -59,9 +60,10 @@ describe('transit vehicle estimation', () => {
 describe('transit vehicle direction icon', () => {
   it('uses a padded, filled dart without mobile-sized strokes', () => {
     expect(VEHICLE_DIRECTION_ICON_SVG).toContain('width="72" height="72" viewBox="0 0 72 72"');
-    expect(VEHICLE_DIRECTION_ICON_SVG).toContain('d="M36 8 58 58 36 49 14 58Z"');
+    expect(VEHICLE_DIRECTION_ICON_SVG).toContain('d="M64 36 8 64 8 8Z"');
     expect(VEHICLE_DIRECTION_ICON_SVG).toContain('fill="#fff"');
     expect(VEHICLE_DIRECTION_ICON_SVG).not.toContain('stroke');
+    expect(VEHICLE_DIRECTION_ICON_SVG.match(/<path /g)).toHaveLength(1);
   });
 
   it.each([
@@ -69,7 +71,15 @@ describe('transit vehicle direction icon', () => {
     ['east', [24, 60], [24.01, 60], 90],
     ['south', [24, 60], [24, 59.99], 180],
     ['west', [24, 60], [23.99, 60], -90],
-  ] as const)('rotates the north-facing dart toward %s travel', (_name, from, to, degrees) => {
-    expect(vehicleHeadingRadians([...from], [...to]) * 180 / Math.PI).toBeCloseTo(degrees);
+  ] as const)('rotates the east-facing asset toward %s travel', (_name, from, to, degrees) => {
+    const heading = vehicleHeadingRadians([...from], [...to]);
+    expect(vehicleMarkerRotation(heading)).toBeCloseTo(degrees - 90);
+  });
+
+  it('reverses the marker by 180 degrees along the same road', () => {
+    const outbound = vehicleMarkerRotation(vehicleHeadingRadians([24, 60], [24.01, 60]));
+    const inbound = vehicleMarkerRotation(vehicleHeadingRadians([24.01, 60], [24, 60]));
+
+    expect(Math.abs(inbound - outbound)).toBeCloseTo(180);
   });
 });
