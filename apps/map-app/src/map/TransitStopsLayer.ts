@@ -115,20 +115,19 @@ async function addTransitIcon(
   }
 }
 
+export const VEHICLE_DIRECTION_ICON_SVG = [
+  '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">',
+  // A single filled dart stays legible at the 20–28 CSS-pixel MapLibre size.
+  // Its furthest corner is over four pixels inside the canvas when rotated 45°.
+  '<path d="M36 8 58 58 36 49 14 58Z" fill="#fff"/>',
+  '</svg>',
+].join('');
+
 async function addVehicleDirectionIcon(map: Map, id: string) {
   if (map.hasImage(id)) return;
 
-  // Use a filled, high-density arrow rather than a stroked icon. The generous
-  // square viewBox keeps every corner inside the image when MapLibre rotates
-  // it, while the stem makes the vehicle's heading unambiguous at small sizes.
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">',
-    '<path d="M36 6 60 38H45V62H27V38H12L36 6Z" fill="#fff" ',
-    'stroke="rgba(15,23,42,.28)" stroke-width="2" stroke-linejoin="round"/>',
-    '</svg>',
-  ].join('');
   const image = new Image();
-  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(VEHICLE_DIRECTION_ICON_SVG)}`;
   await new Promise<void>((resolve, reject) => {
     image.onload = () => resolve();
     image.onerror = () => reject(new Error(`Unable to load ${id}`));

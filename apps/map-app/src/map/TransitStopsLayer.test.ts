@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEstimatedTripLeg, estimatedDistance } from './TransitStopsLayer';
+import { buildEstimatedTripLeg, estimatedDistance, VEHICLE_DIRECTION_ICON_SVG } from './TransitStopsLayer';
 
 const minute = 60_000;
 const baseTime = Date.UTC(2026, 7, 28, 12);
@@ -48,5 +48,14 @@ describe('transit vehicle estimation', () => {
 
     expect(constrained).toBe(leg!.anchors[1].distance);
     expect(unconstrained).toBeGreaterThan(constrained!);
+  });
+});
+
+describe('transit vehicle direction icon', () => {
+  it('uses a padded, filled dart without mobile-sized strokes', () => {
+    expect(VEHICLE_DIRECTION_ICON_SVG).toContain('width="72" height="72" viewBox="0 0 72 72"');
+    expect(VEHICLE_DIRECTION_ICON_SVG).toContain('d="M36 8 58 58 36 49 14 58Z"');
+    expect(VEHICLE_DIRECTION_ICON_SVG).toContain('fill="#fff"');
+    expect(VEHICLE_DIRECTION_ICON_SVG).not.toContain('stroke');
   });
 });
