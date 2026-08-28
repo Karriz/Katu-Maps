@@ -105,9 +105,9 @@ function followCameraCenter(map: Map, coordinates: [number, number]): [number, n
   ];
 }
 
-function visibleViewportPadding(map: Map) {
+function panelViewportPadding(map: Map, base = 0, gap = 0) {
   const mapRect = map.getContainer().getBoundingClientRect();
-  const padding = { top: 0, right: 0, bottom: 0, left: 0 };
+  const padding = { top: base, right: base, bottom: base, left: base };
   document.querySelectorAll<HTMLElement>('.route-panel, .transit-departures-panel, .location-info-panel').forEach((panel) => {
     const panelRect = panel.getBoundingClientRect();
     const overlaps = panelRect.right > mapRect.left
@@ -115,16 +115,29 @@ function visibleViewportPadding(map: Map) {
       && panelRect.bottom > mapRect.top
       && panelRect.top < mapRect.bottom;
     if (!overlaps) return;
-    const left = panelRect.left - mapRect.left;
-    const right = mapRect.right - panelRect.right;
-    const top = panelRect.top - mapRect.top;
-    const bottom = mapRect.bottom - panelRect.bottom;
-    if (panelRect.bottom >= mapRect.bottom - 2) padding.bottom = Math.max(padding.bottom, mapRect.height - top);
-    else if (panelRect.top <= mapRect.top + 2) padding.top = Math.max(padding.top, mapRect.height - bottom);
-    else if (left < right) padding.left = Math.max(padding.left, mapRect.width - right);
-    else padding.right = Math.max(padding.right, mapRect.width - left);
+    const coversMostOfWidth = panelRect.width >= mapRect.width * 0.75;
+    if (coversMostOfWidth) {
+      if (panelRect.bottom >= mapRect.bottom - 2) {
+        padding.bottom = Math.max(padding.bottom, mapRect.bottom - panelRect.top + gap);
+      } else {
+        padding.top = Math.max(padding.top, panelRect.bottom - mapRect.top + gap);
+      }
+    } else if (panelRect.left <= mapRect.left + mapRect.width / 2) {
+      padding.left = Math.max(padding.left, panelRect.right - mapRect.left + gap);
+    } else {
+      padding.right = Math.max(padding.right, mapRect.right - panelRect.left + gap);
+    }
   });
   return padding;
+}
+
+function visibleViewportPadding(map: Map) {
+  return panelViewportPadding(map);
+}
+
+function routeCoordinates(result: RouteResult): [number, number][] {
+  const legCoordinates = result.transitLegs?.flatMap((leg) => leg.geometry?.coordinates ?? []) ?? [];
+  return [...result.geometry.coordinates, ...legCoordinates] as [number, number][];
 }
 
 type PhotonFeature = {
@@ -565,8 +578,9 @@ export function MapView() {
 
   const fitRouteInView = (result: RouteResult) => {
     const map = mapRef.current;
-    if (!map || result.geometry.coordinates.length < 2) return;
-    const bounds = result.geometry.coordinates.reduce(
+    const coordinates = routeCoordinates(result);
+    if (!map || coordinates.length < 2) return;
+    const bounds = coordinates.reduce(
       (current, [lng, lat]) => ({
         minLng: Math.min(current.minLng, lng),
         minLat: Math.min(current.minLat, lat),
@@ -575,29 +589,7 @@ export function MapView() {
       }),
       { minLng: Infinity, minLat: Infinity, maxLng: -Infinity, maxLat: -Infinity },
     );
-    const mapRect = map.getContainer().getBoundingClientRect();
-    const padding = { top: 48, right: 48, bottom: 48, left: 48 };
-    document.querySelectorAll<HTMLElement>('.route-panel, .transit-departures-panel, .location-info-panel').forEach((panel) => {
-      const panelRect = panel.getBoundingClientRect();
-      const overlapsHorizontally = panelRect.right > mapRect.left && panelRect.left < mapRect.right;
-      const overlapsVertically = panelRect.bottom > mapRect.top && panelRect.top < mapRect.bottom;
-      if (!overlapsHorizontally || !overlapsVertically) return;
-      const spansMapWidth = panelRect.left <= mapRect.left + 1 && panelRect.right >= mapRect.right - 1;
-      if (!spansMapWidth) {
-        if (panelRect.left <= mapRect.left + mapRect.width / 2) {
-          padding.left = Math.max(padding.left, panelRect.right - mapRect.left + 24);
-        } else {
-          padding.right = Math.max(padding.right, mapRect.right - panelRect.left + 24);
-        }
-      }
-      const attachedToBottom = panelRect.bottom >= mapRect.bottom - 2;
-      const attachedToTop = panelRect.top <= mapRect.top + 2 && !attachedToBottom;
-      if (attachedToTop) {
-        padding.top = Math.max(padding.top, panelRect.bottom - mapRect.top + 24);
-      } else if (attachedToBottom) {
-        padding.bottom = Math.max(padding.bottom, mapRect.bottom - panelRect.top + 24);
-      }
-    });
+    const padding = panelViewportPadding(map, 48, 24);
     map.fitBounds(
       [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
       {
@@ -1647,15 +1639,18 @@ export function MapView() {
   useEffect(() => {
     const coordinates = pendingSearchCameraRef.current;
     if (!coordinates) return;
-    let secondFrame: number | undefined;
-    const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => {
+    let cancelled = false;
+    let frame: number | undefined;
+    const panels = [...document.querySelectorAll<HTMLElement>('.transit-departures-panel, .location-info-panel')];
+    const panelAnimations = panels.flatMap((panel) => panel.getAnimations({ subtree: true }));
+    void Promise.allSettled(panelAnimations.map((animation) => animation.finished)).then(() => {
+      if (cancelled) return;
+      frame = window.requestAnimationFrame(() => {
         const map = mapRef.current;
         if (!map || pendingSearchCameraRef.current !== coordinates) return;
         pendingSearchCameraRef.current = null;
-        // Wait until the mobile information sheet has been laid out, then use
-        // MapLibre's persistent padding so the marker is centered in the part
-        // of the map that is actually visible rather than behind the sheet.
+        // Measure after the mobile sheet's entrance animation. Its transform
+        // changes getBoundingClientRect without triggering ResizeObserver.
         map.setPadding(visibleViewportPadding(map));
         map.easeTo({
           center: coordinates,
@@ -1665,8 +1660,8 @@ export function MapView() {
       });
     });
     return () => {
-      window.cancelAnimationFrame(firstFrame);
-      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+      cancelled = true;
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, [selectedLocation, selectedTransitStop]);
 
@@ -1719,13 +1714,17 @@ export function MapView() {
 
   useEffect(() => {
     if (!routeOpen || !routeResult) return;
-    let secondFrame: number | undefined;
-    const frame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => fitRouteInView(routeResult));
+    let cancelled = false;
+    let frame: number | undefined;
+    const panels = [...document.querySelectorAll<HTMLElement>('.route-panel')];
+    const panelAnimations = panels.flatMap((panel) => panel.getAnimations({ subtree: true }));
+    void Promise.allSettled(panelAnimations.map((animation) => animation.finished)).then(() => {
+      if (cancelled) return;
+      frame = window.requestAnimationFrame(() => fitRouteInView(routeResult));
     });
     return () => {
-      window.cancelAnimationFrame(frame);
-      if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+      cancelled = true;
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, [routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
 
@@ -1747,6 +1746,7 @@ export function MapView() {
     if (!map || !mapLoaded) return;
     let frame: number | undefined;
     let refitTimer: number | undefined;
+    let recenterTimer: number | undefined;
     const updatePadding = () => {
       frame = undefined;
       map.setPadding(visibleViewportPadding(map));
@@ -1755,6 +1755,14 @@ export function MapView() {
         // Panel animations and orientation changes can alter the usable map
         // after the initial fit. Refit once the resize burst has settled.
         refitTimer = window.setTimeout(() => fitRouteInView(routeResult), 120);
+      } else {
+        const coordinates = selectedTransitStop?.coordinates ?? selectedLocation?.coordinates;
+        if (coordinates) {
+          if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
+          recenterTimer = window.setTimeout(() => {
+            map.easeTo({ center: coordinates, duration: 250 });
+          }, 120);
+        }
       }
     };
     const schedulePadding = () => {
@@ -1770,6 +1778,7 @@ export function MapView() {
     return () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       if (refitTimer !== undefined) window.clearTimeout(refitTimer);
+      if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
       observer?.disconnect();
       window.removeEventListener('resize', schedulePadding);
     };
