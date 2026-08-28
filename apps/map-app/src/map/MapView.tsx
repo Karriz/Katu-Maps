@@ -129,6 +129,21 @@ function panelViewportPadding(map: Map, base = 0, gap = 0) {
       padding.right = Math.max(padding.right, mapRect.right - panelRect.left + gap);
     }
   });
+  // MapLibre cannot calculate a camera when padding consumes the entire
+  // viewport. Tall mobile sheets can otherwise make fitBounds silently keep
+  // the previous camera. Keep a useful strip of map available on both axes.
+  const minimumVisibleWidth = Math.min(160, mapRect.width * 0.4);
+  const minimumVisibleHeight = Math.min(160, mapRect.height * 0.4);
+  const horizontalOverflow = Math.max(0, padding.left + padding.right - (mapRect.width - minimumVisibleWidth));
+  const verticalOverflow = Math.max(0, padding.top + padding.bottom - (mapRect.height - minimumVisibleHeight));
+  if (horizontalOverflow > 0) {
+    if (padding.left >= padding.right) padding.left -= horizontalOverflow;
+    else padding.right -= horizontalOverflow;
+  }
+  if (verticalOverflow > 0) {
+    if (padding.bottom >= padding.top) padding.bottom -= verticalOverflow;
+    else padding.top -= verticalOverflow;
+  }
   return padding;
 }
 
@@ -586,7 +601,11 @@ export function MapView() {
 
   const fitRouteInView = (result: RouteResult) => {
     const map = mapRef.current;
-    const coordinates = routeCoordinates(result);
+    const coordinates = [
+      ...routeCoordinates(result),
+      routeOriginRef.current,
+      routeDestinationRef.current,
+    ].filter((coordinate): coordinate is [number, number] => Boolean(coordinate));
     if (!map || coordinates.length < 2) return;
     const bounds = coordinates.reduce(
       (current, [lng, lat]) => ({
@@ -598,6 +617,7 @@ export function MapView() {
       { minLng: Infinity, minLat: Infinity, maxLng: -Infinity, maxLat: -Infinity },
     );
     const padding = panelViewportPadding(map, 48, 24);
+    map.stop();
     map.fitBounds(
       [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
       {
@@ -631,6 +651,8 @@ export function MapView() {
   const showTransitLegVehicle = (result: RouteResult) => {
     if (routeMode !== 'transit') return;
     vehicleFollowEnabledRef.current = false;
+    setVehicleFollowing(false);
+    setVehicleFollowAvailable(false);
     const leg = result.transitLegs?.find((candidate) => (
       candidate.tripId && !['WALK', 'FOOT'].includes(candidate.mode)
     ));
@@ -870,6 +892,7 @@ export function MapView() {
     const transitVehicleLayer = new TransitVehicleModelLayer();
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       transitVehicleLayer.setPose(pose);
+      setVehicleFollowAvailable(Boolean(pose));
       if (!pose || !vehicleFollowEnabledRef.current) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
       // Keep camera tracking independent of style loading/animation state.
@@ -1967,18 +1990,25 @@ export function MapView() {
               isFollowing={vehicleFollowing}
             />
           )}
-          {routeResult && routeOpen && (
-            <button className="map-floating-action map-fit-route" type="button" onClick={() => fitRouteInView(routeResult)}>
-              Fit route
-            </button>
-          )}
-          {vehicleFollowAvailable && selectedTransitStop && !vehicleFollowing && (
-            <button className="map-floating-action map-resume-follow" type="button" onClick={() => {
-              vehicleFollowEnabledRef.current = true;
-              setVehicleFollowing(true);
-            }}>
-              Follow vehicle
-            </button>
+          {((routeResult && routeOpen) || (vehicleFollowAvailable && selectedTransitStop)) && (
+            <div className="map-camera-actions" aria-label="Map camera controls">
+              {routeResult && routeOpen && (
+                <button className="map-floating-action" type="button" onClick={() => {
+                  pauseVehicleFollow();
+                  scheduleRouteFit(routeResult);
+                }}>
+                  Fit route
+                </button>
+              )}
+              {vehicleFollowAvailable && (
+                <button className="map-floating-action" type="button" onClick={() => {
+                  vehicleFollowEnabledRef.current = !vehicleFollowing;
+                  setVehicleFollowing(!vehicleFollowing);
+                }} aria-pressed={vehicleFollowing}>
+                  {vehicleFollowing ? 'Following vehicle' : 'Follow vehicle'}
+                </button>
+              )}
+            </div>
           )}
           {selectedLocation && !selectedTransitStop && (
             <aside className="location-info-panel" aria-label="Location information">
