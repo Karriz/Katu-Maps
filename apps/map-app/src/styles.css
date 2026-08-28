@@ -210,6 +210,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-camera-actions { display: grid; gap: 8px; position: absolute; right: 28px; top: 28px; z-index: 40; }
 .map-floating-action { background: rgb(255 255 255 / 96%); border: 1px solid #cbd9e8; border-radius: 10px; box-shadow: 0 8px 20px rgb(37 55 79 / 16%); color: var(--color-accent); cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 750; padding: 9px 12px; }
 .map-floating-action:hover { background: #fff; border-color: #8ab7f5; }
+.map-floating-action[aria-pressed='true'] { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
 .route-summary strong { color: #1e293b; font-size: 1.2rem; }
 .route-summary span { color: #64748b; font-size: 0.84rem; }
 .transit-route-legs { border-top: 1px solid #edf0f3; display: grid; gap: 0; margin-top: 12px; padding-top: 8px; }
@@ -389,6 +390,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   }
   .location-search-form { min-height: 54px; padding-left: 15px; }
   .location-search-results { max-height: min(44dvh, 360px); overflow-y: auto; overscroll-behavior: contain; }
+  .map-camera-actions {
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    top: calc(78px + env(safe-area-inset-top, 0px));
+  }
   .map-tools { height: 100%; inset: 0; width: 100%; }
   .map-tools.layers-open { z-index: 110; }
   .map-tool-dock { display: contents; }
