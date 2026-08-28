@@ -137,7 +137,13 @@ function visibleViewportPadding(map: Map) {
 
 function routeCoordinates(result: RouteResult): [number, number][] {
   const legCoordinates = result.transitLegs?.flatMap((leg) => leg.geometry?.coordinates ?? []) ?? [];
-  return [...result.geometry.coordinates, ...legCoordinates] as [number, number][];
+  return [...result.geometry.coordinates, ...legCoordinates].filter(
+    (coordinate): coordinate is [number, number] => (
+      coordinate.length >= 2
+      && Number.isFinite(coordinate[0])
+      && Number.isFinite(coordinate[1])
+    ),
+  );
 }
 
 type PhotonFeature = {
@@ -523,6 +529,7 @@ export function MapView() {
   const [routeSheetCollapsed, setRouteSheetCollapsed] = useState(false);
   const routeSheetDragStartRef = useRef<number | null>(null);
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
+  const routeCameraRequestRef = useRef(0);
   const routeOriginRef = useRef<[number, number] | null>(null);
   const routeDestinationRef = useRef<[number, number] | null>(null);
   const routePickingRef = useRef<'origin' | 'destination' | null>(null);
@@ -602,6 +609,24 @@ export function MapView() {
     );
   };
 
+  const scheduleRouteFit = (result: RouteResult) => {
+    const request = ++routeCameraRequestRef.current;
+    // Route results change the height of the route sheet. Waiting for the
+    // mobile entrance transition (and then two layout frames) makes this an
+    // explicit camera action instead of relying on a ResizeObserver firing.
+    const layoutDelay = window.innerWidth <= 760 ? 240 : 0;
+    window.setTimeout(() => {
+      if (routeCameraRequestRef.current !== request) return;
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (routeCameraRequestRef.current !== request) return;
+          mapRef.current?.resize();
+          fitRouteInView(result);
+        });
+      });
+    }, layoutDelay);
+  };
+
   const showTransitLegVehicle = (result: RouteResult) => {
     if (routeMode !== 'transit') return;
     vehicleFollowEnabledRef.current = false;
@@ -652,6 +677,7 @@ export function MapView() {
       setRouteResult(result);
       showTransitLegVehicle(result);
       setRouteGeometry(result);
+      scheduleRouteFit(result);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         setRouteResult(null);
@@ -670,6 +696,7 @@ export function MapView() {
     setRouteResult(option);
     showTransitLegVehicle(option);
     setRouteGeometry(option);
+    scheduleRouteFit(option);
   };
 
   const openRoute = () => {
@@ -1714,19 +1741,12 @@ export function MapView() {
 
   useEffect(() => {
     if (!routeOpen || !routeResult) return;
-    let cancelled = false;
-    let frame: number | undefined;
-    const panels = [...document.querySelectorAll<HTMLElement>('.route-panel')];
-    const panelAnimations = panels.flatMap((panel) => panel.getAnimations({ subtree: true }));
-    void Promise.allSettled(panelAnimations.map((animation) => animation.finished)).then(() => {
-      if (cancelled) return;
-      frame = window.requestAnimationFrame(() => fitRouteInView(routeResult));
-    });
-    return () => {
-      cancelled = true;
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-    };
+    scheduleRouteFit(routeResult);
   }, [routeOpen, routeResult, routeSheetCollapsed, transitDetailsOpen]);
+
+  useEffect(() => () => {
+    routeCameraRequestRef.current += 1;
+  }, []);
 
   const resetMapOrientation = () => {
     vehicleFollowEnabledRef.current = false;
