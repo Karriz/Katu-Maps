@@ -187,6 +187,7 @@ type LocationSelection = {
   osmType?: string;
   osmId?: string | number;
   iconId?: string;
+  favoriteId?: string;
 };
 
 function photonResultLabel(feature: PhotonFeature) {
@@ -286,6 +287,7 @@ function locationSelectionFromFeature(feature: MapGeoJSONFeature): LocationSelec
     source: 'map',
     ...locationDetails(properties),
     iconId: locationIconId(properties),
+    favoriteId: typeof properties.favoriteId === 'string' ? properties.favoriteId : undefined,
     osmId: typeof properties.osm_id === 'string' || typeof properties.osm_id === 'number'
       ? properties.osm_id
       : (typeof feature.id === 'string' || typeof feature.id === 'number' ? feature.id : undefined),
@@ -1908,7 +1910,7 @@ export function MapView() {
     const map = mapRef.current;
     if (!map) return;
     (document.activeElement as HTMLElement | null)?.blur();
-    if (feature.properties.transitStopId) {
+    if (feature.properties.transitStopId && !feature.properties.favoriteId) {
       const coordinates = feature.geometry.coordinates;
       const stop: TransitStopSelection = {
         stopId: feature.properties.transitStopId,
@@ -1952,6 +1954,7 @@ export function MapView() {
       source: 'search',
       ...locationDetails(properties),
       iconId: locationIconId(properties),
+      favoriteId: typeof properties.favoriteId === 'string' ? properties.favoriteId : undefined,
       osmType: typeof properties.osm_type === 'string' ? properties.osm_type : undefined,
       osmId: properties.osm_id as string | number | undefined,
     };
@@ -2403,11 +2406,12 @@ export function MapView() {
                   {selectedLocation.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
                 </span>
                 {(() => {
-                  const favorite = favorites.find((item) => item.id === selectedLocation.osmId
+                  const favorite = favorites.find((item) => item.id === selectedLocation.favoriteId
+                    || item.id === selectedLocation.osmId
                     || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
                   return favorite ? (
                     <div className="favorite-actions">
-                      <button type="button" onClick={() => editFavorite(favorite)}>Rename</button>
+                      <button type="button" onClick={() => editFavorite(favorite)}>Edit name</button>
                       <button type="button" onClick={() => setFavorites((items) => items.filter((item) => item.id !== favorite.id))}>Remove favourite</button>
                     </div>
                   ) : (
