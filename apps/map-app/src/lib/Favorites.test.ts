@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAVORITES_STORAGE_KEY, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
+import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
 
 const favorite = (overrides: Partial<Favorite> = {}): Favorite => ({
   id: 'one', name: 'Museum', coordinates: [23.7, 61.5], category: 'Museum',
@@ -27,4 +27,21 @@ describe('favorite matching and ordering', () => {
       .toEqual([{ ...provider, name: 'Renamed' }]);
     expect(upsertFavorite([favorite()], favorite({ id: 'new', coordinates: [23.700001, 61.500001] }))).toHaveLength(1);
   });
+});
+
+it('creates map features with the favorite kind used for marker icons', () => {
+  const home = favorite({ id: 'home', name: 'Home', kind: 'home', iconId: 'house' });
+  expect(favoriteMapFeatures([home])).toEqual([{
+    type: 'Feature',
+    id: 'home',
+    geometry: { type: 'Point', coordinates: home.coordinates },
+    properties: {
+      name: 'Home',
+      class: home.category,
+      city: undefined,
+      iconId: 'house',
+      favoriteId: 'home',
+      favoriteKind: 'home',
+    },
+  }]);
 });

@@ -17,7 +17,9 @@ import {
   Church,
   Coffee,
   GraduationCap,
+  BriefcaseBusiness,
   Hospital,
+  House,
   Hotel,
   Landmark,
   Palette,
@@ -48,7 +50,7 @@ import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
-import { loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from '../lib/Favorites';
+import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -331,6 +333,12 @@ const LOCATION_ICON_ALIASES: Array<[string, string]> = [
   ['leisure', 'park'],
 ];
 
+const FAVORITE_ICON_DEFINITIONS: Array<[string, LucideIcon]> = [
+  ['favorite-home-icon', House],
+  ['favorite-work-icon', BriefcaseBusiness],
+  ['favorite-star-icon', Star],
+];
+
 const LOCATION_PRIORITY: Array<[string, number]> = [
   ['restaurant', 1], ['cafe', 2], ['bar', 3], ['pub', 3], ['fast_food', 4],
   ['museum', 5], ['gallery', 5], ['theatre', 5], ['cinema', 5], ['attraction', 5],
@@ -356,6 +364,23 @@ async function addLocationIcons(map: Map) {
     })).replace(
       /(<svg[^>]*>)/,
       `$1<circle cx="12" cy="12" r="11" fill="${LOCATION_ICON_COLORS[id] ?? '#64748b'}"/>`,
+    );
+    const image = new Image();
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`Unable to load ${imageId}`));
+    });
+    if (!map.hasImage(imageId)) map.addImage(imageId, image, { pixelRatio: 2 });
+  }));
+
+  await Promise.all(FAVORITE_ICON_DEFINITIONS.map(async ([imageId, Icon]) => {
+    if (map.hasImage(imageId)) return;
+    const svg = renderToStaticMarkup(createElement(Icon, {
+      color: '#ffffff', size: 22, strokeWidth: 2.4,
+    })).replace(
+      /(<svg[^>]*>)/,
+      '$1<circle cx="12" cy="12" r="11" fill="#e6a817"/>',
     );
     const image = new Image();
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -1161,7 +1186,7 @@ export function MapView() {
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
       setRouteContextMenu(null);
-      const locationLayers = ['search-result-icons', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
+      const locationLayers = ['favorite-icons', 'search-result-icons', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
       const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
       if (routePickingRef.current) {
         const kind = routePickingRef.current;
@@ -1303,6 +1328,10 @@ export function MapView() {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+      map.addSource('favorites', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
       map.addSource('user-location', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -1360,6 +1389,29 @@ export function MapView() {
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
         },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'favorite-icons',
+        type: 'symbol',
+        source: 'favorites',
+        layout: {
+          'icon-image': [
+            'match', ['get', 'favoriteKind'],
+            'home', 'favorite-home-icon',
+            'work', 'favorite-work-icon',
+            'favorite-star-icon',
+          ],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 1.15, 14, 1.4, 18, 1.6],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'text-field': ['get', 'name'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': 11,
+          'text-offset': [0, 1.45],
+          'text-anchor': 'top',
+          'text-optional': true,
+        },
+        paint: { 'text-color': MAP_COLORS.label, 'text-halo-color': MAP_COLORS.labelHalo, 'text-halo-width': 1.3 },
       }, poiLayers.before);
       map.addLayer({
         id: 'search-result-halo',
@@ -1706,6 +1758,12 @@ export function MapView() {
       })),
     });
   }, [highlightedSearchResults, mapLoaded]);
+
+  useEffect(() => {
+    const source = mapRef.current?.getSource('favorites') as { setData: (data: unknown) => void } | undefined;
+    if (!source) return;
+    source.setData({ type: 'FeatureCollection', features: favoriteMapFeatures(favorites) });
+  }, [favorites, mapLoaded]);
 
   const enrichLocationDetails = async (selection: LocationSelection) => {
     const lookupKey = selection.osmType && selection.osmId
