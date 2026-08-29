@@ -50,7 +50,7 @@ import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
-import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from '../lib/Favorites';
+import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -551,6 +551,11 @@ export function MapView() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResultsQuery, setSearchResultsQuery] = useState('');
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
+  const [pendingFavorite, setPendingFavorite] = useState<{
+    selection: LocationSelection;
+    provider?: string;
+    providerId?: string;
+  } | null>(null);
   const [highlightedSearchResults, setHighlightedSearchResults] = useState<PhotonFeature[]>([]);
   const pendingSearchSubmitRef = useRef<string | null>(null);
   const lastSearchFitRef = useRef('');
@@ -631,10 +636,18 @@ export function MapView() {
   )) === index).slice(0, 8);
 
   const saveSelection = (selection: LocationSelection, provider?: string, providerId?: string) => {
+    setPendingFavorite({ selection, provider, providerId });
+  };
+
+  const confirmFavoriteKind = (kind: FavoriteKind) => {
+    if (!pendingFavorite) return;
+    const { selection, provider, providerId } = pendingFavorite;
     const suggested = selection.name === 'Map point'
       ? `${selection.coordinates[1].toFixed(5)}, ${selection.coordinates[0].toFixed(5)}`
       : selection.name;
-    const name = window.prompt('Name this favourite', suggested)?.trim();
+    const name = kind === 'favorite'
+      ? window.prompt('Name this favourite', suggested)?.trim()
+      : kind === 'home' ? 'Home' : 'Work';
     if (!name) return;
     setFavorites((current) => upsertFavorite(current, {
       id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
@@ -645,9 +658,10 @@ export function MapView() {
       provider,
       providerId,
       iconId: selection.iconId,
-      kind: 'favorite',
+      kind,
       createdAt: Date.now(),
     }));
+    setPendingFavorite(null);
   };
 
   const editFavorite = (favorite: Favorite) => {
@@ -2250,6 +2264,31 @@ export function MapView() {
                 openRoute();
                 setRouteEndpoint('origin', selection);
               }}>Route from here</button>
+            </div>
+          )}
+          {pendingFavorite && (
+            <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setPendingFavorite(null);
+            }}>
+              <section className="favorite-menu" role="dialog" aria-modal="true" aria-labelledby="favorite-menu-title">
+                <button className="favorite-menu-close" type="button" aria-label="Close" onClick={() => setPendingFavorite(null)}>
+                  <X size={18} aria-hidden="true" />
+                </button>
+                <span className="favorite-menu-eyebrow">Save place</span>
+                <h2 id="favorite-menu-title">What kind of favourite is this?</h2>
+                <p>Home and Work use their own map icons and are named automatically.</p>
+                <div className="favorite-kind-options">
+                  <button type="button" onClick={() => confirmFavoriteKind('home')}>
+                    <House aria-hidden="true" /><span><strong>Home</strong><small>Save as Home</small></span>
+                  </button>
+                  <button type="button" onClick={() => confirmFavoriteKind('work')}>
+                    <BriefcaseBusiness aria-hidden="true" /><span><strong>Work</strong><small>Save as Work</small></span>
+                  </button>
+                  <button type="button" onClick={() => confirmFavoriteKind('favorite')}>
+                    <Star aria-hidden="true" /><span><strong>Favourite</strong><small>Choose a custom name</small></span>
+                  </button>
+                </div>
+              </section>
             </div>
           )}
           {selectedTransitStop && (
