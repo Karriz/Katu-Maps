@@ -51,6 +51,7 @@ import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { elevationResult, formatCoordinates, formatElevation, queryTerrainElevation, type ElevationState } from './PositionInformation';
+import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -574,6 +575,8 @@ export function MapView() {
   const [routeContextMenu, setRouteContextMenu] = useState<{ x: number; y: number; coordinates: [number, number] } | null>(null);
   const [positionInformation, setPositionInformation] = useState<{ coordinates: [number, number]; elevation: ElevationState } | null>(null);
   const elevationRequestRef = useRef(0);
+  const measurementControllerRef = useRef<DistanceMeasurementController | null>(null);
+  const [measurement, setMeasurement] = useState<Measurement | null>(null);
   const [routeOriginSelection, setRouteOriginSelection] = useState<LocationSelection | null>(null);
   const [routeDestinationSelection, setRouteDestinationSelection] = useState<LocationSelection | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
@@ -707,7 +710,8 @@ export function MapView() {
     if (name) setFavorites((current) => current.map((item) => item.id === favorite.id ? { ...item, name } : item));
   };
 
-  const navigationView = transitDepartureDetailOpen ? 'transit-trip'
+  const navigationView = measurement ? 'measurement'
+    : transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
       : transitDetailsOpen ? 'route-steps'
         : routeSearchTarget ? 'route-search'
@@ -718,6 +722,7 @@ export function MapView() {
                   : searchOpen ? 'search' : null;
 
   useInAppNavigation(navigationView, (parentView) => {
+    if (measurement) { stopMeasurement(); return; }
     if (transitDepartureDetailOpen) {
       setTransitNavigationBackSignal((value) => value + 1);
       return;
@@ -927,6 +932,7 @@ export function MapView() {
   };
 
   const openRoute = () => {
+    stopMeasurement();
     const isMobile = window.innerWidth <= 760;
     routeSheet.setSnap('half');
     setRouteContextMenu(null);
@@ -1066,6 +1072,24 @@ export function MapView() {
     setSearchOpen(false);
     setRouteContextMenu(null);
   };
+
+  function stopMeasurement() {
+    measurementControllerRef.current?.dispose();
+    measurementControllerRef.current = null;
+    setMeasurement(null);
+  }
+
+  function startMeasurement(start: [number, number]) {
+    const map = mapRef.current;
+    if (!map) return;
+    cancelRoute();
+    stopMeasurement();
+    setPositionInformation(null);
+    setSelectedLocation(null);
+    setSelectedTransitStop(null);
+    setRouteContextMenu(null);
+    measurementControllerRef.current = new DistanceMeasurementController(map, start, setMeasurement);
+  }
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -1613,6 +1637,8 @@ export function MapView() {
     mapRef.current = map;
 
     return () => {
+      measurementControllerRef.current?.dispose();
+      measurementControllerRef.current = null;
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       map.off('move', handleCameraMove);
@@ -2290,6 +2316,7 @@ export function MapView() {
                 setPositionInformation({ coordinates, elevation: { status: 'loading' } });
                 setRouteContextMenu(null);
               }}>Position information</button>
+              <button type="button" role="menuitem" onClick={() => startMeasurement([...routeContextMenu.coordinates])}>Measure distance</button>
               <button type="button" role="menuitem" onClick={() => {
                 saveSelection({ name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map' });
                 setRouteContextMenu(null);
@@ -2335,6 +2362,16 @@ export function MapView() {
               </div>
               <small>Ground surface from the configured terrain DEM. Availability depends on terrain coverage and loaded tiles.</small>
             </aside>
+          )}
+          {measurement && (
+            <>
+              <div className="measurement-crosshair" aria-hidden="true"><span /><span /></div>
+              <aside className="measurement-panel" aria-label="Distance measurement">
+                <span>Distance</span>
+                <strong aria-live="polite">{formatDistance(measurement.metres)}</strong>
+                <div><button type="button" onClick={stopMeasurement}>Finish</button><button type="button" onClick={stopMeasurement}>Cancel</button></div>
+              </aside>
+            </>
           )}
           {pendingFavorite && (
             <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {
