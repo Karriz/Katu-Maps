@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
+import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
 
 const favorite = (overrides: Partial<Favorite> = {}): Favorite => ({
   id: 'one', name: 'Museum', coordinates: [23.7, 61.5], category: 'Museum',
   kind: 'favorite', createdAt: 3, ...overrides,
+});
+
+it('opens legacy favorites using the safest compatible information view', () => {
+  expect(resolvedFavoriteEntityType(favorite())).toBe('position');
+  expect(resolvedFavoriteEntityType(favorite({ provider: 'osm' }))).toBe('place');
+  expect(resolvedFavoriteEntityType(favorite({ provider: 'transit' }))).toBe('transit-stop');
+  expect(resolvedFavoriteEntityType(favorite({ entityType: 'place' }))).toBe('place');
 });
 
 it('persists and restores favorites', () => {
@@ -48,6 +55,16 @@ it('creates map features with the favorite kind used for marker icons', () => {
       iconId: 'house',
       favoriteId: 'home',
       favoriteKind: 'home',
+      entityType: undefined,
+      transitStopId: undefined,
+      transitProvider: undefined,
+      transitMode: undefined,
+      osmType: undefined,
+      osmId: undefined,
+      openingHours: undefined,
+      phone: undefined,
+      email: undefined,
+      website: undefined,
     },
   }]);
 });
