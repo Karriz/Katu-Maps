@@ -510,4 +510,5 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .route-panel.mobile-bottom-sheet .route-panel-heading { top: 8px; }
   .route-panel.mobile-bottom-sheet[data-snap='collapsed'] { height: var(--mobile-sheet-height); }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
+  .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-refresh { bottom: auto; right: 64px; top: 20px; }
 }

@@ -47,7 +47,10 @@ export function useMobileBottomSheet(initialSnap: SheetSnap = 'half', onHeightCh
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (window.innerWidth > 760 || event.button !== 0) return;
-    if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
+    // A sheet handle may itself be a button so it remains keyboard accessible.
+    // Only ignore controls nested inside non-interactive handles (such as the
+    // close button in a draggable header), not the handle button itself.
+    if (!event.currentTarget.matches('button') && (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
     const startHeight = dragHeight ?? heightFor(snap);
     drag.current = { pointerId: event.pointerId, startY: event.clientY, startHeight, lastY: event.clientY, lastTime: event.timeStamp, velocityY: 0 };
     event.currentTarget.setPointerCapture(event.pointerId);
