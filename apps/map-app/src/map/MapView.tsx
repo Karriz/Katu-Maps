@@ -57,6 +57,7 @@ import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers
 import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
+import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
@@ -2737,7 +2738,7 @@ export function MapView() {
           )}
           {selectedLocation && !selectedTransitStop && (
             <aside className={`location-info-panel mobile-bottom-sheet${locationSheet.dragging ? ' is-dragging' : ''}`} style={locationSheet.style} data-snap={locationSheet.snap} aria-label="Location information">
-              <div className="mobile-sheet-drag-region" {...locationSheet.handleProps}><span aria-hidden="true" /></div>
+              <MobileSheetHandle {...locationSheet} />
               <div
                 className="location-info-icon"
                 aria-hidden="true"
@@ -2829,18 +2830,7 @@ export function MapView() {
           )}
           {routeOpen && !routePicking && (
             <aside className={`route-panel mobile-bottom-sheet${routeSheetCollapsed ? ' route-sheet-collapsed' : ''}${routeSheet.dragging ? ' is-dragging' : ''}`} style={routeSheet.style} data-snap={routeSheet.snap} aria-label="Route details">
-              <button
-                className="route-sheet-grabber"
-                type="button"
-                aria-label={routeSheetCollapsed ? 'Expand route panel' : 'Collapse route panel'}
-                {...routeSheet.handleProps}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setRouteSheetCollapsed((collapsed) => !collapsed);
-                  }
-                }}
-              ><span aria-hidden="true" /></button>
+              <MobileSheetHandle {...routeSheet} />
               <div className="route-panel-heading" {...routeSheet.handleProps}>
                 <div><strong>Plan a route</strong><span>Search for a place or pick it on the map</span></div>
                 <button type="button" aria-label="Clear route" onClick={cancelRoute}>×</button>
