@@ -290,7 +290,7 @@ export function TransitDeparturesPanel({
     const DetailIcon = modeIcon(detailMode);
     return (
       <aside className={cn("transit-departures-panel transit-trip-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`${detailRoute} route details`}>
-        <MobileSheetHandle {...sheet} />
+        <MobileSheetHandle {...sheet} closeLabel="Close departures" onClose={onClose} />
         <header className="transit-panel-header mobile-sheet-header" {...sheet.handleProps}>
           <button className="transit-panel-back" type="button" onClick={() => {
             onDepartureBack?.();
@@ -366,7 +366,7 @@ export function TransitDeparturesPanel({
 
   return (
     <aside className={cn("transit-departures-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`Departures from ${stop.name}`}>
-      <MobileSheetHandle {...sheet} />
+      <MobileSheetHandle {...sheet} closeLabel="Close departures" onClose={onClose} />
       <header className="transit-panel-header mobile-sheet-header" {...sheet.handleProps}>
         <div className="transit-panel-eyebrow" style={{ color: modeColor(stop.mode) }}>
           <StopIcon aria-hidden="true" />

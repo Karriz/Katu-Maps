@@ -1,9 +1,12 @@
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import type { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 
-type MobileSheetHandleProps = Pick<ReturnType<typeof useMobileBottomSheet>, 'handleProps' | 'setSnap' | 'snap'>;
+type MobileSheetHandleProps = Pick<ReturnType<typeof useMobileBottomSheet>, 'handleProps' | 'setSnap' | 'snap'> & {
+  closeLabel: string;
+  onClose: () => void;
+};
 
-export function MobileSheetHandle({ handleProps, setSnap, snap }: MobileSheetHandleProps) {
+export function MobileSheetHandle({ closeLabel, handleProps, onClose, setSnap, snap }: MobileSheetHandleProps) {
   return (
     <div className="mobile-sheet-handle" role="group" aria-label="Resize panel" {...handleProps}>
       <button type="button" aria-label="Collapse panel" disabled={snap === 'collapsed'} onClick={() => setSnap(snap === 'expanded' ? 'half' : 'collapsed')}>
@@ -12,6 +15,9 @@ export function MobileSheetHandle({ handleProps, setSnap, snap }: MobileSheetHan
       <span aria-hidden="true" />
       <button type="button" aria-label="Expand panel" disabled={snap === 'expanded'} onClick={() => setSnap(snap === 'collapsed' ? 'half' : 'expanded')}>
         <ChevronUp aria-hidden="true" />
+      </button>
+      <button className="mobile-sheet-close" type="button" aria-label={closeLabel} onClick={onClose}>
+        <X aria-hidden="true" />
       </button>
     </div>
   );

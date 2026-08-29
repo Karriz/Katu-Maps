@@ -2740,7 +2740,18 @@ export function MapView() {
           )}
           {selectedLocation && !selectedTransitStop && (
             <aside className={`location-info-panel mobile-bottom-sheet${locationSheet.dragging ? ' is-dragging' : ''}`} style={locationSheet.style} data-snap={locationSheet.snap} aria-label="Location information">
-              <MobileSheetHandle {...locationSheet} />
+              <MobileSheetHandle
+                {...locationSheet}
+                closeLabel="Close location information"
+                onClose={() => {
+                  locationDetailsAbortRef.current?.abort();
+                  setLocationDetailsLoading(false);
+                  setSelectedLocation(null);
+                  (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+                    type: 'FeatureCollection', features: [],
+                  });
+                }}
+              />
               <div
                 className="location-info-icon"
                 aria-hidden="true"
@@ -2834,7 +2845,7 @@ export function MapView() {
           )}
           {routeOpen && !routePicking && (
             <aside className={`route-panel mobile-bottom-sheet${routeSheetCollapsed ? ' route-sheet-collapsed' : ''}${routeSheet.dragging ? ' is-dragging' : ''}`} style={routeSheet.style} data-snap={routeSheet.snap} aria-label="Route details">
-              <MobileSheetHandle {...routeSheet} />
+              <MobileSheetHandle {...routeSheet} closeLabel="Close route planner" onClose={cancelRoute} />
               <div className="route-panel-heading" {...routeSheet.handleProps}>
                 <div><strong>Plan a route</strong><span>Search for a place or pick it on the map</span></div>
                 <button className="route-panel-close" type="button" aria-label="Close route planner" onClick={cancelRoute}><X aria-hidden="true" /></button>
