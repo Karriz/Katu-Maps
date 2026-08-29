@@ -1,6 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0e1726"/>
-  <path d="M256 66c-78 0-141 63-141 141 0 105 141 239 141 239s141-134 141-239C397 129 334 66 256 66Z" fill="#1769e8"/>
-  <circle cx="256" cy="207" r="57" fill="#fff"/>
-  <path d="m256 173 24 48h-18v32h-12v-32h-18l24-48Z" fill="#1769e8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Katu Maps</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#74c8f4"/><stop offset="1" stop-color="#c9ecf8"/></linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#b5da70"/><stop offset="1" stop-color="#83bd4e"/></linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#40556a"/><stop offset="1" stop-color="#203448"/></linearGradient>
+    <clipPath id="clip"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <path d="M0 303c90-58 177-60 262-7 91-70 174-70 250-21v237H0z" fill="url(#grass)"/>
+    <g fill="#faf9f3" stroke="#e4e3da" stroke-width="5" stroke-linejoin="round">
+      <path d="M220 181h78v143h-78z"/><path d="M282 126h100v202H282z"/><path d="M362 212h74v118h-74z"/>
+    </g>
+    <g fill="#72b5c0">
+      <rect x="243" y="213" width="17" height="23" rx="3"/><rect x="243" y="258" width="17" height="23" rx="3"/>
+      <rect x="316" y="160" width="20" height="28" rx="3"/><rect x="316" y="213" width="20" height="28" rx="3"/>
+      <rect x="316" y="266" width="20" height="62" rx="3"/><rect x="391" y="243" width="16" height="24" rx="3"/>
+    </g>
+    <path d="M119 512c32-75 74-129 134-177 52-42 109-76 184-106l58 30c-68 29-122 62-168 99-49 40-84 88-111 154z" fill="#f7f2e6"/>
+    <path d="M70 512c35-82 80-140 148-194 57-46 121-83 204-117l62 29c-75 32-135 68-185 109-56 46-95 101-125 173z" fill="url(#road)"/>
+    <path d="M153 478c11-23 23-45 38-66m28-39c13-16 28-31 44-45m35-28c15-11 32-21 49-31" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+    <rect x="105" y="226" width="18" height="112" rx="9" fill="#74462e"/>
+    <path d="M114 155c-31 0-56 25-56 56 0 10 3 20 8 29-15 10-24 27-24 45 0 28 23 51 51 51 9 0 18-3 26-7 10 8 23 13 37 13 31 0 56-25 56-56 0-19-10-37-26-47 3-7 5-15 5-23 0-31-25-56-56-56-7 0-14 1-21 4z" fill="#5e9e42"/>
+  </g>
+  <rect x="3" y="3" width="506" height="506" rx="109" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="6"/>
 </svg>

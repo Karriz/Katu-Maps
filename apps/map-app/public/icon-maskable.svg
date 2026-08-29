@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Katu Maps maskable icon</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#74c8f4"/><stop offset="1" stop-color="#c9ecf8"/></linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#40556a"/><stop offset="1" stop-color="#203448"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#sky)"/>
+  <path d="M0 323c94-58 181-59 267-7 90-63 172-61 245-16v212H0z" fill="#94c95a"/>
+  <g fill="#faf9f3" stroke="#e4e3da" stroke-width="4">
+    <path d="M228 209h67v120h-67z"/><path d="M281 164h87v168h-87z"/><path d="M350 235h62v99h-62z"/>
+  </g>
+  <g fill="#72b5c0"><rect x="303" y="191" width="17" height="24" rx="3"/><rect x="303" y="237" width="17" height="24" rx="3"/><rect x="303" y="280" width="17" height="52" rx="3"/></g>
+  <path d="M115 512c31-66 71-114 126-158 48-38 102-69 171-97l49 25c-63 27-113 57-155 91-45 37-78 82-104 139z" fill="#f7f2e6"/>
+  <path d="M75 512c34-73 76-124 137-173 52-42 111-75 186-106l55 26c-68 29-122 62-167 99-50 41-86 92-114 154z" fill="url(#road)"/>
+  <path d="M151 486c10-21 22-41 35-59m28-37c12-14 26-28 41-41m32-25c14-10 29-19 44-27" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
+  <rect x="123" y="250" width="15" height="91" rx="7" fill="#74462e"/>
+  <path d="M130 190c-25 0-46 20-46 46 0 9 2 17 7 24-12 8-20 22-20 37 0 23 19 42 42 42 8 0 15-2 21-6 8 7 19 10 30 10 25 0 46-20 46-46 0-16-8-30-21-39 2-6 4-12 4-19 0-25-20-46-46-46-6 0-12 1-17 3z" fill="#5e9e42"/>
+</svg>
