@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, BusFront, ChevronRight, LocateFixed, RefreshCw, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
+import { ArrowLeft, BusFront, ChevronRight, LocateFixed, RefreshCw, Star, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MAP_COLORS } from './MapPalette';
@@ -114,6 +114,7 @@ export function TransitDeparturesPanel({
   onDepartureBack,
   onFollowRequest,
   onSetDestination,
+  onSaveFavorite,
   isFollowing,
   onDetailOpenChange,
   navigationBackSignal = 0,
@@ -132,6 +133,7 @@ export function TransitDeparturesPanel({
   onDepartureBack?: () => void;
   onFollowRequest?: () => void;
   onSetDestination?: () => void;
+  onSaveFavorite?: () => void;
   isFollowing?: boolean;
   onDetailOpenChange?: (open: boolean) => void;
   navigationBackSignal?: number;
@@ -365,6 +367,9 @@ export function TransitDeparturesPanel({
           <span aria-hidden="true" />
           Live timetable from {transitProviderLabel(stop.provider)}
         </div>
+        <button className="transit-stop-destination-button" type="button" onClick={onSaveFavorite}>
+          <Star aria-hidden="true" /> Save favourite
+        </button>
         <button className="transit-stop-destination-button" type="button" onClick={onSetDestination}>
           Use this stop as destination
         </button>

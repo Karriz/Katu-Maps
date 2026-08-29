@@ -22,6 +22,7 @@ import {
   Landmark,
   Palette,
   MapPin,
+  Star,
   X,
   Clock3,
   ShoppingBag,
@@ -47,6 +48,7 @@ import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
+import { loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -163,6 +165,7 @@ type PhotonFeature = {
     transitStopId?: string;
     transitMode?: string;
     transitProvider?: TransitProviderId;
+    favoriteId?: string;
     [key: string]: unknown;
   };
 };
@@ -522,6 +525,7 @@ export function MapView() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResultsQuery, setSearchResultsQuery] = useState('');
+  const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const [highlightedSearchResults, setHighlightedSearchResults] = useState<PhotonFeature[]>([]);
   const pendingSearchSubmitRef = useRef<string | null>(null);
   const lastSearchFitRef = useRef('');
@@ -576,6 +580,55 @@ export function MapView() {
       return saved ? { ...defaults, ...saved } : defaults;
     } catch { return defaults; }
   });
+
+  useEffect(() => {
+    try { saveFavorites(favorites); } catch { /* local storage can be disabled */ }
+  }, [favorites]);
+
+  const favoriteFeatures = orderedFavorites(favorites, searchQuery).map((favorite): PhotonFeature => ({
+    geometry: { coordinates: favorite.coordinates },
+    properties: {
+      name: favorite.name,
+      city: favorite.address,
+      class: favorite.category,
+      favoriteId: favorite.id,
+      transitStopId: favorite.provider === 'transit' ? favorite.providerId?.split(':').slice(1).join(':') : undefined,
+      transitProvider: favorite.provider === 'transit'
+        ? favorite.providerId?.split(':')[0] as TransitProviderId
+        : undefined,
+    },
+  }));
+  const displayedSearchResults = [
+    ...favoriteFeatures,
+    ...(searchQuery.trim().length >= 2 ? searchResults : []),
+  ].filter((feature, index, all) => all.findIndex((candidate) => (
+    candidate.geometry.coordinates.join(',') === feature.geometry.coordinates.join(',')
+  )) === index).slice(0, 8);
+
+  const saveSelection = (selection: LocationSelection, provider?: string, providerId?: string) => {
+    const suggested = selection.name === 'Map point'
+      ? `${selection.coordinates[1].toFixed(5)}, ${selection.coordinates[0].toFixed(5)}`
+      : selection.name;
+    const name = window.prompt('Name this favourite', suggested)?.trim();
+    if (!name) return;
+    setFavorites((current) => upsertFavorite(current, {
+      id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+      name,
+      coordinates: selection.coordinates,
+      category: selection.category,
+      address: selection.address,
+      provider,
+      providerId,
+      iconId: selection.iconId,
+      kind: 'favorite',
+      createdAt: Date.now(),
+    }));
+  };
+
+  const editFavorite = (favorite: Favorite) => {
+    const name = window.prompt('Rename favourite', favorite.name)?.trim();
+    if (name) setFavorites((current) => current.map((item) => item.id === favorite.id ? { ...item, name } : item));
+  };
 
   const navigationView = transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
@@ -1784,7 +1837,6 @@ export function MapView() {
     (document.activeElement as HTMLElement | null)?.blur();
     if (feature.properties.transitStopId) {
       const coordinates = feature.geometry.coordinates;
-      pendingSearchCameraRef.current = coordinates;
       const stop: TransitStopSelection = {
         stopId: feature.properties.transitStopId,
         name: feature.properties.name ?? 'Transit stop',
@@ -1792,6 +1844,21 @@ export function MapView() {
         coordinates,
         provider: feature.properties.transitProvider ?? 'transitous',
       };
+      const routeTarget = routePickingRef.current;
+      if (routeTarget) {
+        setRouteEndpoint(routeTarget, {
+          name: stop.name,
+          category: 'Transit stop',
+          coordinates,
+          source: 'search',
+          transitStopId: stop.stopId,
+          transitStopProvider: stop.provider,
+        });
+        setSearchQuery('');
+        setSearchResults([]);
+        return;
+      }
+      pendingSearchCameraRef.current = coordinates;
       transitStopsLayerRef.current?.selectSearchStop(stop);
       setSelectedTransitStop(stop);
       setSelectedLocation(null);
@@ -2017,12 +2084,12 @@ export function MapView() {
             searchOpen={searchOpen}
             searchLoading={searchLoading}
             searchError={searchError}
-            searchResults={searchResults.map((feature, index) => {
+            searchResults={displayedSearchResults.map((feature, index) => {
               const { primary, secondary } = photonResultLabel(feature);
               return {
                 id: `${feature.geometry.coordinates.join(':')}-${index}`,
                 primary,
-                secondary,
+                secondary: feature.properties.favoriteId ? `★ Favourite${secondary ? ` · ${secondary}` : ''}` : secondary,
               };
             })}
             onQueryChange={(query) => {
@@ -2061,7 +2128,7 @@ export function MapView() {
               }
             }}
             onSearchResultSelect={(index) => {
-              if (searchResults[index]) selectSearchResult(searchResults[index]);
+              if (displayedSearchResults[index]) selectSearchResult(displayedSearchResults[index]);
             }}
             layersOpen={layersOpen}
             onLayersOpenChange={(open) => {
@@ -2106,6 +2173,10 @@ export function MapView() {
               style={{ left: routeContextMenu.x, top: routeContextMenu.y }}
             >
               <strong>Route here</strong>
+              <button type="button" role="menuitem" onClick={() => {
+                saveSelection({ name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map' });
+                setRouteContextMenu(null);
+              }}>Save as favourite</button>
               <button type="button" role="menuitem" onClick={() => {
                 const selection: LocationSelection = {
                   name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map',
@@ -2168,6 +2239,12 @@ export function MapView() {
                 openRoute();
                 setRouteEndpoint('destination', destination);
               }}
+              onSaveFavorite={() => saveSelection({
+                name: selectedTransitStop.name,
+                category: 'Transit stop',
+                coordinates: selectedTransitStop.coordinates,
+                source: 'map',
+              }, 'transit', `${selectedTransitStop.provider}:${selectedTransitStop.stopId}`)}
               onClose={() => {
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);
@@ -2227,6 +2304,22 @@ export function MapView() {
                 <span className="location-info-source">
                   {selectedLocation.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
                 </span>
+                {(() => {
+                  const favorite = favorites.find((item) => item.id === selectedLocation.osmId
+                    || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
+                  return favorite ? (
+                    <div className="favorite-actions">
+                      <button type="button" onClick={() => editFavorite(favorite)}>Rename</button>
+                      <button type="button" onClick={() => setFavorites((items) => items.filter((item) => item.id !== favorite.id))}>Remove favourite</button>
+                    </div>
+                  ) : (
+                    <button className="route-start-button route-secondary-button" type="button" onClick={() => saveSelection(
+                      selectedLocation,
+                      selectedLocation.osmId ? 'osm' : undefined,
+                      selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
+                    )}><Star size={15} aria-hidden="true" /> Save favourite</button>
+                  );
+                })()}
                 <button className="route-start-button" type="button" onClick={() => {
                   openRoute();
                   setRouteEndpoint('destination', selectedLocation);
@@ -2339,12 +2432,12 @@ export function MapView() {
                           Map
                         </button>
                       </div>
-                      {routeSearchTarget === kind && searchQuery.trim().length >= 2 && (
+                      {routeSearchTarget === kind && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && (
                         <div className="route-search-results" role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
                           {searchLoading && <div className="route-search-message">Searching…</div>}
                           {!searchLoading && searchError && <div className="route-search-message">{searchError}</div>}
-                          {!searchLoading && !searchError && searchResults.length === 0 && <div className="route-search-message">No places found</div>}
-                          {!searchLoading && searchResults.map((feature, index) => {
+                          {!searchLoading && !searchError && displayedSearchResults.length === 0 && <div className="route-search-message">No places found</div>}
+                          {!searchLoading && displayedSearchResults.map((feature, index) => {
                             const { primary, secondary } = photonResultLabel(feature);
                             return (
                               <button
