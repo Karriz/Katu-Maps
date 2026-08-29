@@ -55,7 +55,7 @@ import { DistanceMeasurementController, formatDistance, type Measurement } from 
 import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
-import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
+import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -185,6 +185,7 @@ type LocationSelection = {
   source: 'search' | 'map';
   transitStopId?: string;
   transitStopProvider?: TransitProviderId;
+  transitMode?: string;
   openingHours?: string;
   phone?: string;
   email?: string;
@@ -540,7 +541,7 @@ export function MapView() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [orientationChanged, setOrientationChanged] = useState(false);
-  const [selectedTransitStop, setSelectedTransitStop] = useState<TransitStopSelection | null>(null);
+  const [selectedTransitStop, setSelectedTransitStop] = useState<(TransitStopSelection & { favoriteId?: string }) | null>(null);
   const [transitDepartureDetailOpen, setTransitDepartureDetailOpen] = useState(false);
   const [transitNavigationBackSignal, setTransitNavigationBackSignal] = useState(0);
   const vehicleFollowEnabledRef = useRef(false);
@@ -558,6 +559,7 @@ export function MapView() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResultsQuery, setSearchResultsQuery] = useState('');
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
+  const favoritesRef = useRef(favorites);
   const [pendingFavorite, setPendingFavorite] = useState<{
     selection: LocationSelection;
     provider?: string;
@@ -574,7 +576,8 @@ export function MapView() {
   const [routePicking, setRoutePicking] = useState<'origin' | 'destination' | null>(null);
   const [routeSearchTarget, setRouteSearchTarget] = useState<'origin' | 'destination' | null>(null);
   const [routeContextMenu, setRouteContextMenu] = useState<{ x: number; y: number; coordinates: [number, number] } | null>(null);
-  const [positionInformation, setPositionInformation] = useState<{ coordinates: [number, number]; elevation: ElevationState } | null>(null);
+  const [contextMenuMarker, setContextMenuMarker] = useState<[number, number] | null>(null);
+  const [positionInformation, setPositionInformation] = useState<{ coordinates: [number, number]; elevation: ElevationState; favoriteId?: string } | null>(null);
   const elevationRequestRef = useRef(0);
   const measurementControllerRef = useRef<DistanceMeasurementController | null>(null);
   const [measurement, setMeasurement] = useState<Measurement | null>(null);
@@ -623,6 +626,7 @@ export function MapView() {
   });
 
   useEffect(() => {
+    favoritesRef.current = favorites;
     try { saveFavorites(favorites); } catch { /* local storage can be disabled */ }
   }, [favorites]);
 
@@ -664,10 +668,12 @@ export function MapView() {
       city: favorite.address,
       class: favorite.category,
       favoriteId: favorite.id,
-      transitStopId: favorite.provider === 'transit' ? favorite.providerId?.split(':').slice(1).join(':') : undefined,
-      transitProvider: favorite.provider === 'transit'
-        ? favorite.providerId?.split(':')[0] as TransitProviderId
-        : undefined,
+      transitStopId: favorite.transitStopId ?? (favorite.provider === 'transit' ? favorite.providerId?.split(':').slice(1).join(':') : undefined),
+      transitProvider: (favorite.transitProvider ?? (favorite.provider === 'transit'
+        ? favorite.providerId?.split(':')[0]
+        : undefined)) as TransitProviderId | undefined,
+      transitMode: favorite.transitMode,
+      favoriteEntityType: favorite.entityType,
     },
   }));
   const displayedSearchResults = [
@@ -700,10 +706,21 @@ export function MapView() {
       provider,
       providerId,
       iconId: selection.iconId,
+      entityType: selection.transitStopId ? 'transit-stop' : selection.osmId ? 'place' : 'position',
+      transitStopId: selection.transitStopId,
+      transitProvider: selection.transitStopProvider,
+      transitMode: selection.transitMode,
+      osmType: selection.osmType,
+      osmId: selection.osmId,
+      openingHours: selection.openingHours,
+      phone: selection.phone,
+      email: selection.email,
+      website: selection.website,
       kind,
       createdAt: Date.now(),
     }));
     setPendingFavorite(null);
+    setContextMenuMarker(null);
   };
 
   const editFavorite = (favorite: Favorite) => {
@@ -1135,6 +1152,7 @@ export function MapView() {
     setSelectedLocation(null);
     setSelectedTransitStop(null);
     setRouteContextMenu(null);
+    setContextMenuMarker(null);
     measurementControllerRef.current = new DistanceMeasurementController(map, start, setMeasurement);
   }
 
@@ -1310,6 +1328,7 @@ export function MapView() {
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
       setRouteContextMenu(null);
+      if (!positionInformation && !pendingFavorite) setContextMenuMarker(null);
       const locationLayers = ['favorite-icons', 'search-result-icons', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
       const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
       if (routePickingRef.current) {
@@ -1324,15 +1343,30 @@ export function MapView() {
         return;
       }
       if (!feature || feature.layer.id === 'selected-location-icon') return;
+      const favoriteId = typeof feature.properties?.favoriteId === 'string' ? feature.properties.favoriteId : undefined;
+      const favorite = favoriteId ? favoritesRef.current.find((item) => item.id === favoriteId) : undefined;
+      const favoriteEntityType = favorite ? resolvedFavoriteEntityType(favorite) : undefined;
+      if (favorite && favoriteEntityType === 'position') {
+        setPositionInformation({ coordinates: favorite.coordinates, elevation: { status: 'loading' }, favoriteId: favorite.id });
+        return;
+      }
       const selection = locationSelectionFromFeature(feature);
+      if (favorite) Object.assign(selection, {
+        name: favorite.name, category: favorite.category, address: favorite.address,
+        iconId: favorite.iconId, favoriteId: favorite.id, osmType: favorite.osmType, osmId: favorite.osmId,
+        openingHours: favorite.openingHours, phone: favorite.phone, email: favorite.email, website: favorite.website,
+        transitStopId: favorite.transitStopId ?? (favorite.provider === 'transit' ? favorite.providerId?.split(':').slice(1).join(':') : undefined),
+        transitStopProvider: (favorite.transitProvider ?? (favorite.provider === 'transit' ? favorite.providerId?.split(':')[0] : undefined)) as TransitProviderId | undefined,
+      });
       if (selection.coordinates[0] === 0 && selection.coordinates[1] === 0) return;
       if (selection.transitStopId) {
-        const stop: TransitStopSelection = {
+        const stop: TransitStopSelection & { favoriteId?: string } = {
           stopId: selection.transitStopId,
           name: selection.name,
           mode: selection.transitStopProvider ? String(feature.properties.transitMode ?? 'TRANSIT').split(',')[0] : 'TRANSIT',
           coordinates: selection.coordinates,
           provider: selection.transitStopProvider ?? 'transitous',
+          favoriteId: favorite?.id,
         };
         transitStopsLayerRef.current?.selectSearchStop(stop);
         setSelectedTransitStop(stop);
@@ -1364,6 +1398,7 @@ export function MapView() {
     };
     const showRouteContextMenu = (point: Point, coordinates: [number, number]) => {
       const container = map.getContainer();
+      setContextMenuMarker(coordinates);
       setRouteContextMenu({
         x: Math.min(Math.max(point.x, 12), container.clientWidth - 220),
         y: Math.min(Math.max(point.y, 12), container.clientHeight - 130),
@@ -1911,8 +1946,8 @@ export function MapView() {
 
   useEffect(() => {
     const source = mapRef.current?.getSource('context-menu-location') as { setData: (data: unknown) => void } | undefined;
-    source?.setData(markerFeatureCollection(routeContextMenu?.coordinates ?? null, 'temporary'));
-  }, [routeContextMenu, mapLoaded]);
+    source?.setData(markerFeatureCollection(contextMenuMarker, 'temporary'));
+  }, [contextMenuMarker, mapLoaded]);
 
   const enrichLocationDetails = async (selection: LocationSelection) => {
     const lookupKey = selection.osmType && selection.osmId
@@ -2042,14 +2077,25 @@ export function MapView() {
     const map = mapRef.current;
     if (!map) return;
     (document.activeElement as HTMLElement | null)?.blur();
-    if (feature.properties.transitStopId && !feature.properties.favoriteId) {
+    const favorite = feature.properties.favoriteId
+      ? favorites.find((item) => item.id === feature.properties.favoriteId)
+      : undefined;
+    const favoriteEntityType = favorite ? resolvedFavoriteEntityType(favorite) : undefined;
+    if (favorite && favoriteEntityType === 'position') {
+      setPositionInformation({ coordinates: favorite.coordinates, elevation: { status: 'loading' }, favoriteId: favorite.id });
+      setSearchOpen(false);
+      setHighlightedSearchResults([]);
+      return;
+    }
+    if (feature.properties.transitStopId) {
       const coordinates = feature.geometry.coordinates;
-      const stop: TransitStopSelection = {
+      const stop: TransitStopSelection & { favoriteId?: string } = {
         stopId: feature.properties.transitStopId,
         name: feature.properties.name ?? 'Transit stop',
         mode: feature.properties.transitMode?.split(',')[0] || 'TRANSIT',
         coordinates,
         provider: feature.properties.transitProvider ?? 'transitous',
+        favoriteId: favorite?.id,
       };
       const routeTarget = routePickingRef.current;
       if (routeTarget) {
@@ -2090,6 +2136,18 @@ export function MapView() {
       osmType: typeof properties.osm_type === 'string' ? properties.osm_type : undefined,
       osmId: properties.osm_id as string | number | undefined,
     };
+    if (favorite) Object.assign(selection, {
+      name: favorite.name,
+      category: favorite.category,
+      address: favorite.address,
+      iconId: favorite.iconId,
+      osmType: favorite.osmType,
+      osmId: favorite.osmId,
+      openingHours: favorite.openingHours,
+      phone: favorite.phone,
+      email: favorite.email,
+      website: favorite.website,
+    });
     const routeTarget = routePickingRef.current;
     if (routeTarget) {
       locationDetailsAbortRef.current?.abort();
@@ -2396,6 +2454,7 @@ export function MapView() {
                   name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map',
                 };
                 openRoute();
+                setContextMenuMarker(null);
                 setRouteEndpoint('destination', selection);
               }}>Route to here</button>
               <button type="button" role="menuitem" onClick={() => {
@@ -2403,13 +2462,17 @@ export function MapView() {
                   name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map',
                 };
                 openRoute();
+                setContextMenuMarker(null);
                 setRouteEndpoint('origin', selection);
               }}>Route from here</button>
             </div>
           )}
           {positionInformation && (
             <aside className="position-information" role="dialog" aria-modal="true" aria-labelledby="position-information-title">
-              <button className="location-info-close" type="button" aria-label="Close position information" onClick={() => setPositionInformation(null)}>×</button>
+              <button className="location-info-close" type="button" aria-label="Close position information" onClick={() => {
+                setPositionInformation(null);
+                setContextMenuMarker(null);
+              }}>×</button>
               <div className="position-information-heading">
                 <span className="location-info-icon" aria-hidden="true"><Mountain size={20} /></span>
                 <div><span className="location-info-category">Map point</span><h2 id="position-information-title">Position information</h2></div>
@@ -2431,6 +2494,16 @@ export function MapView() {
                 {positionInformation.elevation.status === 'unavailable' && <span>Elevation unavailable</span>}
               </div>
               <small>Ground surface from the configured terrain DEM. Availability depends on terrain coverage and loaded tiles.</small>
+              {positionInformation.favoriteId && (() => {
+                const favorite = favorites.find((item) => item.id === positionInformation.favoriteId);
+                return favorite ? <div className="favorite-actions">
+                  <button type="button" onClick={() => editFavorite(favorite)}>Edit favourite</button>
+                  <button type="button" onClick={() => {
+                    setFavorites((items) => items.filter((item) => item.id !== favorite.id));
+                    setPositionInformation(null);
+                  }}>Remove favourite</button>
+                </div> : null;
+              })()}
             </aside>
           )}
           {measurement && (
@@ -2445,10 +2518,10 @@ export function MapView() {
           )}
           {pendingFavorite && (
             <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setPendingFavorite(null);
+              if (event.target === event.currentTarget) { setPendingFavorite(null); setContextMenuMarker(null); }
             }}>
               <section className="favorite-menu" role="dialog" aria-modal="true" aria-labelledby="favorite-menu-title">
-                <button className="favorite-menu-close" type="button" aria-label="Close" onClick={() => setPendingFavorite(null)}>
+                <button className="favorite-menu-close" type="button" aria-label="Close" onClick={() => { setPendingFavorite(null); setContextMenuMarker(null); }}>
                   <X size={18} aria-hidden="true" />
                 </button>
                 <span className="favorite-menu-eyebrow">Save place</span>
@@ -2519,7 +2592,18 @@ export function MapView() {
                 category: 'Transit stop',
                 coordinates: selectedTransitStop.coordinates,
                 source: 'map',
+                transitStopId: selectedTransitStop.stopId,
+                transitStopProvider: selectedTransitStop.provider,
+                transitMode: selectedTransitStop.mode,
               }, 'transit', `${selectedTransitStop.provider}:${selectedTransitStop.stopId}`)}
+              onEditFavorite={selectedTransitStop.favoriteId ? () => {
+                const favorite = favorites.find((item) => item.id === selectedTransitStop.favoriteId);
+                if (favorite) editFavorite(favorite);
+              } : undefined}
+              onRemoveFavorite={selectedTransitStop.favoriteId ? () => {
+                setFavorites((items) => items.filter((item) => item.id !== selectedTransitStop.favoriteId));
+                setSelectedTransitStop((stop) => stop ? { ...stop, favoriteId: undefined } : stop);
+              } : undefined}
               onClose={() => {
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);

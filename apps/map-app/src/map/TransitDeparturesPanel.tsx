@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, BusFront, ChevronRight, LocateFixed, RefreshCw, Star, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
+import { ArrowLeft, BusFront, ChevronRight, LocateFixed, Pencil, RefreshCw, Star, Trash2, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MAP_COLORS } from './MapPalette';
@@ -115,6 +115,8 @@ export function TransitDeparturesPanel({
   onFollowRequest,
   onSetDestination,
   onSaveFavorite,
+  onEditFavorite,
+  onRemoveFavorite,
   isFollowing,
   onDetailOpenChange,
   navigationBackSignal = 0,
@@ -134,6 +136,8 @@ export function TransitDeparturesPanel({
   onFollowRequest?: () => void;
   onSetDestination?: () => void;
   onSaveFavorite?: () => void;
+  onEditFavorite?: () => void;
+  onRemoveFavorite?: () => void;
   isFollowing?: boolean;
   onDetailOpenChange?: (open: boolean) => void;
   navigationBackSignal?: number;
@@ -367,9 +371,16 @@ export function TransitDeparturesPanel({
           <span aria-hidden="true" />
           Live timetable from {transitProviderLabel(stop.provider)}
         </div>
-        <button className="transit-stop-destination-button favorite-save-button" type="button" onClick={onSaveFavorite}>
-          <Star aria-hidden="true" /> Save favourite
-        </button>
+        {onRemoveFavorite ? (
+          <div className="favorite-actions">
+            <button type="button" onClick={onEditFavorite}><Pencil aria-hidden="true" /> Edit favourite</button>
+            <button type="button" onClick={onRemoveFavorite}><Trash2 aria-hidden="true" /> Remove favourite</button>
+          </div>
+        ) : (
+          <button className="transit-stop-destination-button favorite-save-button" type="button" onClick={onSaveFavorite}>
+            <Star aria-hidden="true" /> Save favourite
+          </button>
+        )}
         <button className="transit-stop-destination-button" type="button" onClick={onSetDestination}>
           Use this stop as destination
         </button>
