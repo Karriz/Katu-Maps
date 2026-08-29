@@ -282,6 +282,15 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-context-menu strong { border-bottom: 1px solid var(--color-line); color: var(--color-muted); font-size: 0.68rem; letter-spacing: 0.06em; padding: 10px 13px 8px; text-transform: uppercase; }
 .map-context-menu button { background: transparent; border: 0; color: var(--color-ink); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 11px 13px; text-align: left; }
 .map-context-menu button:hover, .map-context-menu button:focus-visible { background: var(--surface-hover); color: var(--color-accent); outline: 0; }
+.position-information { backdrop-filter: blur(20px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: var(--radius-card); box-shadow: var(--shadow-card); color: var(--color-ink); padding: 22px; position: absolute; right: 28px; top: 28px; width: min(350px, calc(100% - 56px)); z-index: 160; }
+.position-information-heading { align-items: center; display: flex; gap: 12px; margin-bottom: 18px; padding-right: 28px; }
+.position-information-heading .location-info-icon { background: var(--color-accent); }
+.position-information h2 { font-size: 1.12rem; margin: 4px 0 0; }
+.position-information-field { border-top: 1px solid var(--color-line); display: flex; flex-direction: column; gap: 4px; padding: 12px 0; }
+.position-information-field strong { color: #64748b; font-size: 0.65rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.position-information-field span { font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.position-copy { align-items: center; background: #eef5ff; border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.76rem; font-weight: 700; gap: 7px; padding: 8px 10px; }
+.position-information small { color: #94a3b8; display: block; font-size: 0.68rem; line-height: 1.4; margin-top: 3px; }
 .terrain-toggle { background: #f4fbff; border: 1px solid #86aac2; border-radius: 8px; color: #163047; cursor: pointer; font: inherit; font-size: 0.8rem; padding: 8px 10px; position: absolute; right: 16px; top: 84px; z-index: 1; }
 .terrain-toggle:hover { background: #dff3ff; }
 .terrain-toggle[aria-pressed='true'] { background: #b9e6ff; border-color: #4f9ac5; }
