@@ -20,6 +20,7 @@ import {
   type TransitTripLeg,
   type TransitTripPlace,
 } from './transit';
+import { resolveSelectedTrip, tripIsDisplayableAt } from './transit/tripTimeline';
 
 const TRANSIT_SOURCE_ID = 'transit-stops';
 const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
@@ -772,19 +773,26 @@ export class TransitStopsLayer {
         || this.selectedTrip.serviceDate !== selection.serviceDate
       ) return;
 
-      const estimatedLegs: EstimatedTripLeg[] = [];
-      const features = payload.legs.flatMap((leg): RouteLineFeature[] => {
-        if (String(leg.tripId ?? '') !== selection.tripId) return [];
-        const coordinates = leg.coordinates;
-        if (coordinates.length < 2) return [];
-        const estimatedLeg = buildEstimatedTripLeg(leg, coordinates);
-        if (estimatedLeg) estimatedLegs.push(estimatedLeg);
-        return [{
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates },
-          properties: { color: selection.color },
-        }];
+      const validatesBoardingStop = selection.boardingStop && !selection.boardingStop.stopId.startsWith('route-origin:');
+      const resolved = resolveSelectedTrip(payload, {
+        tripId: selection.tripId,
+        provider: selection.provider,
+        serviceDate: selection.serviceDate,
+        boardingStopId: validatesBoardingStop ? selection.boardingStop?.stopId : undefined,
+        selectedDeparture: validatesBoardingStop && Number.isFinite(selection.boardingStop?.departureTime)
+          ? new Date(selection.boardingStop!.departureTime).toISOString() : undefined,
       });
+      const estimatedLegs: EstimatedTripLeg[] = [];
+      const features: RouteLineFeature[] = resolved && resolved.leg.coordinates.length >= 2
+        ? [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: resolved.leg.coordinates },
+          properties: { color: selection.color },
+        }] : [];
+      if (resolved) {
+        const estimatedLeg = buildEstimatedTripLeg(resolved.leg, resolved.leg.coordinates);
+        if (estimatedLeg) estimatedLegs.push(estimatedLeg);
+      }
       this.estimatedTripLegs = estimatedLegs;
       const source = this.map.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
       source?.setData(selection.showRoute ? { type: 'FeatureCollection', features } : emptyRouteCollection());
@@ -802,18 +810,19 @@ export class TransitStopsLayer {
     const now = Date.now();
     const activeLeg = this.estimatedTripLegs.find((leg) => (
       now >= leg.anchors[0].time && now <= leg.anchors[leg.anchors.length - 1].time
-    )) ?? this.estimatedTripLegs.find((leg) => now < leg.anchors[0].time)
-      ?? this.estimatedTripLegs[this.estimatedTripLegs.length - 1];
-    const pose = activeLeg
+    )) ?? this.estimatedTripLegs.find((leg) => now < leg.anchors[0].time);
+    const displayableLeg = activeLeg && tripIsDisplayableAt(activeLeg.anchors.map((anchor) => anchor.time), now)
+      ? activeLeg : undefined;
+    const pose = displayableLeg
       ? estimatedVehiclePose(
-        activeLeg,
+        displayableLeg,
         now,
         this.selectedTrip.mode,
         this.selectedTrip.color,
         this.selectedTrip.boardingStop,
       )
       : undefined;
-    if (!activeLeg || !pose) {
+    if (!displayableLeg || !pose) {
       source.setData(emptyCollection());
       this.onVehiclePose?.(null);
       return;
@@ -826,7 +835,7 @@ export class TransitStopsLayer {
         geometry: { type: 'Point', coordinates },
         properties: {
           color: this.selectedTrip.color,
-          label: activeLeg.realTime ? 'Estimated · realtime' : 'Estimated · schedule',
+          label: displayableLeg.realTime ? 'Estimated · realtime' : 'Estimated · schedule',
         },
       }],
     });

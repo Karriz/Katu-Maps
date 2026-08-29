@@ -498,6 +498,7 @@ export function MapView() {
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
+  const plannedVehicleTripRef = useRef<string | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -690,12 +691,26 @@ export function MapView() {
 
   const showTransitLegVehicle = (result: RouteResult) => {
     if (routeMode !== 'transit') return;
+    const now = Date.now();
+    const vehicleLegs = result.transitLegs?.filter((candidate) => (
+      candidate.tripId && !['WALK', 'FOOT'].includes(candidate.mode)
+    )) ?? [];
+    const leg = vehicleLegs.find((candidate) => {
+      const start = candidate.startTime ? Date.parse(candidate.startTime) : NaN;
+      const end = candidate.endTime ? Date.parse(candidate.endTime) : NaN;
+      return Number.isFinite(start) && Number.isFinite(end) && now >= start && now <= end;
+    }) ?? vehicleLegs.find((candidate) => {
+      const start = candidate.startTime ? Date.parse(candidate.startTime) : NaN;
+      return Number.isFinite(start) && now < start;
+    });
+    const nextTripKey = leg?.tripId
+      ? `${leg.provider}:${leg.tripId}:${leg.serviceDate ?? ''}:${leg.startTime ?? ''}`
+      : null;
+    if (plannedVehicleTripRef.current === nextTripKey) return;
+    plannedVehicleTripRef.current = nextTripKey;
     vehicleFollowEnabledRef.current = false;
     setVehicleFollowing(false);
     setVehicleFollowAvailable(false);
-    const leg = result.transitLegs?.find((candidate) => (
-      candidate.tripId && !['WALK', 'FOOT'].includes(candidate.mode)
-    ));
     if (leg?.tripId) {
       void transitStopsLayerRef.current?.selectTrip(
         leg.tripId,
@@ -710,8 +725,16 @@ export function MapView() {
           departure: leg.startTime,
         } : undefined,
       );
+    } else {
+      transitStopsLayerRef.current?.clearTrip();
     }
   };
+
+  useEffect(() => {
+    if (!routeResult || routeMode !== 'transit') return;
+    const timer = window.setInterval(() => showTransitLegVehicle(routeResult), 30_000);
+    return () => window.clearInterval(timer);
+  }, [routeMode, routeResult]);
 
   const requestRoute = async (origin: [number, number], destination: [number, number]) => {
     routeAbortRef.current?.abort();
