@@ -52,6 +52,7 @@ import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { elevationResult, formatCoordinates, formatElevation, queryTerrainElevation, type ElevationState } from './PositionInformation';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
+import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -949,9 +950,10 @@ export function MapView() {
     vehicleFollowEnabledRef.current = false;
     setVehicleFollowing(false);
     setVehicleFollowAvailable(false);
-    if (!routeOriginSelection) {
-      routeOriginRef.current = null;
-      setRouteOriginSelection({ name: 'Your location', category: 'Current location', coordinates: [0, 0], source: 'map' });
+    const availableGps = availableGpsEndpoint(userLocationRef.current);
+    if (!routeOriginSelection && availableGps) {
+      routeOriginRef.current = availableGps.coordinates;
+      setRouteOriginSelection(availableGps);
     }
     if (isMobile) {
       setSelectedLocation(null);
@@ -960,6 +962,51 @@ export function MapView() {
         type: 'FeatureCollection', features: [],
       });
     }
+  };
+
+  const selectYourLocation = (kind: 'origin' | 'destination') => {
+    setRouteError(null);
+    const applyLocation = (coordinates: [number, number]) => {
+      userLocationRef.current = coordinates;
+      (mapRef.current?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: { kind: 'gps' } }],
+      });
+      setRouteEndpoint(kind, { name: 'Your location', category: 'Current location', coordinates, source: 'map' });
+    };
+    if (userLocationRef.current) {
+      applyLocation(userLocationRef.current);
+      return;
+    }
+    if (!navigator.geolocation) {
+      setRouteError('Your location is not available in this browser. Choose another point.');
+      return;
+    }
+    setRouteLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setRouteLoading(false);
+        applyLocation([coords.longitude, coords.latitude]);
+        if (userLocationWatchRef.current === null) {
+          userLocationWatchRef.current = navigator.geolocation.watchPosition(
+            ({ coords: update }) => {
+              const coordinates: [number, number] = [update.longitude, update.latitude];
+              userLocationRef.current = coordinates;
+              (mapRef.current?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+                type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: { kind: 'gps' } }],
+              });
+            },
+            () => undefined,
+            { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
+          );
+        }
+      },
+      () => {
+        setRouteLoading(false);
+        setRouteError('We could not access your location. Choose another point or try again.');
+      },
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
   };
 
   const setRouteEndpoint = (kind: 'origin' | 'destination', selection: LocationSelection) => {
@@ -1413,6 +1460,10 @@ export function MapView() {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+      map.addSource('context-menu-location', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
       map.addSource('selected-route', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -1465,6 +1516,20 @@ export function MapView() {
           'circle-color': ['match', ['get', 'kind'], 'origin', '#1c9b61', '#e15858'],
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
+        },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'context-menu-location-halo', type: 'circle', source: 'context-menu-location',
+        paint: {
+          'circle-radius': 13, 'circle-color': '#ffffff', 'circle-opacity': 0.98,
+          'circle-stroke-color': '#64748b', 'circle-stroke-width': 2,
+        },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'context-menu-location-dot', type: 'circle', source: 'context-menu-location',
+        paint: {
+          'circle-radius': 7, 'circle-color': '#64748b',
+          'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
         },
       }, poiLayers.before);
       map.addLayer({
@@ -1843,6 +1908,11 @@ export function MapView() {
     if (!source) return;
     source.setData({ type: 'FeatureCollection', features: favoriteMapFeatures(favorites) });
   }, [favorites, mapLoaded]);
+
+  useEffect(() => {
+    const source = mapRef.current?.getSource('context-menu-location') as { setData: (data: unknown) => void } | undefined;
+    source?.setData(markerFeatureCollection(routeContextMenu?.coordinates ?? null, 'temporary'));
+  }, [routeContextMenu, mapLoaded]);
 
   const enrichLocationDetails = async (selection: LocationSelection) => {
     const lookupKey = selection.osmType && selection.osmId
@@ -2639,12 +2709,20 @@ export function MapView() {
                           Map
                         </button>
                       </div>
-                      {routeSearchTarget === kind && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && (
+                      {routeSearchTarget === kind && (
                         <div className="route-search-results" role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
+                          <button
+                            className="route-search-result route-search-current-location"
+                            type="button"
+                            onClick={() => selectYourLocation(kind)}
+                          >
+                            <strong>Your location</strong>
+                            <span>{userLocationRef.current ? 'Use current GPS position' : 'Request location access'}</span>
+                          </button>
                           {searchLoading && <div className="route-search-message">Searching…</div>}
                           {!searchLoading && searchError && <div className="route-search-message">{searchError}</div>}
-                          {!searchLoading && !searchError && displayedSearchResults.length === 0 && <div className="route-search-message">No places found</div>}
-                          {!searchLoading && displayedSearchResults.map((feature, index) => {
+                          {!searchLoading && !searchError && searchQuery.trim().length >= 2 && displayedSearchResults.length === 0 && <div className="route-search-message">No places found</div>}
+                          {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
                             const { primary, secondary } = photonResultLabel(feature);
                             return (
                               <button
