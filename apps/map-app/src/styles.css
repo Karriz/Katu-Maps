@@ -80,10 +80,13 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-follow-button:hover { background: #dceaff; }
 .transit-follow-button[aria-pressed='true'] { background: #dff7e8; border-color: #a9dfbc; color: #17804a; }
 .transit-follow-button svg { height: 14px; width: 14px; }
-.transit-stop-destination-button { background: #fff; border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 750; margin: 12px 20px 0; padding: 9px 11px; }
+.transit-stop-destination-button { align-items: center; background: #fff; border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.7rem; font-weight: 750; gap: 5px; justify-content: center; margin: 0; min-width: 0; padding: 7px 8px; }
 .transit-stop-destination-button:hover { background: var(--color-accent-soft); }
-.share-button { align-items: center; display: flex; gap: 6px; justify-content: center; }
-.share-button svg { height: 16px; width: 16px; }
+.panel-primary-actions { display: flex; gap: 7px; margin-top: 10px; width: 100%; }
+.panel-primary-actions > button { flex: 1 1 0; margin: 0; min-height: 34px; padding: 7px 6px; width: auto; }
+.panel-primary-actions svg, .share-button svg { flex: 0 0 auto; height: 15px; margin: 0; width: 15px; }
+.panel-primary-actions > .panel-icon-action { align-items: center; background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; flex: 0 0 34px; justify-content: center; padding: 0; }
+.panel-primary-actions > .panel-icon-action:hover { background: var(--color-accent-soft); }
 .transit-trip-stop-heading { align-items: baseline; display: flex; justify-content: space-between; padding: 15px 20px 11px; }
 .transit-trip-stop-heading strong { font-size: 0.77rem; }
 .transit-trip-stop-heading span { color: var(--color-muted); font-size: 0.67rem; }
@@ -182,13 +185,17 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-retry-button:disabled { background: #cbd5e1; cursor: not-allowed; }
 .route-selection-banner { align-items: center; background: rgb(255 255 255 / 96%); border: 1px solid #b9d4fb; border-radius: 12px; box-shadow: 0 8px 24px rgb(66 75 72 / 13%); color: #263449; display: flex; gap: 9px; left: 50%; padding: 10px 12px; position: absolute; top: 16px; transform: translateX(-50%); z-index: 5; }
 .route-selection-banner span { color: #64748b; font-size: 0.75rem; }
-.route-selection-banner button, .route-panel-heading button { background: transparent; border: 0; color: #64748b; cursor: pointer; font: inherit; }
+.route-selection-banner button { background: transparent; border: 0; color: #64748b; cursor: pointer; font: inherit; }
 .route-panel { background: rgb(255 255 255 / 98%); border: 1px solid #d9e1eb; border-radius: 18px; box-shadow: var(--shadow-card); color: #263449; left: 28px; padding: 20px; position: absolute; top: 28px; width: min(380px, calc(100% - 56px)); z-index: 100; }
 .mobile-sheet-handle { display: none; }
 .route-panel-heading { align-items: flex-start; display: flex; justify-content: space-between; }
 .route-panel-heading div { display: flex; flex-direction: column; gap: 2px; }
 .route-panel-heading strong { font-size: 1.05rem; }
 .route-panel-heading span { color: #94a3b8; font-size: 0.72rem; }
+.route-panel-close { align-items: center; background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: #64748b; cursor: pointer; display: flex; flex: 0 0 auto; height: 34px; justify-content: center; padding: 0; width: 34px; }
+.route-panel-close:hover { background: #fff; color: var(--color-accent); }
+.route-panel-close:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
+.route-panel-close svg { height: 17px; width: 17px; }
 .route-endpoints { display: grid; gap: 10px; margin-top: 16px; }
 .route-endpoint-group { min-width: 0; position: relative; }
 .route-search-field { align-items: center; background: #f8fafc; border: 1px solid #dbe4ee; border-radius: 11px; display: flex; gap: 10px; min-height: 48px; padding: 5px 7px 5px 12px; }
