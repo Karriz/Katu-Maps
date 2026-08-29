@@ -2817,7 +2817,7 @@ export function MapView() {
                   });
                 }}
               >
-                ×
+                <X aria-hidden="true" />
               </button>
             </aside>
           )}

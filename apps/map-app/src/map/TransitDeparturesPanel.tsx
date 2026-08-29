@@ -302,9 +302,11 @@ export function TransitDeparturesPanel({
             <ArrowLeft aria-hidden="true" />
             <span>All departures</span>
           </button>
-          <button className="transit-panel-close" type="button" aria-label="Close departures" onClick={onClose}>
-            <X aria-hidden="true" />
-          </button>
+          <div className="transit-panel-actions">
+            <button className="transit-panel-close" type="button" aria-label="Close departures" onClick={onClose}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
           <div className="transit-trip-summary">
             <div className="transit-route-badge" style={{ backgroundColor: normalizedColor(selectedDeparture.routeColor, modeColor(detailMode)), color: '#fff' }}>
               {detailRoute}
@@ -370,9 +372,14 @@ export function TransitDeparturesPanel({
           <StopIcon aria-hidden="true" />
           <span>Departures</span>
         </div>
-        <button className="transit-panel-close" type="button" aria-label="Close departures" onClick={onClose}>
-          <X aria-hidden="true" />
-        </button>
+        <div className="transit-panel-actions">
+          <button className="transit-panel-refresh" type="button" aria-label="Refresh departures" onClick={refresh}>
+            <RefreshCw className={refreshing ? 'spinning' : ''} aria-hidden="true" />
+          </button>
+          <button className="transit-panel-close" type="button" aria-label="Close departures" onClick={onClose}>
+            <X aria-hidden="true" />
+          </button>
+        </div>
         <h2>{stop.name}</h2>
         <div className="transit-panel-status">
           <span aria-hidden="true" />
@@ -393,9 +400,6 @@ export function TransitDeparturesPanel({
         </button>
         <button className="transit-stop-destination-button share-button" type="button" onClick={onShare}>
           <Share2 aria-hidden="true" /> Share stop
-        </button>
-        <button className="transit-panel-refresh" type="button" aria-label="Refresh departures" onClick={refresh}>
-          <RefreshCw className={refreshing ? 'spinning' : ''} aria-hidden="true" />
         </button>
       </header>
 
