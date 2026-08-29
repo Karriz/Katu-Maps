@@ -48,6 +48,33 @@ The production build separates the application, React, Three.js, MapLibre, and
 other dependencies into independently cacheable chunks. This keeps ordinary
 style and UI changes out of the large stable renderer bundles.
 
+## Visual review suite
+
+The Playwright suite renders Chromium with ANGLE/SwiftShader and checks WebGL2
+explicitly before waiting for the map. Install Chromium once, then run all
+scenarios or select one by its descriptive name:
+
+```sh
+npx playwright install --with-deps chromium
+npm run test:visual
+npm run test:visual:scenario -- phone-search-autocomplete
+```
+
+Open `test-results/visual-report/index.html` after the run. The self-contained
+gallery links to full-size PNG files and records the scenario, viewport, fixture,
+browser, MapLibre and WebGL diagnostics, console errors, and failed requests.
+Search responses and the clock are fixed by the test. Hosted map tiles remain
+external because maintaining a vector-tile pipeline solely for screenshots
+would be disproportionate; a tile outage therefore fails readiness instead of
+capturing a permanently loading screen.
+
+These images are intended to review hierarchy, spacing, responsive panels,
+overlap, route fitting, and marker/label relationships. SwiftShader does not
+measure phone frame rate, thermals, gestures, physical GPS, vendor GPU drivers,
+or Samsung/Chromium atlas corruption. The CI job is initially non-blocking;
+make it required only after tile availability and rendering variance have been
+stable over a representative run history.
+
 ## Attribution and service expectations
 
 MapLibre's attribution control displays the OpenFreeMap, OpenMapTiles,

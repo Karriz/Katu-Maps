@@ -1,0 +1,43 @@
+name: Visual UI review
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-review:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps/map-app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/map-app/package-lock.json
+      - run: npm ci
+      - name: Cache Playwright browser
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/map-app/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - name: Capture visual scenarios
+        run: npm run test:visual
+      - name: Add report location to summary
+        if: always()
+        run: echo 'Download the **katu-maps-visual-report** artifact and open `index.html`.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload review report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: katu-maps-visual-report
+          path: apps/map-app/test-results/visual-report
+          if-no-files-found: warn
+          retention-days: 14
