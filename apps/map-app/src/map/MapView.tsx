@@ -48,6 +48,7 @@ import { fetchValhallaRoute, type RouteMode, type RouteResult } from './Valhalla
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
+import { DistanceMeasurement, formatMeasuredDistance, type MeasurementUpdate } from './DistanceMeasurement';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -569,6 +570,8 @@ export function MapView() {
   const [routePicking, setRoutePicking] = useState<'origin' | 'destination' | null>(null);
   const [routeSearchTarget, setRouteSearchTarget] = useState<'origin' | 'destination' | null>(null);
   const [routeContextMenu, setRouteContextMenu] = useState<{ x: number; y: number; coordinates: [number, number] } | null>(null);
+  const [measurement, setMeasurement] = useState<MeasurementUpdate | null>(null);
+  const measurementRef = useRef<DistanceMeasurement | null>(null);
   const [routeOriginSelection, setRouteOriginSelection] = useState<LocationSelection | null>(null);
   const [routeDestinationSelection, setRouteDestinationSelection] = useState<LocationSelection | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
@@ -671,7 +674,15 @@ export function MapView() {
     if (name) setFavorites((current) => current.map((item) => item.id === favorite.id ? { ...item, name } : item));
   };
 
-  const navigationView = transitDepartureDetailOpen ? 'transit-trip'
+  const cancelMeasurement = () => {
+    measurementRef.current?.stop();
+    measurementRef.current = null;
+    setMeasurement(null);
+    setRouteContextMenu(null);
+  };
+
+  const navigationView = measurement ? 'measurement'
+    : transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
       : transitDetailsOpen ? 'route-steps'
         : routeSearchTarget ? 'route-search'
@@ -682,6 +693,7 @@ export function MapView() {
                   : searchOpen ? 'search' : null;
 
   useInAppNavigation(navigationView, (parentView) => {
+    if (measurement) { cancelMeasurement(); return; }
     if (transitDepartureDetailOpen) {
       setTransitNavigationBackSignal((value) => value + 1);
       return;
@@ -891,6 +903,7 @@ export function MapView() {
   };
 
   const openRoute = () => {
+    cancelMeasurement();
     const isMobile = window.innerWidth <= 760;
     routeSheet.setSnap('half');
     setRouteContextMenu(null);
@@ -1259,7 +1272,7 @@ export function MapView() {
       const container = map.getContainer();
       setRouteContextMenu({
         x: Math.min(Math.max(point.x, 12), container.clientWidth - 220),
-        y: Math.min(Math.max(point.y, 12), container.clientHeight - 130),
+        y: Math.min(Math.max(point.y, 12), container.clientHeight - 180),
         coordinates,
       });
     };
@@ -1577,6 +1590,8 @@ export function MapView() {
     mapRef.current = map;
 
     return () => {
+      measurementRef.current?.stop();
+      measurementRef.current = null;
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       map.off('move', handleCameraMove);
@@ -2245,10 +2260,25 @@ export function MapView() {
             <div
               className="map-context-menu"
               role="menu"
-              aria-label="Route options"
+              aria-label="Map point options"
               style={{ left: routeContextMenu.x, top: routeContextMenu.y }}
             >
-              <strong>Route here</strong>
+              <strong>Map point</strong>
+              <button type="button" role="menuitem" onClick={() => {
+                const start = routeContextMenu.coordinates;
+                cancelRoute();
+                setSelectedLocation(null);
+                (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+                  type: 'FeatureCollection', features: [],
+                });
+                transitStopsLayerRef.current?.clearSelection();
+                setSelectedTransitStop(null);
+                measurementRef.current?.stop();
+                const next = new DistanceMeasurement(mapRef.current!, start, setMeasurement);
+                measurementRef.current = next;
+                setRouteContextMenu(null);
+                next.startMode();
+              }}>Measure distance</button>
               <button type="button" role="menuitem" onClick={() => {
                 saveSelection({ name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map' });
                 setRouteContextMenu(null);
@@ -2268,6 +2298,18 @@ export function MapView() {
                 setRouteEndpoint('origin', selection);
               }}>Route from here</button>
             </div>
+          )}
+          {measurement && (
+            <>
+              <div className="measurement-crosshair" aria-hidden="true"><span /></div>
+              <section className="measurement-panel" aria-label="Distance measurement" aria-live="polite">
+                <div><span>Distance</span><strong>{formatMeasuredDistance(measurement.metres)}</strong></div>
+                <div className="measurement-actions">
+                  <button type="button" className="measurement-finish" onClick={cancelMeasurement}>Finish</button>
+                  <button type="button" onClick={cancelMeasurement}>Cancel</button>
+                </div>
+              </section>
+            </>
           )}
           {pendingFavorite && (
             <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {
