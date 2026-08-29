@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -6,6 +6,9 @@ export default defineConfig({
   // Pages path. The deployment workflow supplies GitHub's current base path.
   base: './',
   plugins: [react()],
+  test: {
+    exclude: ['tests/visual/**', 'node_modules/**', 'dist/**'],
+  },
   build: {
     rollupOptions: {
       output: {
