@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/map-app/public/icon.svg" alt="Katu Maps icon" width="128">
+</p>
+
 # Katu Maps 🗺️
 
 An open 3D map for exploring places, public transport, and routes—directly in the browser.
