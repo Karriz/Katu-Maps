@@ -2437,6 +2437,7 @@ export function MapView() {
                 <div><strong>Plan a route</strong><span>Search for a place or pick it on the map</span></div>
                 <button type="button" aria-label="Clear route" onClick={cancelRoute}>×</button>
               </div>
+              <div className="route-panel-body">
               <div className="route-endpoints">
                 {(['origin', 'destination'] as const).map((kind) => {
                   const selection = kind === 'origin' ? routeOriginSelection : routeDestinationSelection;
@@ -2626,6 +2627,7 @@ export function MapView() {
               {!routeLoading && !routeResult && !routeError && !routeOriginSelection && (
                 <p className="route-panel-message">Choose a starting point to begin.</p>
               )}
+              </div>
             </aside>
           )}
         </>
