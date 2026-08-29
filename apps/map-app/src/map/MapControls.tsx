@@ -183,7 +183,7 @@ export function MapControls({
             <kbd className="location-search-shortcut"><span>{shortcutModifier}</span>K</kbd>
           )}
         </form>
-        {searchOpen && query.trim().length >= 2 && (
+        {searchOpen && (query.trim().length >= 2 || searchResults.length > 0) && (
           <div className="location-search-results" role="listbox" aria-label="Location search results">
             {searchError && <div className="location-search-message">{searchError}</div>}
             {!searchLoading && !searchError && searchResults.length === 0 && (
@@ -202,7 +202,7 @@ export function MapControls({
                 {result.secondary && <span>{result.secondary}</span>}
               </button>
             ))}
-            <div className="location-search-attribution">Powered by Photon</div>
+            {query.trim().length >= 2 && <div className="location-search-attribution">Powered by Photon</div>}
           </div>
         )}
       </div>}

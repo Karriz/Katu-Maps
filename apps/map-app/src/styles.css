@@ -152,6 +152,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-source { color: #94a3b8; font-size: 0.68rem; }
 .location-info-attribution { color: #94a3b8; display: block; font-size: 0.64rem; margin-top: 4px; text-decoration: none; }
 .location-info-attribution:hover { color: var(--color-accent); text-decoration: underline; }
+.favorite-actions { display: flex; gap: 7px; margin-top: 10px; }
+.favorite-actions button { background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: var(--color-accent); cursor: pointer; font: inherit; font-size: 0.72rem; padding: 7px 9px; }
+.route-start-button svg { margin-right: 5px; vertical-align: -3px; }
 .location-info-close { align-items: center; background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: #64748b; cursor: pointer; display: flex; font-size: 1.25rem; height: 34px; justify-content: center; line-height: 1; padding: 0; position: absolute; right: 16px; top: 16px; width: 34px; }
 .location-info-close:hover { color: #1e293b; }
 .route-start-button, .route-retry-button { background: var(--color-accent); border: 0; border-radius: 10px; color: #fff; cursor: pointer; font: inherit; font-size: 0.82rem; font-weight: 700; margin: 12px 0 10px; min-height: 42px; padding: 10px 13px; width: 100%; }
