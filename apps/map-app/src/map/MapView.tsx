@@ -2415,7 +2415,7 @@ export function MapView() {
                       <button type="button" onClick={() => setFavorites((items) => items.filter((item) => item.id !== favorite.id))}>Remove favourite</button>
                     </div>
                   ) : (
-                    <button className="route-start-button route-secondary-button" type="button" onClick={() => saveSelection(
+                    <button className="route-start-button route-secondary-button favorite-save-button" type="button" onClick={() => saveSelection(
                       selectedLocation,
                       selectedLocation.osmId ? 'osm' : undefined,
                       selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,

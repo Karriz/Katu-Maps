@@ -367,7 +367,7 @@ export function TransitDeparturesPanel({
           <span aria-hidden="true" />
           Live timetable from {transitProviderLabel(stop.provider)}
         </div>
-        <button className="transit-stop-destination-button" type="button" onClick={onSaveFavorite}>
+        <button className="transit-stop-destination-button favorite-save-button" type="button" onClick={onSaveFavorite}>
           <Star aria-hidden="true" /> Save favourite
         </button>
         <button className="transit-stop-destination-button" type="button" onClick={onSetDestination}>

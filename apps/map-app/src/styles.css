@@ -154,6 +154,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-attribution:hover { color: var(--color-accent); text-decoration: underline; }
 .favorite-actions { display: flex; gap: 7px; margin-top: 10px; }
 .favorite-actions button { background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: var(--color-accent); cursor: pointer; font: inherit; font-size: 0.72rem; padding: 7px 9px; }
+.favorite-save-button { align-items: center; display: flex; gap: 5px; justify-content: center; }
+.favorite-save-button svg { flex: 0 0 auto; height: 15px; margin: 0; width: 15px; }
 .favorite-menu-backdrop { align-items: center; background: rgb(15 23 42 / 38%); display: flex; inset: 0; justify-content: center; padding: 20px; position: absolute; z-index: 200; }
 .favorite-menu { background: var(--surface-card); border: 1px solid var(--color-line); border-radius: 18px; box-shadow: 0 20px 55px rgb(15 23 42 / 24%); max-width: 420px; padding: 22px; position: relative; width: 100%; }
 .favorite-menu-eyebrow { color: var(--color-accent); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
