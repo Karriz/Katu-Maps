@@ -178,17 +178,29 @@ type TripCall = {
   } | null;
   schedule?: { time?: { arrival?: unknown; departure?: unknown } | null } | null;
   realTime?: {
-    arrival?: { time?: unknown } | null;
-    departure?: { time?: unknown } | null;
+    arrival?: { time?: unknown; delay?: unknown } | null;
+    departure?: { time?: unknown; delay?: unknown } | null;
   } | null;
 };
 
-function tripPlace(call: TripCall): TransitTripPlace | undefined {
+function delayedTime(value: string | undefined, delaySeconds: number | undefined) {
+  if (!value || delaySeconds === undefined) return value;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time + delaySeconds * 1000).toISOString() : value;
+}
+
+function callDelay(call: TripCall) {
+  const delay = call.realTime?.departure?.delay ?? call.realTime?.arrival?.delay;
+  return finiteNumber(delay) ? delay : isoDurationSeconds(delay);
+}
+
+function tripPlace(call: TripCall, tripDelay?: number): TransitTripPlace | undefined {
   if (!call.stopLocation || typeof call.stopLocation.name !== 'string') return undefined;
   const scheduledArrival = typeof call.schedule?.time?.arrival === 'string' ? call.schedule.time.arrival : undefined;
   const scheduledDeparture = typeof call.schedule?.time?.departure === 'string' ? call.schedule.time.departure : undefined;
   const realtimeArrival = typeof call.realTime?.arrival?.time === 'string' ? call.realTime.arrival.time : undefined;
   const realtimeDeparture = typeof call.realTime?.departure?.time === 'string' ? call.realTime.departure.time : undefined;
+  const delay = callDelay(call) ?? tripDelay;
   return {
     stopId: typeof call.stopLocation.gtfsId === 'string' ? call.stopLocation.gtfsId : undefined,
     parentStopId: typeof call.stopLocation.parentStation?.gtfsId === 'string'
@@ -199,8 +211,8 @@ function tripPlace(call: TripCall): TransitTripPlace | undefined {
     lon: finiteNumber(call.stopLocation.lon) ? call.stopLocation.lon : undefined,
     scheduledArrival,
     scheduledDeparture,
-    arrival: realtimeArrival ?? scheduledArrival,
-    departure: realtimeDeparture ?? scheduledDeparture,
+    arrival: realtimeArrival ?? delayedTime(scheduledArrival, delay),
+    departure: realtimeDeparture ?? delayedTime(scheduledDeparture, delay),
   };
 }
 
@@ -352,8 +364,12 @@ export const digitransitProvider: TransitProvider = {
       } | null;
     }>(TRIP_QUERY, { id: tripId, serviceDate: resolvedServiceDate }, signal);
     const trip = data.trip;
-    const places = (trip?.onServiceDate?.stopCalls ?? []).flatMap((call) => {
-      const place = tripPlace(call);
+    const calls = trip?.onServiceDate?.stopCalls ?? [];
+    // A delay reported on only one call is trip-level information in practice;
+    // applying it to every missing realtime timestamp avoids mixing two clocks.
+    const tripDelay = calls.map(callDelay).find((delay) => delay !== undefined);
+    const places = calls.flatMap((call) => {
+      const place = tripPlace(call, tripDelay);
       return place ? [place] : [];
     });
     const geometry = typeof trip?.tripGeometry?.points === 'string'
@@ -369,6 +385,7 @@ export const digitransitProvider: TransitProvider = {
     return {
       legs: [{
         tripId,
+        serviceDate: resolvedServiceDate,
         startTime: typeof first.departure === 'string' ? first.departure : undefined,
         endTime: typeof last.arrival === 'string' ? last.arrival : undefined,
         realTime: (trip?.onServiceDate?.stopCalls ?? []).some((call) => Boolean(

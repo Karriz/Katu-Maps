@@ -10,6 +10,7 @@ import {
   type TransitDeparture as Departure,
   type TransitTripPlace as TripPlace,
 } from './transit';
+import { resolveSelectedTrip } from './transit/tripTimeline';
 
 function text(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback;
@@ -200,15 +201,19 @@ export function TransitDeparturesPanel({
       controller.signal,
     )
       .then((payload) => {
-        const stops = payload.legs
-          .filter((leg) => String(leg.tripId ?? '') === tripId)
-          .flatMap((leg) => [
-            leg.from,
-            ...(Array.isArray(leg.intermediateStops) ? leg.intermediateStops as TripPlace[] : []),
-            leg.to,
-          ])
-          .filter((place): place is TripPlace => Boolean(place));
-        setRouteStops(stops);
+        const resolved = resolveSelectedTrip(payload, {
+          tripId,
+          provider: selectedDeparture.provider,
+          serviceDate: selectedDeparture.serviceDate,
+          boardingStopId: stop.stopId,
+          selectedDeparture: selectedDeparture.departure,
+        });
+        if (!resolved) {
+          setRouteStops([]);
+          setRouteStopsError('Live trip details are temporarily unavailable.');
+          return;
+        }
+        setRouteStops(resolved.stops);
       })
       .catch((requestError: unknown) => {
         if ((requestError as { name?: string }).name !== 'AbortError') setRouteStopsError('Route stops are temporarily unavailable.');
@@ -217,7 +222,7 @@ export function TransitDeparturesPanel({
         if (!controller.signal.aborted) setRouteStopsLoading(false);
       });
     return () => controller.abort();
-  }, [selectedDeparture]);
+  }, [selectedDeparture, stop.stopId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -293,8 +298,8 @@ export function TransitDeparturesPanel({
                 <span>{modeLabel(detailMode)} · Live trip</span>
               </div>
               <h2>{detailDestination || 'Route stops'}</h2>
-              <div className="transit-panel-status"><span aria-hidden="true" />{isFollowing ? 'Following vehicle' : 'Follow paused · map is under your control'}</div>
-              <button className="transit-follow-button" type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
+              <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsError ? 'Validated live timeline unavailable' : isFollowing ? 'Following estimated vehicle' : 'Estimated position · follow paused'}</div>
+              <button className="transit-follow-button" disabled={Boolean(routeStopsError)} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
                 <LocateFixed aria-hidden="true" />
                 {isFollowing ? 'Following vehicle' : 'Follow vehicle'}
               </button>

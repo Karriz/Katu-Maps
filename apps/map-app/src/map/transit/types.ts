@@ -54,6 +54,7 @@ export type TransitTripPlace = {
 
 export type TransitTripLeg = {
   tripId?: string;
+  serviceDate?: string;
   startTime?: string;
   endTime?: string;
   realTime?: boolean;
