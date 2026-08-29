@@ -86,6 +86,28 @@ const TRANSIT_ICON_IDS = {
 } as const;
 
 const METRO_COLOR = '#e87524';
+// MapLibre uses the image's pixelRatio to turn atlas pixels into logical map
+// pixels.  The old 22px raster was marked as @2x, leaving only 22 source
+// pixels for an icon that can occupy almost 19 CSS pixels.  On 2x/3x mobile
+// canvases that texture is magnified heavily and thin Lucide strokes can lose
+// whole segments.  Rasterize a true @4x copy while preserving the existing
+// 11px logical size (44 / 4), so layer sizing and stop semantics stay intact.
+export const TRANSIT_ICON_PIXEL_RATIO = 4;
+export const TRANSIT_ICON_RASTER_SIZE = 44;
+
+export function transitIconSvg(icon: typeof BusFront, color?: string) {
+  const renderedIcon = renderToStaticMarkup(createElement(icon, {
+    color: '#ffffff',
+    size: TRANSIT_ICON_RASTER_SIZE,
+    strokeWidth: 2.5,
+  }));
+  return color
+    ? renderedIcon.replace(
+      /(<svg[^>]*>)/,
+      `$1<circle cx="12" cy="12" r="11" fill="${color}"/>`,
+    )
+    : renderedIcon;
+}
 
 async function addTransitIcon(
   map: Map,
@@ -94,17 +116,7 @@ async function addTransitIcon(
   color?: string,
 ) {
   if (map.hasImage(id)) return;
-  const renderedIcon = renderToStaticMarkup(createElement(icon, {
-    color: '#ffffff',
-    size: 22,
-    strokeWidth: 2.5,
-  }));
-  const svg = color
-    ? renderedIcon.replace(
-      /(<svg[^>]*>)/,
-      `$1<circle cx="12" cy="12" r="11" fill="${color}"/>`,
-    )
-    : renderedIcon;
+  const svg = transitIconSvg(icon, color);
   const image = new Image();
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   await new Promise<void>((resolve, reject) => {
@@ -112,7 +124,7 @@ async function addTransitIcon(
     image.onerror = () => reject(new Error(`Unable to load ${id}`));
   });
   if (!map.hasImage(id)) {
-    map.addImage(id, image, { pixelRatio: 2 });
+    map.addImage(id, image, { pixelRatio: TRANSIT_ICON_PIXEL_RATIO });
   }
 }
 
