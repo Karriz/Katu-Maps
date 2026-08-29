@@ -491,3 +491,23 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     transition-duration: 0.01ms !important;
   }
 }
+
+@media (max-width: 760px) {
+  .mobile-bottom-sheet {
+    height: min(var(--mobile-sheet-height), calc(100dvh - env(safe-area-inset-top, 0px) - 8px));
+    max-height: none;
+    overscroll-behavior: contain;
+    transition: height 240ms cubic-bezier(.22, .75, .24, 1);
+    will-change: height;
+  }
+  .mobile-bottom-sheet.is-dragging { transition: none; user-select: none; }
+  .mobile-sheet-header, .mobile-sheet-drag-region, .route-sheet-grabber { cursor: grab; touch-action: none; }
+  .mobile-sheet-header:active, .mobile-sheet-drag-region:active, .route-sheet-grabber:active { cursor: grabbing; }
+  .mobile-sheet-drag-region { align-items: center; display: flex; height: 24px; justify-content: center; left: 0; position: absolute; right: 0; top: 0; z-index: 2; }
+  .mobile-sheet-drag-region span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 38px; }
+  .route-panel.mobile-bottom-sheet { display: flex; flex-direction: column; overflow-y: auto; }
+  .route-panel.mobile-bottom-sheet .route-sheet-grabber, .route-panel.mobile-bottom-sheet .route-panel-heading { background: rgb(255 255 255 / 98%); flex: 0 0 auto; position: sticky; top: 0; z-index: 3; }
+  .route-panel.mobile-bottom-sheet .route-panel-heading { top: 8px; }
+  .route-panel.mobile-bottom-sheet[data-snap='collapsed'] { height: var(--mobile-sheet-height); }
+  .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
+}
