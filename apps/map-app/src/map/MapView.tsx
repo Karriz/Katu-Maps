@@ -824,7 +824,6 @@ export function MapView() {
         result = await fetchValhallaRoute(origin, destination, routeMode, controller.signal);
       }
       if (controller.signal.aborted) return;
-      if (window.innerWidth <= 760) setRouteSheetCollapsed(true);
       setRouteResult(result);
       showTransitLegVehicle(result);
       setRouteGeometry(result);
@@ -844,7 +843,6 @@ export function MapView() {
     const option = transitRouteOptions[index];
     if (!option) return;
     setSelectedTransitRouteIndex(index);
-    if (window.innerWidth <= 760) setRouteSheetCollapsed(true);
     setRouteResult(option);
     showTransitLegVehicle(option);
     setRouteGeometry(option);
@@ -853,6 +851,7 @@ export function MapView() {
 
   const openRoute = () => {
     const isMobile = window.innerWidth <= 760;
+    routeSheet.setSnap('half');
     setRouteContextMenu(null);
     setRouteOpen(true);
     setLayersOpen(false);
@@ -889,6 +888,7 @@ export function MapView() {
       setRouteDestinationSelection(selection);
     }
     setRouteOpen(true);
+    routeSheet.setSnap('half');
     setRoutePicking(null);
     setRouteSearchTarget(null);
     routePickingRef.current = null;
@@ -901,6 +901,7 @@ export function MapView() {
   const pickRouteEndpoint = (kind: 'origin' | 'destination') => {
     routeAbortRef.current?.abort();
     setRouteOpen(true);
+    routeSheet.setSnap('half');
     setRoutePicking(kind);
     setRouteSearchTarget(null);
     routePickingRef.current = kind;
@@ -2374,7 +2375,7 @@ export function MapView() {
                   }
                 }}
               ><span aria-hidden="true" /></button>
-              <div className="route-panel-heading">
+              <div className="route-panel-heading" {...routeSheet.handleProps}>
                 <div><strong>Plan a route</strong><span>Search for a place or pick it on the map</span></div>
                 <button type="button" aria-label="Clear route" onClick={cancelRoute}>×</button>
               </div>

@@ -504,8 +504,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     will-change: height;
   }
   .mobile-bottom-sheet.is-dragging { transition: none; user-select: none; }
-  .mobile-sheet-header, .mobile-sheet-drag-region, .route-sheet-grabber { cursor: grab; touch-action: none; }
-  .mobile-sheet-header:active, .mobile-sheet-drag-region:active, .route-sheet-grabber:active { cursor: grabbing; }
+  .mobile-sheet-header, .mobile-sheet-drag-region, .route-sheet-grabber, .route-panel-heading { cursor: grab; touch-action: none; }
+  .mobile-sheet-header:active, .mobile-sheet-drag-region:active, .route-sheet-grabber:active, .route-panel-heading:active { cursor: grabbing; }
   .mobile-sheet-drag-region { align-items: center; display: flex; height: 24px; justify-content: center; left: 0; position: absolute; right: 0; top: 0; z-index: 2; }
   .mobile-sheet-drag-region span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 38px; }
   .route-panel.mobile-bottom-sheet { display: flex; flex-direction: column; overflow-y: auto; }
