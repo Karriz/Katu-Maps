@@ -440,13 +440,19 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     width: 100%;
     z-index: 80;
   }
-  .mobile-sheet-handle { align-items: center; border-bottom: 1px solid var(--color-line); cursor: grab; display: flex; flex: 0 0 auto; gap: 8px; height: 42px; justify-content: center; touch-action: none; }
+  .mobile-sheet-handle { align-items: center; border-bottom: 1px solid var(--color-line); cursor: grab; display: flex; flex: 0 0 auto; gap: 8px; height: 42px; justify-content: center; position: relative; touch-action: none; }
   .mobile-sheet-handle:active { cursor: grabbing; }
   .mobile-sheet-handle > span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 34px; }
   .mobile-sheet-handle button { align-items: center; background: var(--color-accent-soft); border: 0; border-radius: 8px; color: var(--color-accent); cursor: pointer; display: flex; height: 30px; justify-content: center; padding: 0; width: 38px; }
   .mobile-sheet-handle button:hover, .mobile-sheet-handle button:focus-visible { background: #dceaff; outline: 2px solid rgb(80 145 235 / 30%); outline-offset: 1px; }
   .mobile-sheet-handle button:disabled { background: #f3f5f7; color: #aab4bf; cursor: default; }
   .mobile-sheet-handle svg { height: 19px; stroke-width: 2.4; width: 19px; }
+  .mobile-sheet-handle .mobile-sheet-close { background: #f7f9fb; border: 1px solid var(--color-line); color: #5f6f81; height: 34px; position: absolute; right: 8px; top: 4px; width: 34px; }
+  .mobile-sheet-handle .mobile-sheet-close:hover, .mobile-sheet-handle .mobile-sheet-close:focus-visible { background: #fff; color: var(--color-accent); }
+  .mobile-sheet-handle .mobile-sheet-close svg { height: 17px; width: 17px; }
+  .mobile-bottom-sheet > .location-info-close,
+  .mobile-bottom-sheet > .route-panel-heading .route-panel-close,
+  .mobile-bottom-sheet > .transit-panel-header .transit-panel-close { display: none; }
   @keyframes mobile-sheet-enter {
     from { opacity: 0; transform: translateY(24px); }
     to { opacity: 1; transform: translateY(0); }
