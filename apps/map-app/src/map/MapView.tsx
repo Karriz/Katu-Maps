@@ -50,7 +50,7 @@ import { fetchValhallaRoute, type RouteMode, type RouteResult } from './Valhalla
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
-import { elevationResult, formatCoordinates, formatElevation, queryTerrainElevation, type ElevationState } from './PositionInformation';
+import { elevationResult, formatCoordinates, formatElevation, hasDisplayableElevation, queryTerrainElevation, type ElevationState } from './PositionInformation';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
@@ -621,6 +621,10 @@ export function MapView() {
       return saved ? { ...defaults, ...saved } : defaults;
     } catch { return defaults; }
   });
+  const is3dMode = layerToggles.terrain
+    && layerToggles.buildings
+    && layerToggles.trees
+    && layerToggles.transitModels;
 
   useEffect(() => {
     try { saveFavorites(favorites); } catch { /* local storage can be disabled */ }
@@ -628,6 +632,12 @@ export function MapView() {
 
   useEffect(() => {
     if (!positionInformation) return;
+    if (!is3dMode) {
+      setPositionInformation((current) => current && current.elevation.status !== 'unavailable'
+        ? { ...current, elevation: { status: 'unavailable' } }
+        : current);
+      return;
+    }
     const map = mapRef.current;
     if (!map) return;
     const request = ++elevationRequestRef.current;
@@ -655,7 +665,7 @@ export function MapView() {
       elevationRequestRef.current += 1;
       controller.abort();
     };
-  }, [positionInformation?.coordinates]);
+  }, [positionInformation?.coordinates, is3dMode]);
 
   const favoriteFeatures = orderedFavorites(favorites, searchQuery).map((favorite): PhotonFeature => ({
     geometry: { coordinates: favorite.coordinates },
@@ -1975,11 +1985,6 @@ export function MapView() {
       : LOCATION_ICON_ALIASES.find(([alias]) => alias === selectedLocation.iconId)?.[1]
   ) || 'shop';
   const SelectedLocationIcon = LOCATION_ICON_DEFINITIONS.find(([id]) => id === selectedIconKey)?.[1] ?? Store;
-  const is3dMode = layerToggles.terrain
-    && layerToggles.buildings
-    && layerToggles.trees
-    && layerToggles.transitModels;
-
   useEffect(() => {
     setRoutePoints();
   }, [routeOriginSelection, routeDestinationSelection, mapLoaded]);
@@ -2424,13 +2429,15 @@ export function MapView() {
                   () => setMapToolNotice('Could not copy coordinates'),
                 );
               }}><Copy size={16} aria-hidden="true" /> Copy coordinates</button>
-              <div className="position-information-field">
-                <strong>Approximate terrain elevation</strong>
-                {positionInformation.elevation.status === 'loading' && <span role="status">Loading elevation…</span>}
-                {positionInformation.elevation.status === 'available' && <span>{formatElevation(positionInformation.elevation.metres)}</span>}
-                {positionInformation.elevation.status === 'unavailable' && <span>Elevation unavailable</span>}
-              </div>
-              <small>Ground surface from the configured terrain DEM. Availability depends on terrain coverage and loaded tiles.</small>
+              {hasDisplayableElevation(positionInformation.elevation, is3dMode) && (
+                <>
+                  <div className="position-information-field">
+                    <strong>Approximate terrain elevation</strong>
+                    <span>{formatElevation(positionInformation.elevation.metres)}</span>
+                  </div>
+                  <small>Ground surface from the configured terrain DEM.</small>
+                </>
+              )}
             </aside>
           )}
           {measurement && (

@@ -23,6 +23,13 @@ export function elevationResult(value: number | null | undefined): ElevationStat
     : { status: 'unavailable' };
 }
 
+export function hasDisplayableElevation(
+  state: ElevationState,
+  is3dMode: boolean,
+): state is { status: 'available'; metres: number } {
+  return is3dMode && state.status === 'available' && Number.isFinite(state.metres);
+}
+
 const delay = (milliseconds: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   const timer = window.setTimeout(resolve, milliseconds);
   signal.addEventListener('abort', () => {

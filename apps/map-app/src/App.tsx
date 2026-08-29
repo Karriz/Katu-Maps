@@ -5,7 +5,6 @@ export function App() {
     <main className="app-shell">
       <section className="map-frame" aria-label="Interactive map">
         <MapView />
-        <div className="map-hint">Drag to pan · scroll to zoom · right-drag to tilt</div>
       </section>
     </main>
   );

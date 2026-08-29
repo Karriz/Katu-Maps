@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { elevationResult, formatCoordinates, formatElevation } from './PositionInformation';
+import { elevationResult, formatCoordinates, formatElevation, hasDisplayableElevation } from './PositionInformation';
 
 describe('position information', () => {
   it('formats latitude and longitude with sensible precision', () => {
@@ -9,12 +9,20 @@ describe('position information', () => {
   it('represents missing and invalid elevation as unavailable', () => {
     expect(elevationResult(null)).toEqual({ status: 'unavailable' });
     expect(elevationResult(Number.NaN)).toEqual({ status: 'unavailable' });
+    expect(elevationResult(Number.POSITIVE_INFINITY)).toEqual({ status: 'unavailable' });
   });
 
   it('keeps valid zero and negative elevations', () => {
     expect(elevationResult(0)).toEqual({ status: 'available', metres: 0 });
     expect(elevationResult(-12.4)).toEqual({ status: 'available', metres: -12.4 });
     expect(formatElevation(-12.4)).toBe('-12 m above mean sea level');
+  });
+
+  it('only displays trustworthy elevation outside 2D mode', () => {
+    expect(hasDisplayableElevation({ status: 'available', metres: 0 }, false)).toBe(false);
+    expect(hasDisplayableElevation({ status: 'loading' }, true)).toBe(false);
+    expect(hasDisplayableElevation({ status: 'unavailable' }, true)).toBe(false);
+    expect(hasDisplayableElevation({ status: 'available', metres: 0 }, true)).toBe(true);
   });
 
   it('allows request identity to reject a stale asynchronous result', async () => {
