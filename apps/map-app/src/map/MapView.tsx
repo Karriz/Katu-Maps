@@ -962,10 +962,11 @@ export function MapView() {
     const transitVehicleLayer = new TransitVehicleModelLayer();
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       latestVehiclePoseRef.current = pose;
-      // The map symbol is the sole vehicle marker. Rendering the 3D vehicle at
-      // the same coordinate produced a pale, offset duplicate below it on
-      // Android GPUs, especially while the model interpolated between poses.
-      transitVehicleLayer.setPose(null);
+      // Keep the custom model layer synchronized with the same estimated pose
+      // used by the map marker and follow camera. Layer visibility decides
+      // whether the model is rendered; clearing the pose here prevents the
+      // 3D vehicles toggle from ever having anything to display.
+      transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
       if (!pose || !vehicleFollowEnabledRef.current) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
