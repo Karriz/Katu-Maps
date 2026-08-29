@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { ArrowLeft, BusFront, ChevronRight, LocateFixed, Pencil, RefreshCw, Share2, Star, Trash2, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
+import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { MAP_COLORS } from './MapPalette';
 import type { TransitStopSelection } from './TransitStopsLayer';
 import {
@@ -289,6 +290,7 @@ export function TransitDeparturesPanel({
     const DetailIcon = modeIcon(detailMode);
     return (
       <aside className={cn("transit-departures-panel transit-trip-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`${detailRoute} route details`}>
+        <MobileSheetHandle {...sheet} />
         <header className="transit-panel-header mobile-sheet-header" {...sheet.handleProps}>
           <button className="transit-panel-back" type="button" onClick={() => {
             onDepartureBack?.();
@@ -362,6 +364,7 @@ export function TransitDeparturesPanel({
 
   return (
     <aside className={cn("transit-departures-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`Departures from ${stop.name}`}>
+      <MobileSheetHandle {...sheet} />
       <header className="transit-panel-header mobile-sheet-header" {...sheet.handleProps}>
         <div className="transit-panel-eyebrow" style={{ color: modeColor(stop.mode) }}>
           <StopIcon aria-hidden="true" />
