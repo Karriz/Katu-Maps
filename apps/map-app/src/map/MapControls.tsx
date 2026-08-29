@@ -11,6 +11,7 @@ import {
   Minus,
   Plus,
   Search,
+  Star,
   TrainFront,
   Trees,
   X,
@@ -84,6 +85,9 @@ export function MapControls({
   onQueryChange,
   onSearchClear,
   onSearchFocus,
+  onSearchClose,
+  favoritesOpen,
+  onFavoritesToggle,
   onSearchSubmit,
   onSearchResultSelect,
   layersOpen,
@@ -110,6 +114,9 @@ export function MapControls({
   onQueryChange: (query: string) => void;
   onSearchClear: () => void;
   onSearchFocus: () => void;
+  onSearchClose: () => void;
+  favoritesOpen: boolean;
+  onFavoritesToggle: () => void;
   onSearchSubmit: () => void;
   onSearchResultSelect: (index: number) => void;
   layersOpen: boolean;
@@ -153,6 +160,9 @@ export function MapControls({
             event.preventDefault();
             onSearchSubmit();
           }}
+          onBlur={(event) => {
+            if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node | null)) onSearchClose();
+          }}
         >
           <Search aria-hidden="true" />
           <input
@@ -182,12 +192,23 @@ export function MapControls({
           ) : !query && (
             <kbd className="location-search-shortcut"><span>{shortcutModifier}</span>K</kbd>
           )}
+          <button
+            className={`location-favorites-toggle${favoritesOpen ? ' active' : ''}`}
+            type="button"
+            aria-label={favoritesOpen ? 'Close favourites' : 'Show favourites'}
+            aria-expanded={favoritesOpen}
+            aria-controls="location-search-results"
+            title={favoritesOpen ? 'Close favourites' : 'Show favourites'}
+            onClick={onFavoritesToggle}
+          >
+            <Star aria-hidden="true" />
+          </button>
         </form>
-        {searchOpen && (query.trim().length >= 2 || searchResults.length > 0) && (
-          <div className="location-search-results" role="listbox" aria-label="Location search results">
+        {searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0) && (
+          <div id="location-search-results" className="location-search-results" role="listbox" aria-label={favoritesOpen ? 'Favourite places' : 'Location search results'}>
             {searchError && <div className="location-search-message">{searchError}</div>}
             {!searchLoading && !searchError && searchResults.length === 0 && (
-              <div className="location-search-message">No places found</div>
+              <div className="location-search-message">{favoritesOpen ? 'No favourites saved yet' : 'No places found'}</div>
             )}
             {searchResults.map((result, index) => (
               <button
@@ -202,7 +223,7 @@ export function MapControls({
                 {result.secondary && <span>{result.secondary}</span>}
               </button>
             ))}
-            {query.trim().length >= 2 && <div className="location-search-attribution">Powered by Photon</div>}
+            {!favoritesOpen && query.trim().length >= 2 && <div className="location-search-attribution">Powered by Photon</div>}
           </div>
         )}
       </div>}
