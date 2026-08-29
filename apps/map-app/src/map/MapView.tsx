@@ -27,6 +27,8 @@ import {
   Star,
   X,
   Clock3,
+  Copy,
+  Mountain,
   ShoppingBag,
   Store,
   Ticket,
@@ -48,6 +50,7 @@ import { fetchValhallaRoute, type RouteMode, type RouteResult } from './Valhalla
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
+import { elevationResult, formatCoordinates, formatElevation, queryTerrainElevation, type ElevationState } from './PositionInformation';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -569,6 +572,8 @@ export function MapView() {
   const [routePicking, setRoutePicking] = useState<'origin' | 'destination' | null>(null);
   const [routeSearchTarget, setRouteSearchTarget] = useState<'origin' | 'destination' | null>(null);
   const [routeContextMenu, setRouteContextMenu] = useState<{ x: number; y: number; coordinates: [number, number] } | null>(null);
+  const [positionInformation, setPositionInformation] = useState<{ coordinates: [number, number]; elevation: ElevationState } | null>(null);
+  const elevationRequestRef = useRef(0);
   const [routeOriginSelection, setRouteOriginSelection] = useState<LocationSelection | null>(null);
   const [routeDestinationSelection, setRouteDestinationSelection] = useState<LocationSelection | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
@@ -616,6 +621,37 @@ export function MapView() {
   useEffect(() => {
     try { saveFavorites(favorites); } catch { /* local storage can be disabled */ }
   }, [favorites]);
+
+  useEffect(() => {
+    if (!positionInformation) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const request = ++elevationRequestRef.current;
+    const controller = new AbortController();
+    const coordinates = positionInformation.coordinates;
+    void queryTerrainElevation(
+      map,
+      coordinates,
+      terrainSourceRef.current,
+      () => terrainEnabledRef.current,
+      controller.signal,
+    ).then((value) => {
+      if (request !== elevationRequestRef.current) return;
+      setPositionInformation((current) => current && current.coordinates === coordinates
+        ? { ...current, elevation: elevationResult(value) }
+        : current);
+    }).catch((error: unknown) => {
+      if ((error as Error).name !== 'AbortError' && request === elevationRequestRef.current) {
+        setPositionInformation((current) => current && current.coordinates === coordinates
+          ? { ...current, elevation: { status: 'unavailable' } }
+          : current);
+      }
+    });
+    return () => {
+      elevationRequestRef.current += 1;
+      controller.abort();
+    };
+  }, [positionInformation?.coordinates]);
 
   const favoriteFeatures = orderedFavorites(favorites, searchQuery).map((favorite): PhotonFeature => ({
     geometry: { coordinates: favorite.coordinates },
@@ -2248,7 +2284,12 @@ export function MapView() {
               aria-label="Route options"
               style={{ left: routeContextMenu.x, top: routeContextMenu.y }}
             >
-              <strong>Route here</strong>
+              <strong>Map point</strong>
+              <button type="button" role="menuitem" onClick={() => {
+                const coordinates: [number, number] = [...routeContextMenu.coordinates];
+                setPositionInformation({ coordinates, elevation: { status: 'loading' } });
+                setRouteContextMenu(null);
+              }}>Position information</button>
               <button type="button" role="menuitem" onClick={() => {
                 saveSelection({ name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map' });
                 setRouteContextMenu(null);
@@ -2268,6 +2309,32 @@ export function MapView() {
                 setRouteEndpoint('origin', selection);
               }}>Route from here</button>
             </div>
+          )}
+          {positionInformation && (
+            <aside className="position-information" role="dialog" aria-modal="true" aria-labelledby="position-information-title">
+              <button className="location-info-close" type="button" aria-label="Close position information" onClick={() => setPositionInformation(null)}>×</button>
+              <div className="position-information-heading">
+                <span className="location-info-icon" aria-hidden="true"><Mountain size={20} /></span>
+                <div><span className="location-info-category">Map point</span><h2 id="position-information-title">Position information</h2></div>
+              </div>
+              <div className="position-information-field">
+                <strong>Latitude, longitude</strong>
+                <span>{formatCoordinates(positionInformation.coordinates)}</span>
+              </div>
+              <button className="position-copy" type="button" onClick={() => {
+                void navigator.clipboard.writeText(formatCoordinates(positionInformation.coordinates)).then(
+                  () => setMapToolNotice('Coordinates copied'),
+                  () => setMapToolNotice('Could not copy coordinates'),
+                );
+              }}><Copy size={16} aria-hidden="true" /> Copy coordinates</button>
+              <div className="position-information-field">
+                <strong>Approximate terrain elevation</strong>
+                {positionInformation.elevation.status === 'loading' && <span role="status">Loading elevation…</span>}
+                {positionInformation.elevation.status === 'available' && <span>{formatElevation(positionInformation.elevation.metres)}</span>}
+                {positionInformation.elevation.status === 'unavailable' && <span>Elevation unavailable</span>}
+              </div>
+              <small>Ground surface from the configured terrain DEM. Availability depends on terrain coverage and loaded tiles.</small>
+            </aside>
           )}
           {pendingFavorite && (
             <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {
