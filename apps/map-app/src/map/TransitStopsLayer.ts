@@ -11,6 +11,7 @@ import { BusFront, TrainFront, TrainFrontTunnel, TramFront } from 'lucide-react'
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
+import { rasterizeMapIcon } from './rasterizeMapIcon';
 import {
   fetchTransitStops,
   fetchTransitTrip,
@@ -78,32 +79,28 @@ type RouteLineFeature = {
 export type { TransitStopSelection } from './transit';
 
 const TRANSIT_ICON_IDS = {
-  bus: 'transit-bus-icon',
-  tram: 'transit-tram-icon',
-  metro: 'transit-metro-icon',
-  train: 'transit-train-icon',
-  vehicle: 'transit-estimated-vehicle-icon',
+  bus: 'transit-bus-icon-v2',
+  tram: 'transit-tram-icon-v2',
+  metro: 'transit-metro-icon-v2',
+  train: 'transit-train-icon-v2',
+  vehicle: 'transit-estimated-vehicle-icon-v2',
 } as const;
 
 const METRO_COLOR = '#e87524';
-// MapLibre uses the image's pixelRatio to turn atlas pixels into logical map
-// pixels. Keep transit images on the same @2x atlas path as the more reliable
-// POI images while preserving their existing 11px logical size (22 / 2).
-// In particular, avoid the @4x image registration that correlated with sliced
-// transit icons and nearby glyphs on high-DPI Android devices.
 export const TRANSIT_ICON_PIXEL_RATIO = 2;
-export const TRANSIT_ICON_RASTER_SIZE = 22;
+export const TRANSIT_ICON_RASTER_SIZE = 64;
+export const TRANSIT_ICON_CONTENT_INSET = 8;
 
 export function transitIconSvg(icon: typeof BusFront, color?: string) {
   const renderedIcon = renderToStaticMarkup(createElement(icon, {
     color: '#ffffff',
-    size: TRANSIT_ICON_RASTER_SIZE,
+    size: 48,
     strokeWidth: 2.5,
   }));
   return color
     ? renderedIcon.replace(
       /(<svg[^>]*>)/,
-      `$1<circle cx="12" cy="12" r="11" fill="${color}"/>`,
+      `$1<circle cx="12" cy="12" r="12" fill="${color}"/>`,
     )
     : renderedIcon;
 }
@@ -116,11 +113,9 @@ async function addTransitIcon(
 ) {
   if (map.hasImage(id)) return;
   const svg = transitIconSvg(icon, color);
-  const image = new Image();
-  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error(`Unable to load ${id}`));
+  const image = await rasterizeMapIcon(svg, {
+    bitmapSize: TRANSIT_ICON_RASTER_SIZE,
+    contentInset: TRANSIT_ICON_CONTENT_INSET,
   });
   if (!map.hasImage(id)) {
     map.addImage(id, image, { pixelRatio: TRANSIT_ICON_PIXEL_RATIO });
@@ -473,13 +468,18 @@ export class TransitStopsLayer {
       data: emptyCollection(),
     });
 
-    await Promise.all([
-      addTransitIcon(map, TRANSIT_ICON_IDS.bus, BusFront, MAP_COLORS.transitBlue),
-      addTransitIcon(map, TRANSIT_ICON_IDS.tram, TramFront, '#8554c7'),
-      addTransitIcon(map, TRANSIT_ICON_IDS.metro, TrainFrontTunnel, METRO_COLOR),
-      addTransitIcon(map, TRANSIT_ICON_IDS.train, TrainFront, '#4f9b70'),
-      addTransitIcon(map, TRANSIT_ICON_IDS.vehicle, BusFront),
-    ]);
+    // Mutate MapLibre's shared image atlas serially. Concurrent addImage calls
+    // have produced cross-icon fragments on high-DPI Android renderers.
+    const transitIcons = [
+      [TRANSIT_ICON_IDS.bus, BusFront, MAP_COLORS.transitBlue],
+      [TRANSIT_ICON_IDS.tram, TramFront, '#8554c7'],
+      [TRANSIT_ICON_IDS.metro, TrainFrontTunnel, METRO_COLOR],
+      [TRANSIT_ICON_IDS.train, TrainFront, '#4f9b70'],
+      [TRANSIT_ICON_IDS.vehicle, BusFront, undefined],
+    ] as const;
+    for (const [id, icon, color] of transitIcons) {
+      await addTransitIcon(map, id, icon, color);
+    }
     if (this.map !== map) return;
 
     const iconLayer = (
@@ -495,7 +495,7 @@ export class TransitStopsLayer {
       filter: ['in', ['get', 'mode'], ['literal', modes]],
       layout: {
         'icon-image': iconImage,
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.25, 14, 1.5, 18, 1.7],
+        'icon-size': ['step', ['zoom'], 0.575, 14, 0.69, 18, 0.85],
         'icon-padding': 8,
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
@@ -620,7 +620,7 @@ export class TransitStopsLayer {
           'SUBWAY', TRANSIT_ICON_IDS.metro,
           TRANSIT_ICON_IDS.train,
         ],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 1.25, 14, 1.45, 18, 1.65],
+        'icon-size': ['step', ['zoom'], 0.575, 14, 0.665, 18, 0.755],
         'icon-padding': 8,
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
@@ -646,7 +646,7 @@ export class TransitStopsLayer {
       minzoom: 5,
       layout: {
         'icon-image': TRANSIT_ICON_IDS.vehicle,
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 0.85, 14, 1, 18, 1.15],
+        'icon-size': ['step', ['zoom'], 0.39, 14, 0.46, 18, 0.53],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
