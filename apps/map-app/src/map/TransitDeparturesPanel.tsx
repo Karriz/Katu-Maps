@@ -122,7 +122,6 @@ export function TransitDeparturesPanel({
   isFollowing,
   onDetailOpenChange,
   navigationBackSignal = 0,
-  staleRefreshSignal = 0,
 }: {
   stop: TransitStopSelection;
   onClose: () => void;
@@ -145,7 +144,6 @@ export function TransitDeparturesPanel({
   isFollowing?: boolean;
   onDetailOpenChange?: (open: boolean) => void;
   navigationBackSignal?: number;
-  staleRefreshSignal?: number;
 }) {
   const [departures, setDepartures] = useState<Departure[]>([]);
   const [loading, setLoading] = useState(true);
@@ -262,7 +260,7 @@ export function TransitDeparturesPanel({
       });
 
     return () => controller.abort();
-  }, [stop, refreshKey, staleRefreshSignal]);
+  }, [stop, refreshKey]);
 
   const refresh = () => {
     setRefreshing(true);
