@@ -46,6 +46,7 @@ import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import { searchTransitStops, type TransitProviderId } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
+import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -543,8 +544,13 @@ export function MapView() {
   const [transitTimeMode, setTransitTimeMode] = useState<'depart' | 'arrive'>('depart');
   const [transitDateTime, setTransitDateTime] = useState(() => localDateTimeValue());
   const [transitTimeControlsOpen, setTransitTimeControlsOpen] = useState(false);
-  const [routeSheetCollapsed, setRouteSheetCollapsed] = useState(false);
-  const routeSheetDragStartRef = useRef<number | null>(null);
+  const routeSheet = useMobileBottomSheet('half');
+  const locationSheet = useMobileBottomSheet('half');
+  const routeSheetCollapsed = routeSheet.snap === 'collapsed';
+  const setRouteSheetCollapsed = (collapsed: boolean | ((current: boolean) => boolean)) => {
+    const next = typeof collapsed === 'function' ? collapsed(routeSheet.snap === 'collapsed') : collapsed;
+    routeSheet.setSnap(next ? 'collapsed' : 'half');
+  };
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const routeCameraRequestRef = useRef(0);
   const routeOriginRef = useRef<[number, number] | null>(null);
@@ -2193,7 +2199,8 @@ export function MapView() {
             </div>
           )}
           {selectedLocation && !selectedTransitStop && (
-            <aside className="location-info-panel" aria-label="Location information">
+            <aside className={`location-info-panel mobile-bottom-sheet${locationSheet.dragging ? ' is-dragging' : ''}`} style={locationSheet.style} data-snap={locationSheet.snap} aria-label="Location information">
+              <div className="mobile-sheet-drag-region" {...locationSheet.handleProps}><span aria-hidden="true" /></div>
               <div
                 className="location-info-icon"
                 aria-hidden="true"
@@ -2261,24 +2268,12 @@ export function MapView() {
             </div>
           )}
           {routeOpen && !routePicking && (
-            <aside className={`route-panel${routeSheetCollapsed ? ' route-sheet-collapsed' : ''}`} aria-label="Route details">
+            <aside className={`route-panel mobile-bottom-sheet${routeSheetCollapsed ? ' route-sheet-collapsed' : ''}${routeSheet.dragging ? ' is-dragging' : ''}`} style={routeSheet.style} data-snap={routeSheet.snap} aria-label="Route details">
               <button
                 className="route-sheet-grabber"
                 type="button"
                 aria-label={routeSheetCollapsed ? 'Expand route panel' : 'Collapse route panel'}
-                onPointerDown={(event) => {
-                  routeSheetDragStartRef.current = event.clientY;
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                }}
-                onPointerUp={(event) => {
-                  const start = routeSheetDragStartRef.current;
-                  routeSheetDragStartRef.current = null;
-                  if (start === null) return;
-                  const delta = event.clientY - start;
-                  if (delta > 35) setRouteSheetCollapsed(true);
-                  else if (delta < -35) setRouteSheetCollapsed(false);
-                  else setRouteSheetCollapsed((collapsed) => !collapsed);
-                }}
+                {...routeSheet.handleProps}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();

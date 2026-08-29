@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowLeft, BusFront, ChevronRight, LocateFixed, RefreshCw, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MAP_COLORS } from './MapPalette';
 import type { TransitStopSelection } from './TransitStopsLayer';
 import {
@@ -150,6 +151,7 @@ export function TransitDeparturesPanel({
   const routeStopScrollRef = useRef<HTMLDivElement>(null);
   const selectedRouteStopRef = useRef<HTMLDivElement>(null);
   const hasPositionedRouteRef = useRef(false);
+  const sheet = useMobileBottomSheet('half');
 
   useEffect(() => {
     hasPositionedRouteRef.current = false;
@@ -276,8 +278,8 @@ export function TransitDeparturesPanel({
   if (selectedDeparture) {
     const DetailIcon = modeIcon(detailMode);
     return (
-      <aside className="transit-departures-panel transit-trip-panel" aria-label={`${detailRoute} route details`}>
-        <header className="transit-panel-header">
+      <aside className={cn("transit-departures-panel transit-trip-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`${detailRoute} route details`}>
+        <header className="transit-panel-header mobile-sheet-header" {...sheet.handleProps}>
           <button className="transit-panel-back" type="button" onClick={() => {
             onDepartureBack?.();
             hasPositionedRouteRef.current = false;
@@ -349,8 +351,8 @@ export function TransitDeparturesPanel({
   }
 
   return (
-    <aside className="transit-departures-panel" aria-label={`Departures from ${stop.name}`}>
-      <header className="transit-panel-header">
+    <aside className={cn("transit-departures-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`Departures from ${stop.name}`}>
+      <header className="transit-panel-header mobile-sheet-header" {...sheet.handleProps}>
         <div className="transit-panel-eyebrow" style={{ color: modeColor(stop.mode) }}>
           <StopIcon aria-hidden="true" />
           <span>Departures</span>
