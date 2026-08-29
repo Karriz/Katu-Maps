@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, BusFront, ChevronRight, LocateFixed, Pencil, RefreshCw, Share2, Star, Trash2, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
+import { ArrowLeft, BusFront, ChevronRight, LocateFixed, Navigation, Pencil, RefreshCw, Share2, Star, Trash2, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
@@ -385,22 +385,22 @@ export function TransitDeparturesPanel({
           <span aria-hidden="true" />
           Live timetable from {transitProviderLabel(stop.provider)}
         </div>
-        {onRemoveFavorite ? (
-          <div className="favorite-actions">
-            <button type="button" onClick={onEditFavorite}><Pencil aria-hidden="true" /> Edit favourite</button>
-            <button type="button" onClick={onRemoveFavorite}><Trash2 aria-hidden="true" /> Remove favourite</button>
-          </div>
-        ) : (
+        <div className="panel-primary-actions">
+        {onRemoveFavorite ? <>
+          <button className="panel-icon-action" type="button" aria-label="Edit favourite" title="Edit favourite" onClick={onEditFavorite}><Pencil aria-hidden="true" /></button>
+          <button className="panel-icon-action" type="button" aria-label="Remove favourite" title="Remove favourite" onClick={onRemoveFavorite}><Trash2 aria-hidden="true" /></button>
+        </> :
           <button className="transit-stop-destination-button favorite-save-button" type="button" onClick={onSaveFavorite}>
-            <Star aria-hidden="true" /> Save favourite
+            <Star aria-hidden="true" /> Save
           </button>
-        )}
+        }
         <button className="transit-stop-destination-button" type="button" onClick={onSetDestination}>
-          Use this stop as destination
+          <Navigation aria-hidden="true" /> Directions
         </button>
         <button className="transit-stop-destination-button share-button" type="button" onClick={onShare}>
-          <Share2 aria-hidden="true" /> Share stop
+          <Share2 aria-hidden="true" /> Share
         </button>
+        </div>
       </header>
 
       <div className="transit-panel-section-heading">

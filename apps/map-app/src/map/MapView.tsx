@@ -24,6 +24,7 @@ import {
   Landmark,
   Palette,
   MapPin,
+  Pencil,
   Star,
   X,
   Clock3,
@@ -33,6 +34,7 @@ import {
   Share2,
   Store,
   Ticket,
+  Trash2,
   TreePine,
   Utensils,
   type LucideIcon,
@@ -2562,7 +2564,7 @@ export function MapView() {
               <button className="location-info-close" type="button" aria-label="Close position information" onClick={() => {
                 setPositionInformation(null);
                 setContextMenuMarker(null);
-              }}>×</button>
+              }}><X aria-hidden="true" /></button>
               <div className="position-information-heading">
                 <span className="location-info-icon" aria-hidden="true"><Mountain size={20} /></span>
                 <div><span className="location-info-category">Map point</span><h2 id="position-information-title">Position information</h2></div>
@@ -2765,21 +2767,22 @@ export function MapView() {
                 <span className="location-info-source">
                   {selectedLocation.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
                 </span>
+                <div className="panel-primary-actions">
                 {(() => {
                   const favorite = favorites.find((item) => item.id === selectedLocation.favoriteId
                     || item.id === selectedLocation.osmId
                     || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
                   return favorite ? (
-                    <div className="favorite-actions">
-                      <button type="button" onClick={() => editFavorite(favorite)}>Edit name</button>
-                      <button type="button" onClick={() => setFavorites((items) => items.filter((item) => item.id !== favorite.id))}>Remove favourite</button>
-                    </div>
+                    <>
+                      <button className="panel-icon-action" type="button" aria-label="Edit favourite" title="Edit favourite" onClick={() => editFavorite(favorite)}><Pencil aria-hidden="true" /></button>
+                      <button className="panel-icon-action" type="button" aria-label="Remove favourite" title="Remove favourite" onClick={() => setFavorites((items) => items.filter((item) => item.id !== favorite.id))}><Trash2 aria-hidden="true" /></button>
+                    </>
                   ) : (
                     <button className="route-start-button route-secondary-button favorite-save-button" type="button" onClick={() => saveSelection(
                       selectedLocation,
                       selectedLocation.osmId ? 'osm' : undefined,
                       selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
-                    )}><Star size={15} aria-hidden="true" /> Save favourite</button>
+                    )}><Star size={15} aria-hidden="true" /> Save</button>
                   );
                 })()}
                 <button className="route-start-button route-secondary-button share-button" type="button" onClick={() => shareSelection({
@@ -2791,10 +2794,11 @@ export function MapView() {
                 <button className="route-start-button" type="button" onClick={() => {
                   openRoute();
                   setRouteEndpoint('destination', selectedLocation);
-                }}>Get directions</button>
+                }}>Directions</button>
                 {routeOpen && <button className="route-start-button route-secondary-button" type="button" onClick={() => setRouteEndpoint('origin', selectedLocation)}>
-                  Use as starting point
+                  Start here
                 </button>}
+                </div>
                 <a
                   className="location-info-attribution"
                   href="https://nominatim.openstreetmap.org/"
@@ -2833,7 +2837,7 @@ export function MapView() {
               <MobileSheetHandle {...routeSheet} />
               <div className="route-panel-heading" {...routeSheet.handleProps}>
                 <div><strong>Plan a route</strong><span>Search for a place or pick it on the map</span></div>
-                <button type="button" aria-label="Clear route" onClick={cancelRoute}>×</button>
+                <button className="route-panel-close" type="button" aria-label="Close route planner" onClick={cancelRoute}><X aria-hidden="true" /></button>
               </div>
               <div className="route-panel-body">
               <div className="route-endpoints">
