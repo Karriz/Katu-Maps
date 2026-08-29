@@ -7,9 +7,11 @@ import {
 } from './TransitStopsLayer';
 
 describe('transit stop icon raster', () => {
-  it('provides a high-density mobile texture without changing logical size', () => {
+  it('uses the same @2x atlas path as POI icons without changing logical size', () => {
     const svg = transitIconSvg(TramFront, '#8554c7');
 
+    expect(TRANSIT_ICON_RASTER_SIZE).toBe(22);
+    expect(TRANSIT_ICON_PIXEL_RATIO).toBe(2);
     expect(TRANSIT_ICON_RASTER_SIZE / TRANSIT_ICON_PIXEL_RATIO).toBe(11);
     expect(svg).toContain(`width="${TRANSIT_ICON_RASTER_SIZE}"`);
     expect(svg).toContain(`height="${TRANSIT_ICON_RASTER_SIZE}"`);
