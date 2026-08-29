@@ -87,13 +87,12 @@ const TRANSIT_ICON_IDS = {
 
 const METRO_COLOR = '#e87524';
 // MapLibre uses the image's pixelRatio to turn atlas pixels into logical map
-// pixels.  The old 22px raster was marked as @2x, leaving only 22 source
-// pixels for an icon that can occupy almost 19 CSS pixels.  On 2x/3x mobile
-// canvases that texture is magnified heavily and thin Lucide strokes can lose
-// whole segments.  Rasterize a true @4x copy while preserving the existing
-// 11px logical size (44 / 4), so layer sizing and stop semantics stay intact.
-export const TRANSIT_ICON_PIXEL_RATIO = 4;
-export const TRANSIT_ICON_RASTER_SIZE = 44;
+// pixels. Keep transit images on the same @2x atlas path as the more reliable
+// POI images while preserving their existing 11px logical size (22 / 2).
+// In particular, avoid the @4x image registration that correlated with sliced
+// transit icons and nearby glyphs on high-DPI Android devices.
+export const TRANSIT_ICON_PIXEL_RATIO = 2;
+export const TRANSIT_ICON_RASTER_SIZE = 22;
 
 export function transitIconSvg(icon: typeof BusFront, color?: string) {
   const renderedIcon = renderToStaticMarkup(createElement(icon, {
