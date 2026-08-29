@@ -282,6 +282,16 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-context-menu strong { border-bottom: 1px solid var(--color-line); color: var(--color-muted); font-size: 0.68rem; letter-spacing: 0.06em; padding: 10px 13px 8px; text-transform: uppercase; }
 .map-context-menu button { background: transparent; border: 0; color: var(--color-ink); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 11px 13px; text-align: left; }
 .map-context-menu button:hover, .map-context-menu button:focus-visible { background: var(--surface-hover); color: var(--color-accent); outline: 0; }
+.measurement-crosshair { height: 34px; left: 50%; pointer-events: none; position: absolute; top: 50%; transform: translate(-50%, -50%); width: 34px; z-index: 80; }
+.measurement-crosshair span { background: #b45309; border: 1px solid #fff; box-shadow: 0 1px 4px rgb(15 23 42 / 45%); left: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); }
+.measurement-crosshair span:first-child { height: 3px; width: 34px; }
+.measurement-crosshair span:last-child { height: 34px; width: 3px; }
+.measurement-panel { backdrop-filter: blur(18px); background: rgb(255 255 255 / 94%); border: 1px solid #f2c078; border-radius: 15px; bottom: 28px; box-shadow: var(--shadow-card); color: var(--color-ink); display: flex; flex-direction: column; left: 50%; min-width: 190px; padding: 13px 16px; position: absolute; text-align: center; transform: translateX(-50%); z-index: 100; }
+.measurement-panel > span { color: #92400e; font-size: 0.68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.measurement-panel > strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; margin: 3px 0 10px; }
+.measurement-panel div { display: flex; gap: 8px; }
+.measurement-panel button { background: #fff7ed; border: 1px solid #fdba74; border-radius: 9px; color: #9a3412; cursor: pointer; flex: 1; font: inherit; font-size: .76rem; font-weight: 700; padding: 8px 10px; }
+.measurement-panel button:first-child { background: #b45309; border-color: #b45309; color: #fff; }
 .position-information { backdrop-filter: blur(20px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: var(--radius-card); box-shadow: var(--shadow-card); color: var(--color-ink); padding: 22px; position: absolute; right: 28px; top: 28px; width: min(350px, calc(100% - 56px)); z-index: 160; }
 .position-information-heading { align-items: center; display: flex; gap: 12px; margin-bottom: 18px; padding-right: 28px; }
 .position-information-heading .location-info-icon { background: var(--color-accent); }
