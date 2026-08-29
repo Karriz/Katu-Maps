@@ -82,6 +82,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-follow-button svg { height: 14px; width: 14px; }
 .transit-stop-destination-button { background: #fff; border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 750; margin: 12px 20px 0; padding: 9px 11px; }
 .transit-stop-destination-button:hover { background: var(--color-accent-soft); }
+.share-button { align-items: center; display: flex; gap: 6px; justify-content: center; }
+.share-button svg { height: 16px; width: 16px; }
 .transit-trip-stop-heading { align-items: baseline; display: flex; justify-content: space-between; padding: 15px 20px 11px; }
 .transit-trip-stop-heading strong { font-size: 0.77rem; }
 .transit-trip-stop-heading span { color: var(--color-muted); font-size: 0.67rem; }

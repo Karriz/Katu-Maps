@@ -30,6 +30,7 @@ import {
   Copy,
   Mountain,
   ShoppingBag,
+  Share2,
   Store,
   Ticket,
   TreePine,
@@ -56,6 +57,7 @@ import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers
 import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
+import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
@@ -532,6 +534,7 @@ function globalWaterPatternLayer(): FillLayerSpecification {
 }
 
 export function MapView() {
+  const initialDeepLinkRef = useRef<MapDeepLink | null>(parseMapDeepLink(window.location.search));
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const treeRefreshRef = useRef<(() => void) | null>(null);
@@ -632,6 +635,13 @@ export function MapView() {
     && layerToggles.buildings
     && layerToggles.trees
     && layerToggles.transitModels;
+
+  const shareSelection = (link: MapDeepLink, title: string) => {
+    const url = createMapDeepLink(window.location.href, link);
+    void shareMapDeepLink(url, title).then((result) => {
+      if (result !== 'cancelled') setMapToolNotice(result === 'shared' ? 'Shared successfully' : 'Link copied');
+    }).catch(() => setMapToolNotice('Could not share link'));
+  };
 
   useEffect(() => {
     favoritesRef.current = favorites;
@@ -1173,12 +1183,13 @@ export function MapView() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const savedView = loadPersistedMapView();
+    const deepLink = initialDeepLinkRef.current;
+    const savedView = deepLink ? null : loadPersistedMapView();
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: GLOBAL_MAP_STYLE,
-      center: savedView?.center ?? TAMPERE,
-      zoom: savedView?.zoom ?? 2.2,
+      center: deepLink?.coordinates ?? savedView?.center ?? TAMPERE,
+      zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
       pitch: savedView?.pitch ?? 0,
       bearing: savedView?.bearing ?? 0,
       // MapLibre line layers are screen-space strokes. At extreme pitch the
@@ -1709,6 +1720,36 @@ export function MapView() {
       scheduleTransitStopsUpdate();
       initialLoadComplete = true;
       setMapLoaded(true);
+      if (deepLink) {
+        initialDeepLinkRef.current = null;
+        const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
+        const showPositionFallback = () => {
+          setPositionInformation({ coordinates: deepLink.coordinates, elevation: { status: 'loading' } });
+          setContextMenuMarker(deepLink.coordinates);
+        };
+        if (deepLink.type === 'stop' && deepLink.id && (deepLink.provider === 'digitransit' || deepLink.provider === 'transitous')) {
+          const stop: TransitStopSelection = {
+            stopId: deepLink.id, provider: deepLink.provider, coordinates: deepLink.coordinates,
+            name: deepLink.name ?? 'Shared transit stop', mode: 'TRANSIT',
+          };
+          transitStopsLayer.selectSearchStop(stop);
+          setSelectedTransitStop(stop);
+        } else if (deepLink.type === 'poi' && deepLink.id) {
+          const osmMatch = /^(node|way|relation|[NWR])(\d+)$/i.exec(deepLink.id);
+          const osmType = osmMatch?.[1].toLowerCase();
+          const selection: LocationSelection = {
+            name: deepLink.name ?? 'Shared place', category: 'Place', coordinates: deepLink.coordinates,
+            source: 'map',
+            osmType: osmType === 'node' ? 'N' : osmType === 'way' ? 'W' : osmType === 'relation' ? 'R' : osmType?.toUpperCase(),
+            osmId: osmMatch?.[2],
+          };
+          setSelectedLocation(selection);
+          selectedSource?.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: deepLink.coordinates }, properties: {} }] });
+          void enrichLocationDetails(selection);
+        } else {
+          showPositionFallback();
+        }
+      }
     });
     const handleMoveEnd = () => {
       try {
@@ -2535,6 +2576,9 @@ export function MapView() {
                   () => setMapToolNotice('Could not copy coordinates'),
                 );
               }}><Copy size={16} aria-hidden="true" /> Copy coordinates</button>
+              <button className="position-copy" type="button" onClick={() => shareSelection({
+                type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
+              }, 'Map position')}><Share2 size={16} aria-hidden="true" /> Share position</button>
               {hasDisplayableElevation(positionInformation.elevation, is3dMode) && (
                 <>
                   <div className="position-information-field">
@@ -2639,6 +2683,11 @@ export function MapView() {
                 openRoute();
                 setRouteEndpoint('destination', destination);
               }}
+              onShare={() => shareSelection({
+                type: 'stop', coordinates: selectedTransitStop.coordinates,
+                zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15), provider: selectedTransitStop.provider,
+                id: selectedTransitStop.stopId, name: selectedTransitStop.name,
+              }, selectedTransitStop.name)}
               onSaveFavorite={() => saveSelection({
                 name: selectedTransitStop.name,
                 category: 'Transit stop',
@@ -2732,6 +2781,12 @@ export function MapView() {
                     )}><Star size={15} aria-hidden="true" /> Save favourite</button>
                   );
                 })()}
+                <button className="route-start-button route-secondary-button share-button" type="button" onClick={() => shareSelection({
+                  type: selectedLocation.osmId ? 'poi' : 'position', coordinates: selectedLocation.coordinates,
+                  zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
+                  id: selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
+                  provider: selectedLocation.osmId ? 'osm' : undefined, name: selectedLocation.name,
+                }, selectedLocation.name)}><Share2 size={16} aria-hidden="true" /> Share</button>
                 <button className="route-start-button" type="button" onClick={() => {
                   openRoute();
                   setRouteEndpoint('destination', selectedLocation);
