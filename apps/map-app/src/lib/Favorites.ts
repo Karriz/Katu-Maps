@@ -1,4 +1,5 @@
 export type FavoriteKind = 'home' | 'work' | 'favorite';
+export type FavoriteEntityType = 'place' | 'transit-stop' | 'position';
 
 export type Favorite = {
   id: string;
@@ -9,11 +10,28 @@ export type Favorite = {
   providerId?: string;
   provider?: string;
   iconId?: string;
+  entityType?: FavoriteEntityType;
+  transitStopId?: string;
+  transitProvider?: string;
+  transitMode?: string;
+  osmType?: string;
+  osmId?: string | number;
+  openingHours?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
   kind: FavoriteKind;
   createdAt: number;
 };
 
 export const FAVORITES_STORAGE_KEY = 'maps-favorites-v1';
+
+export function resolvedFavoriteEntityType(favorite: Favorite): FavoriteEntityType {
+  if (favorite.entityType) return favorite.entityType;
+  if (favorite.provider === 'transit') return 'transit-stop';
+  if (favorite.provider) return 'place';
+  return 'position';
+}
 
 export function favoriteIdentity(favorite: Pick<Favorite, 'coordinates' | 'providerId' | 'provider'>) {
   if (favorite.providerId) return `${favorite.provider ?? 'place'}:${favorite.providerId}`;
@@ -55,6 +73,16 @@ export function favoriteMapFeatures(favorites: Favorite[]) {
       iconId: favorite.iconId,
       favoriteId: favorite.id,
       favoriteKind: favorite.kind,
+      entityType: favorite.entityType,
+      transitStopId: favorite.transitStopId,
+      transitProvider: favorite.transitProvider,
+      transitMode: favorite.transitMode,
+      osmType: favorite.osmType,
+      osmId: favorite.osmId,
+      openingHours: favorite.openingHours,
+      phone: favorite.phone,
+      email: favorite.email,
+      website: favorite.website,
     },
   }));
 }
