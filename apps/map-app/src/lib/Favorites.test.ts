@@ -27,6 +27,12 @@ describe('favorite matching and ordering', () => {
       .toEqual([{ ...provider, name: 'Renamed' }]);
     expect(upsertFavorite([favorite()], favorite({ id: 'new', coordinates: [23.700001, 61.500001] }))).toHaveLength(1);
   });
+
+  it('keeps only one Home and one Work favorite', () => {
+    const home = favorite({ id: 'home', name: 'Home', kind: 'home' });
+    const movedHome = favorite({ id: 'moved', name: 'Home', kind: 'home', coordinates: [24, 62] });
+    expect(upsertFavorite([home], movedHome)).toEqual([{ ...movedHome, id: 'home', createdAt: home.createdAt }]);
+  });
 });
 
 it('creates map features with the favorite kind used for marker icons', () => {

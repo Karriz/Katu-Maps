@@ -22,11 +22,14 @@ export function favoriteIdentity(favorite: Pick<Favorite, 'coordinates' | 'provi
 
 export function upsertFavorite(favorites: Favorite[], favorite: Favorite) {
   const identity = favoriteIdentity(favorite);
-  const existing = favorites.find((item) => favoriteIdentity(item) === identity);
+  const existing = favorites.find((item) => favoriteIdentity(item) === identity)
+    ?? favorites.find((item) => favorite.kind !== 'favorite' && item.kind === favorite.kind);
   if (!existing) return [...favorites, favorite];
   return favorites.map((item) => item.id === existing.id
     ? { ...favorite, id: existing.id, createdAt: existing.createdAt }
-    : item);
+    : item).filter((item) => favorite.kind === 'favorite'
+      || item.kind !== favorite.kind
+      || item.id === existing.id);
 }
 
 export function orderedFavorites(favorites: Favorite[], query = '') {
