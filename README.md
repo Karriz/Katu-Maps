@@ -6,7 +6,7 @@
 
 An open 3D map for exploring places, public transport, and routes—directly in the browser.
 
-**[Open Katu Maps](https://karriz.github.io/Maps/)**
+**[Open Katu Maps](https://karriz.github.io/Katu-Maps/)**
 
 ## What it does
 
