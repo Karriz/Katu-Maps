@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeft, BusFront, ChevronRight, LocateFixed, Pencil, RefreshCw, Star, Trash2, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
+import { ArrowLeft, BusFront, ChevronRight, LocateFixed, Pencil, RefreshCw, Share2, Star, Trash2, TrainFront, TrainFrontTunnel, TramFront, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MAP_COLORS } from './MapPalette';
@@ -114,6 +114,7 @@ export function TransitDeparturesPanel({
   onDepartureBack,
   onFollowRequest,
   onSetDestination,
+  onShare,
   onSaveFavorite,
   onEditFavorite,
   onRemoveFavorite,
@@ -136,6 +137,7 @@ export function TransitDeparturesPanel({
   onDepartureBack?: () => void;
   onFollowRequest?: () => void;
   onSetDestination?: () => void;
+  onShare?: () => void;
   onSaveFavorite?: () => void;
   onEditFavorite?: () => void;
   onRemoveFavorite?: () => void;
@@ -385,6 +387,9 @@ export function TransitDeparturesPanel({
         )}
         <button className="transit-stop-destination-button" type="button" onClick={onSetDestination}>
           Use this stop as destination
+        </button>
+        <button className="transit-stop-destination-button share-button" type="button" onClick={onShare}>
+          <Share2 aria-hidden="true" /> Share stop
         </button>
         <button className="transit-panel-refresh" type="button" aria-label="Refresh departures" onClick={refresh}>
           <RefreshCw className={refreshing ? 'spinning' : ''} aria-hidden="true" />
