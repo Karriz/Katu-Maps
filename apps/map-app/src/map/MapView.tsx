@@ -59,6 +59,7 @@ import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers
 import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
+import { installBackgroundReload } from '../lib/BackgroundReload';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -84,7 +85,6 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-contact-shadow',
 ];
 const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
-const STALE_BACKGROUND_MS = 5 * 60_000;
 
 function closeRangeCameraOffset(): [number, number] {
   if (window.innerWidth > 760) return [0, 0];
@@ -564,7 +564,6 @@ export function MapView() {
   const [searchResults, setSearchResults] = useState<PhotonFeature[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
-  const [staleRefreshSignal, setStaleRefreshSignal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResultsQuery, setSearchResultsQuery] = useState('');
@@ -1769,21 +1768,7 @@ export function MapView() {
       scheduleTreeUpdate();
       scheduleTransitStopsUpdate();
     };
-    let hiddenAt: number | null = document.hidden ? Date.now() : null;
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        hiddenAt = Date.now();
-        return;
-      }
-      if (hiddenAt !== null && Date.now() - hiddenAt >= STALE_BACKGROUND_MS) {
-        transitSearchCacheRef.current.clear();
-        scheduleTransitStopsUpdate();
-        setStaleRefreshSignal((value) => value + 1);
-        map.triggerRepaint();
-      }
-      hiddenAt = null;
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const removeBackgroundReload = installBackgroundReload(document, () => window.location.reload());
     const handleCameraMove = () => {
       updateGlobalLabelDensity();
       const nextOrientationChanged = Math.abs(map.getBearing()) > 1 || map.getPitch() > 1;
@@ -1826,7 +1811,7 @@ export function MapView() {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       map.off('move', handleCameraMove);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      removeBackgroundReload();
       map.off('moveend', handleMoveEnd);
       map.off('zoomstart', handleMapGestureStart);
       map.off('dragstart', handleMapGestureStart);
@@ -2650,7 +2635,6 @@ export function MapView() {
             <TransitDeparturesPanel
               stop={selectedTransitStop}
               onDetailOpenChange={setTransitDepartureDetailOpen}
-              staleRefreshSignal={staleRefreshSignal}
               navigationBackSignal={transitNavigationBackSignal}
               onDepartureSelect={({ tripId, mode, color, serviceDate, departure, scheduledDeparture }) => {
                 vehicleFollowEnabledRef.current = true;
