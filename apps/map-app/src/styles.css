@@ -416,7 +416,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .transit-trip-panel { max-height: min(58dvh, 500px); }
   .location-info-panel { max-height: min(68dvh, 560px); }
   .transit-panel-header { padding-top: 18px; }
-  .location-info-panel { flex-wrap: wrap; padding-top: 18px; }
+  .location-info-panel { flex-wrap: wrap; padding-top: 0; }
   .location-info-panel .mobile-sheet-handle { flex-basis: 100%; width: 100%; }
   .location-info-close { top: 58px; }
   .layer-panel::before {
@@ -435,7 +435,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     border-radius: 18px 18px 0 0;
     bottom: 0;
     left: 0;
-    padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: 0;
     max-height: min(62dvh, 600px);
     overflow-y: auto;
     top: auto;
@@ -582,7 +582,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .mobile-sheet-header:active, .mobile-sheet-handle:active, .route-panel-heading:active { cursor: grabbing; }
   .route-panel.mobile-bottom-sheet { display: flex; flex-direction: column; overflow: hidden; }
   .route-panel.mobile-bottom-sheet .mobile-sheet-handle, .route-panel.mobile-bottom-sheet .route-panel-heading { background: rgb(255 255 255 / 98%); flex: 0 0 auto; position: relative; z-index: 3; }
-  .route-panel.mobile-bottom-sheet .route-panel-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .route-panel.mobile-bottom-sheet .route-panel-heading { padding: 16px 16px 0; }
+  .route-panel.mobile-bottom-sheet .route-panel-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
   .route-panel.mobile-bottom-sheet[data-snap='collapsed'] { height: var(--mobile-sheet-height); }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
 }
