@@ -53,6 +53,7 @@ import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutlier
 import { elevationResult, formatCoordinates, formatElevation, queryTerrainElevation, type ElevationState } from './PositionInformation';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, markerFeatureCollection } from './LocationMarkers';
+import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -78,6 +79,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-contact-shadow',
 ];
 const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
+const STALE_BACKGROUND_MS = 5 * 60_000;
 
 function closeRangeCameraOffset(): [number, number] {
   if (window.innerWidth > 760) return [0, 0];
@@ -554,6 +556,8 @@ export function MapView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PhotonFeature[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [staleRefreshSignal, setStaleRefreshSignal] = useState(0);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResultsQuery, setSearchResultsQuery] = useState('');
@@ -657,7 +661,7 @@ export function MapView() {
     };
   }, [positionInformation?.coordinates]);
 
-  const favoriteFeatures = orderedFavorites(favorites, searchQuery).map((favorite): PhotonFeature => ({
+  const favoriteFeatures = orderedFavorites(favorites, favoritesOpen ? '' : searchQuery).map((favorite): PhotonFeature => ({
     geometry: { coordinates: favorite.coordinates },
     properties: {
       name: favorite.name,
@@ -672,7 +676,7 @@ export function MapView() {
   }));
   const displayedSearchResults = [
     ...favoriteFeatures,
-    ...(searchQuery.trim().length >= 2 ? searchResults : []),
+    ...(!favoritesOpen && searchQuery.trim().length >= 2 ? searchResults : []),
   ].filter((feature, index, all) => all.findIndex((candidate) => (
     candidate.geometry.coordinates.join(',') === feature.geometry.coordinates.join(',')
   )) === index).slice(0, 8);
@@ -1141,13 +1145,14 @@ export function MapView() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
+    const savedView = loadPersistedMapView();
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: GLOBAL_MAP_STYLE,
-      center: TAMPERE,
-      zoom: 2.2,
-      pitch: 0,
-      bearing: 0,
+      center: savedView?.center ?? TAMPERE,
+      zoom: savedView?.zoom ?? 2.2,
+      pitch: savedView?.pitch ?? 0,
+      bearing: savedView?.bearing ?? 0,
       // MapLibre line layers are screen-space strokes. At extreme pitch the
       // perspective projection makes foreground roads look disproportionately
       // wide; keep the line-based mode readable until polygon roads return.
@@ -1661,10 +1666,34 @@ export function MapView() {
       setMapLoaded(true);
     });
     const handleMoveEnd = () => {
+      try {
+        const center = map.getCenter();
+        savePersistedMapView({
+          center: [center.lng, center.lat],
+          zoom: map.getZoom(),
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
+        });
+      } catch { /* local storage can be disabled */ }
       updateGlobalRoadWidths();
       scheduleTreeUpdate();
       scheduleTransitStopsUpdate();
     };
+    let hiddenAt: number | null = document.hidden ? Date.now() : null;
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= STALE_BACKGROUND_MS) {
+        transitSearchCacheRef.current.clear();
+        scheduleTransitStopsUpdate();
+        setStaleRefreshSignal((value) => value + 1);
+        map.triggerRepaint();
+      }
+      hiddenAt = null;
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     const handleCameraMove = () => {
       updateGlobalLabelDensity();
       const nextOrientationChanged = Math.abs(map.getBearing()) > 1 || map.getPitch() > 1;
@@ -1707,6 +1736,7 @@ export function MapView() {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       map.off('move', handleCameraMove);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       map.off('moveend', handleMoveEnd);
       map.off('zoomstart', handleMapGestureStart);
       map.off('dragstart', handleMapGestureStart);
@@ -2305,6 +2335,7 @@ export function MapView() {
               setSearchQuery(query);
               setHighlightedSearchResults([]);
               setSearchOpen(true);
+              setFavoritesOpen(false);
               setLayersOpen(false);
             }}
             onSearchClear={() => {
@@ -2318,6 +2349,18 @@ export function MapView() {
             }}
             onSearchFocus={() => {
               setSearchOpen(true);
+              setLayersOpen(false);
+            }}
+            onSearchClose={() => {
+              setSearchOpen(false);
+              setFavoritesOpen(false);
+            }}
+            favoritesOpen={favoritesOpen}
+            onFavoritesToggle={() => {
+              setFavoritesOpen((open) => {
+                setSearchOpen(!open);
+                return !open;
+              });
               setLayersOpen(false);
             }}
             onSearchSubmit={() => {
@@ -2472,6 +2515,7 @@ export function MapView() {
             <TransitDeparturesPanel
               stop={selectedTransitStop}
               onDetailOpenChange={setTransitDepartureDetailOpen}
+              staleRefreshSignal={staleRefreshSignal}
               navigationBackSignal={transitNavigationBackSignal}
               onDepartureSelect={({ tripId, mode, color, serviceDate, departure, scheduledDeparture }) => {
                 vehicleFollowEnabledRef.current = true;
