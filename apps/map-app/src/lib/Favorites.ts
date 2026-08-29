@@ -40,6 +40,22 @@ export function orderedFavorites(favorites: Favorite[], query = '') {
     });
 }
 
+export function favoriteMapFeatures(favorites: Favorite[]) {
+  return favorites.map((favorite) => ({
+    type: 'Feature' as const,
+    id: favorite.id,
+    geometry: { type: 'Point' as const, coordinates: favorite.coordinates },
+    properties: {
+      name: favorite.name,
+      class: favorite.category,
+      city: favorite.address,
+      iconId: favorite.iconId,
+      favoriteId: favorite.id,
+      favoriteKind: favorite.kind,
+    },
+  }));
+}
+
 export function loadFavorites(storage: Pick<Storage, 'getItem'> = window.localStorage): Favorite[] {
   try {
     const value = JSON.parse(storage.getItem(FAVORITES_STORAGE_KEY) ?? '[]') as unknown;
