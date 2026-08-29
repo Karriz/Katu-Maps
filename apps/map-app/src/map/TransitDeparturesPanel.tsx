@@ -10,7 +10,7 @@ import {
   type TransitDeparture as Departure,
   type TransitTripPlace as TripPlace,
 } from './transit';
-import { resolveSelectedTrip } from './transit/tripTimeline';
+import { resolveSelectedTripResult } from './transit/tripTimeline';
 
 function text(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback;
@@ -126,6 +126,7 @@ export function TransitDeparturesPanel({
     provider: Departure['provider'];
     serviceDate?: string;
     departure: string;
+    scheduledDeparture?: string;
   }) => void;
   onDepartureBack?: () => void;
   onFollowRequest?: () => void;
@@ -201,18 +202,20 @@ export function TransitDeparturesPanel({
       controller.signal,
     )
       .then((payload) => {
-        const resolved = resolveSelectedTrip(payload, {
+        const resolution = resolveSelectedTripResult(payload, {
           tripId,
           provider: selectedDeparture.provider,
           serviceDate: selectedDeparture.serviceDate,
           boardingStopId: stop.stopId,
-          selectedDeparture: selectedDeparture.departure,
+          scheduledDeparture: selectedDeparture.scheduledDeparture,
         });
-        if (!resolved) {
+        if (!resolution.ok) {
+          console.warn('Selected trip could not be resolved.', { provider: selectedDeparture.provider, reason: resolution.reason });
           setRouteStops([]);
           setRouteStopsError('Live trip details are temporarily unavailable.');
           return;
         }
+        const resolved = resolution.trip;
         setRouteStops(resolved.stops);
       })
       .catch((requestError: unknown) => {
@@ -416,6 +419,7 @@ export function TransitDeparturesPanel({
                     provider: departure.provider,
                     serviceDate: departure.serviceDate,
                     departure: departure.departure,
+                    scheduledDeparture: departure.scheduledDeparture,
                   });
                 }}
                 style={cardStyle}

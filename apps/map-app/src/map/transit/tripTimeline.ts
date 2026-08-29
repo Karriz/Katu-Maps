@@ -1,28 +1,44 @@
 import type { TransitProviderId, TransitTrip, TransitTripLeg, TransitTripPlace } from './types';
 
-/** Selected departures and trip details may differ slightly as realtime feeds update. */
-export const BOARDING_TIME_TOLERANCE_MS = 2 * 60_000;
+/** Provider timetable values are minute-resolution in some feeds. */
+export const BOARDING_TIME_TOLERANCE_MS = 60_000;
 export const TRIP_END_GRACE_MS = 60_000;
+
+export type TripResolutionReason =
+  | 'trip-id-mismatch'
+  | 'service-date-mismatch'
+  | 'boarding-stop-not-found'
+  | 'boarding-occurrence-ambiguous'
+  | 'scheduled-call-time-mismatch'
+  | 'route-calls-unusable';
 
 export type SelectedTripContext = {
   tripId: string;
   provider: TransitProviderId;
   serviceDate?: string;
   boardingStopId?: string;
-  selectedDeparture?: string;
+  scheduledDeparture?: string;
 };
 
 export type ResolvedTrip = {
   leg: TransitTripLeg;
   stops: TransitTripPlace[];
   boardingStopIndex: number;
+  /** Best available timeline. Route identity does not depend on its validity. */
   times: number[];
+  vehicleTimelineUsable: boolean;
 };
 
-export function tripPlaceTime(place: TransitTripPlace, departure = false) {
-  const value = departure
-    ? place.departure ?? place.arrival ?? place.scheduledDeparture ?? place.scheduledArrival
-    : place.arrival ?? place.departure ?? place.scheduledArrival ?? place.scheduledDeparture;
+export type TripResolution =
+  | { ok: true; trip: ResolvedTrip }
+  | { ok: false; reason: TripResolutionReason };
+
+export function tripPlaceTime(place: TransitTripPlace, departure = false, scheduledOnly = false) {
+  const value = scheduledOnly
+    ? (departure ? place.scheduledDeparture ?? place.scheduledArrival : place.scheduledArrival ?? place.scheduledDeparture)
+    : departure
+      ? place.departure ?? place.arrival ?? place.scheduledDeparture ?? place.scheduledArrival
+      : place.arrival ?? place.departure ?? place.scheduledArrival ?? place.scheduledDeparture;
   if (typeof value === 'number') return value < 10_000_000_000 ? value * 1000 : value;
   if (typeof value !== 'string') return undefined;
   const parsed = Date.parse(value);
@@ -34,47 +50,52 @@ function places(leg: TransitTripLeg) {
     .filter((place): place is TransitTripPlace => Boolean(place));
 }
 
-/**
- * Produces the single timeline used by both the stop panel and map marker.
- * Invalid/ambiguous instances are rejected rather than partially rendered.
- */
-export function resolveSelectedTrip(payload: TransitTrip, context: SelectedTripContext): ResolvedTrip | undefined {
-  if (context.provider === 'transitous' && !context.serviceDate) return undefined;
-  const matching = payload.legs.filter((leg) => leg.tripId === context.tripId);
-  if (matching.length !== 1) return undefined;
+/** Resolve identity first; validate the optional vehicle timeline separately. */
+export function resolveSelectedTripResult(payload: TransitTrip, context: SelectedTripContext): TripResolution {
+  const matching = payload.legs.filter((leg) => leg.tripId === context.tripId
+    && (!leg.provider || leg.provider === context.provider));
+  if (matching.length !== 1) return { ok: false, reason: 'trip-id-mismatch' };
   const leg = matching[0];
-  if (context.serviceDate && leg.serviceDate !== context.serviceDate) return undefined;
-  const stops = places(leg);
-  if (stops.length < 2) return undefined;
-
-  const times = stops.map((stop, index) => tripPlaceTime(stop, index === 0));
-  if (times.some((time) => time === undefined)) return undefined;
-  const resolvedTimes = times as number[];
-  const callSequence = stops.flatMap((stop) => [tripPlaceTime(stop), tripPlaceTime(stop, true)]);
-  if (callSequence.some((time) => time === undefined)) return undefined;
-  if ((callSequence as number[]).some((time, index, sequence) => index > 0 && time < sequence[index - 1])) {
-    return undefined;
+  if (context.serviceDate && leg.serviceDate && leg.serviceDate !== context.serviceDate) {
+    return { ok: false, reason: 'service-date-mismatch' };
   }
+  const stops = places(leg);
+  if (stops.length < 2) return { ok: false, reason: 'route-calls-unusable' };
 
   let boardingStopIndex = -1;
-  if (context.boardingStopId && context.selectedDeparture) {
-    const selectedTime = Date.parse(context.selectedDeparture);
-    if (!Number.isFinite(selectedTime)) return undefined;
+  if (context.boardingStopId) {
     const candidates = stops.flatMap((stop, index) => (
       stop.stopId === context.boardingStopId || stop.parentStopId === context.boardingStopId ? [index] : []
     ));
-    boardingStopIndex = candidates.reduce((best, index) => {
-      const candidateTime = tripPlaceTime(stops[index], true);
-      if (candidateTime === undefined) return best;
-      if (best < 0) return index;
-      return Math.abs(candidateTime - selectedTime) < Math.abs(tripPlaceTime(stops[best], true)! - selectedTime)
-        ? index : best;
-    }, -1);
-    if (boardingStopIndex < 0) return undefined;
-    const boardingTime = tripPlaceTime(stops[boardingStopIndex], true);
-    if (boardingTime === undefined || Math.abs(boardingTime - selectedTime) > BOARDING_TIME_TOLERANCE_MS) return undefined;
+    if (!candidates.length) return { ok: false, reason: 'boarding-stop-not-found' };
+    if (context.scheduledDeparture) {
+      const selectedTime = Date.parse(context.scheduledDeparture);
+      const matchingCalls = candidates.filter((index) => {
+        const callTime = tripPlaceTime(stops[index], true, true);
+        return Number.isFinite(selectedTime) && callTime !== undefined
+          && Math.abs(callTime - selectedTime) <= BOARDING_TIME_TOLERANCE_MS;
+      });
+      if (!matchingCalls.length) return { ok: false, reason: 'scheduled-call-time-mismatch' };
+      if (matchingCalls.length > 1) return { ok: false, reason: 'boarding-occurrence-ambiguous' };
+      [boardingStopIndex] = matchingCalls;
+    } else if (candidates.length === 1) {
+      [boardingStopIndex] = candidates;
+    } else {
+      return { ok: false, reason: 'boarding-occurrence-ambiguous' };
+    }
   }
-  return { leg, stops, boardingStopIndex, times: resolvedTimes };
+
+  const parsed = stops.map((stop, index) => tripPlaceTime(stop, index === 0));
+  const times = parsed.filter((time): time is number => time !== undefined);
+  const vehicleTimelineUsable = times.length === stops.length
+    && times.every((time, index) => index === 0 || time >= times[index - 1]);
+  return { ok: true, trip: { leg, stops, boardingStopIndex, times, vehicleTimelineUsable } };
+}
+
+/** Compatibility convenience for callers that only need a resolved route. */
+export function resolveSelectedTrip(payload: TransitTrip, context: SelectedTripContext) {
+  const result = resolveSelectedTripResult(payload, context);
+  return result.ok ? result.trip : undefined;
 }
 
 export function tripIsDisplayableAt(times: number[], now: number) {

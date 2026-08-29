@@ -1,78 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import type { TransitTrip } from './types';
-import { BOARDING_TIME_TOLERANCE_MS, resolveSelectedTrip, tripIsDisplayableAt } from './tripTimeline';
+import digitransit from './__fixtures__/digitransit-trip.json';
+import transitous from './__fixtures__/transitous-trip.json';
+import type { TransitProviderId, TransitTrip } from './types';
+import { resolveSelectedTripResult, tripIsDisplayableAt } from './tripTimeline';
 
-const serviceDate = '2026-08-28';
-const tripId = 'tampere:30:trip';
-const iso = (minute: number) => new Date(Date.UTC(2026, 7, 28, 20, minute)).toISOString();
-
-function trip(stops: Array<{ id: string; time: string }>, date = serviceDate): TransitTrip {
-  const places = stops.map(({ id, time }) => ({ stopId: id, name: id, arrival: time, departure: time }));
-  return { legs: [{
-    tripId,
-    serviceDate: date,
-    from: places[0],
-    intermediateStops: places.slice(1, -1),
-    to: places.at(-1),
-    coordinates: [[23.7, 61.4], [23.8, 61.5]],
-  }] };
+function resolve(fixture: typeof digitransit | typeof transitous, provider: TransitProviderId, overrides = {}) {
+  return resolveSelectedTripResult(fixture.trip as TransitTrip, { tripId: fixture.selection.tripId, provider,
+    serviceDate: fixture.selection.serviceDate, boardingStopId: fixture.selection.stopId,
+    scheduledDeparture: fixture.selection.scheduledDeparture, ...overrides });
 }
 
-const context = {
-  tripId,
-  provider: 'digitransit' as const,
-  serviceDate,
-  boardingStopId: 'board',
-  selectedDeparture: iso(12),
-};
-
-describe('selected trip timeline validation', () => {
-  it('keeps every downstream stop after a future boarding stop', () => {
-    const resolved = resolveSelectedTrip(trip([
-      { id: 'previous', time: iso(5) }, { id: 'board', time: iso(12) }, { id: 'next', time: iso(18) },
-    ]), context);
-    expect(resolved?.boardingStopIndex).toBe(1);
-    expect(resolved?.times[2]).toBeGreaterThan(resolved!.times[1]);
+describe('selected trip identity resolution', () => {
+  it('resolves delayed Digitransit by scheduled call rather than realtime clock', () => {
+    const result = resolve(digitransit, 'digitransit');
+    expect(result.ok && result.trip.boardingStopIndex).toBe(1);
   });
-
-  it('rejects a mixed realtime/scheduled timeline which moves backwards', () => {
-    expect(resolveSelectedTrip(trip([
-      { id: 'previous', time: iso(5) }, { id: 'board', time: iso(12) }, { id: 'next', time: iso(9) },
-    ]), context)).toBeUndefined();
+  it('rejects a previous same-line service through exact trip identity', () => {
+    expect(resolve(digitransit, 'digitransit', { tripId: 'tampere:previous-trip' }))
+      .toEqual({ ok: false, reason: 'trip-id-mismatch' });
   });
-
-  it('selects the matching occurrence when a loop visits a stop twice', () => {
-    const resolved = resolveSelectedTrip(trip([
-      { id: 'board', time: iso(2) }, { id: 'middle', time: iso(8) }, { id: 'board', time: iso(12) },
-    ]), context);
-    expect(resolved?.boardingStopIndex).toBe(2);
+  it('matches a station selection to its child platform', () => {
+    expect(resolve(digitransit, 'digitransit', { boardingStopId: 'tampere:station' }).ok).toBe(true);
   });
-
-  it('rejects departure and service-instance mismatches', () => {
-    expect(resolveSelectedTrip(trip([{ id: 'board', time: iso(8) }, { id: 'next', time: iso(18) }]), context)).toBeUndefined();
-    expect(resolveSelectedTrip(trip([
-      { id: 'board', time: iso(12) }, { id: 'next', time: iso(18) },
-    ], '2026-08-29'), context)).toBeUndefined();
+  it('selects a repeated occurrence by schedule and rejects ambiguity without it', () => {
+    const loop = structuredClone(transitous);
+    loop.trip.legs[0].intermediateStops.push({ ...loop.trip.legs[0].intermediateStops[0],
+      scheduledArrival: '2026-08-29T09:10:00Z', scheduledDeparture: '2026-08-29T09:10:00Z' });
+    expect(resolve(loop, 'transitous').ok).toBe(true);
+    expect(resolve(loop, 'transitous', { scheduledDeparture: undefined }))
+      .toEqual({ ok: false, reason: 'boarding-occurrence-ambiguous' });
   });
-
-  it('accepts midnight rollover and the documented boarding tolerance', () => {
-    const selected = new Date(Date.parse('2026-08-28T23:59:00+03:00') + BOARDING_TIME_TOLERANCE_MS).toISOString();
-    const resolved = resolveSelectedTrip(trip([
-      { id: 'board', time: '2026-08-28T23:59:00+03:00' },
-      { id: 'next', time: '2026-08-29T00:08:00+03:00' },
-    ]), { ...context, selectedDeparture: selected });
-    expect(resolved).toBeDefined();
+  it('supports schedule-only Transitous without inventing a service-date requirement', () => {
+    const result = resolve(transitous, 'transitous', { serviceDate: undefined });
+    expect(result.ok && result.trip.vehicleTimelineUsable).toBe(true);
   });
-
-  it('does not resolve an ambiguous Transitous service instance', () => {
-    expect(resolveSelectedTrip(trip([
-      { id: 'board', time: iso(12) }, { id: 'next', time: iso(18) },
-    ]), { ...context, provider: 'transitous', serviceDate: undefined })).toBeUndefined();
+  it('keeps route calls when inconsistent realtime makes only vehicle estimation unsafe', () => {
+    const partial = structuredClone(digitransit);
+    partial.trip.legs[0].intermediateStops[0].departure = '2026-08-29T06:40:00Z';
+    partial.trip.legs[0].intermediateStops[0].arrival = '2026-08-29T06:40:00Z';
+    const result = resolve(partial, 'digitransit');
+    expect(result.ok && result.trip.stops).toHaveLength(3);
+    expect(result.ok && result.trip.vehicleTimelineUsable).toBe(false);
   });
-
-  it('removes a completed marker after its short grace period', () => {
-    const end = Date.parse(iso(18));
-    expect(tripIsDisplayableAt([Date.parse(iso(12)), end], end + 30_000)).toBe(true);
-    expect(tripIsDisplayableAt([Date.parse(iso(12)), end], end + 61_000)).toBe(false);
+  it('handles midnight and expires completed markers', () => {
+    const end = Date.parse('2026-08-30T00:08:00Z');
+    expect(tripIsDisplayableAt([Date.parse('2026-08-29T23:59:00Z'), end], end + 30_000)).toBe(true);
+    expect(tripIsDisplayableAt([Date.parse('2026-08-29T23:59:00Z'), end], end + 61_000)).toBe(false);
   });
 });
