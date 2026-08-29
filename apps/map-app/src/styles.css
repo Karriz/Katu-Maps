@@ -394,7 +394,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .route-sheet-grabber { align-items: center; background: transparent; border: 0; cursor: grab; display: flex; height: 18px; justify-content: center; margin: -10px -8px 0; padding: 0; touch-action: none; width: calc(100% + 16px); }
   .route-sheet-grabber:active { cursor: grabbing; }
   .route-sheet-grabber span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 38px; }
-  .route-panel.route-sheet-collapsed { max-height: 92px; overflow: hidden; }
   @keyframes mobile-sheet-enter {
     from { opacity: 0; transform: translateY(24px); }
     to { opacity: 1; transform: translateY(0); }
@@ -523,9 +522,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .mobile-sheet-header:active, .mobile-sheet-drag-region:active, .route-sheet-grabber:active, .route-panel-heading:active { cursor: grabbing; }
   .mobile-sheet-drag-region { align-items: center; display: flex; height: 24px; justify-content: center; left: 0; position: absolute; right: 0; top: 0; z-index: 2; }
   .mobile-sheet-drag-region span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 38px; }
-  .route-panel.mobile-bottom-sheet { display: flex; flex-direction: column; overflow-y: auto; }
-  .route-panel.mobile-bottom-sheet .route-sheet-grabber, .route-panel.mobile-bottom-sheet .route-panel-heading { background: rgb(255 255 255 / 98%); flex: 0 0 auto; position: sticky; top: 0; z-index: 3; }
-  .route-panel.mobile-bottom-sheet .route-panel-heading { top: 8px; }
+  .route-panel.mobile-bottom-sheet { display: flex; flex-direction: column; overflow: hidden; }
+  .route-panel.mobile-bottom-sheet .route-sheet-grabber, .route-panel.mobile-bottom-sheet .route-panel-heading { background: rgb(255 255 255 / 98%); flex: 0 0 auto; position: relative; z-index: 3; }
+  .route-panel.mobile-bottom-sheet .route-panel-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .route-panel.mobile-bottom-sheet[data-snap='collapsed'] { height: var(--mobile-sheet-height); }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-refresh { bottom: auto; right: 64px; top: 20px; }
