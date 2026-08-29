@@ -2120,7 +2120,7 @@ export function MapView() {
               stop={selectedTransitStop}
               onDetailOpenChange={setTransitDepartureDetailOpen}
               navigationBackSignal={transitNavigationBackSignal}
-              onDepartureSelect={({ tripId, mode, color, serviceDate, departure }) => {
+              onDepartureSelect={({ tripId, mode, color, serviceDate, departure, scheduledDeparture }) => {
                 vehicleFollowEnabledRef.current = true;
                 setVehicleFollowing(true);
                 setVehicleFollowAvailable(true);
@@ -2135,6 +2135,7 @@ export function MapView() {
                     stopId: selectedTransitStop.stopId,
                     coordinates: selectedTransitStop.coordinates,
                     departure,
+                    scheduledDeparture,
                   },
                 );
               }}

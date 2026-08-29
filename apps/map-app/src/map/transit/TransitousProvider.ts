@@ -77,6 +77,7 @@ function tripLeg(raw: RawLeg) {
       .filter((place): place is RawPlace => finiteNumber(place?.lon) && finiteNumber(place?.lat))
       .map((place) => [place.lon as number, place.lat as number] as [number, number]);
   return {
+    provider: 'transitous' as const,
     tripId: text(raw.tripId) || undefined,
     startTime: absoluteTime(raw.startTime),
     endTime: absoluteTime(raw.endTime),
@@ -146,6 +147,7 @@ export const transitousProvider: TransitProvider = {
       if (!departure) return [];
       return [{
         departure,
+        scheduledDeparture: absoluteTime(item.place?.scheduledDeparture),
         mode: text(item.mode) || undefined,
         routeId: text(item.routeId) || undefined,
         tripId: text(item.tripId) || undefined,
@@ -157,6 +159,7 @@ export const transitousProvider: TransitProvider = {
         routeTextColor: text(item.routeTextColor) || undefined,
         cancelled: item.cancelled === true,
         realTime: item.realTime === true,
+        serviceDate: absoluteTime(item.place?.scheduledDeparture)?.slice(0, 10),
         provider: 'transitous' as const,
       }];
     });

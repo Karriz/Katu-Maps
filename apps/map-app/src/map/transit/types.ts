@@ -24,6 +24,8 @@ export type TransitStopSelection = Pick<
 
 export type TransitDeparture = {
   departure: string;
+  /** Stable timetable value used to identify the stop call; `departure` may be realtime. */
+  scheduledDeparture?: string;
   mode?: string;
   routeId?: string;
   tripId?: string;
@@ -53,6 +55,7 @@ export type TransitTripPlace = {
 };
 
 export type TransitTripLeg = {
+  provider?: TransitProviderId;
   tripId?: string;
   serviceDate?: string;
   startTime?: string;

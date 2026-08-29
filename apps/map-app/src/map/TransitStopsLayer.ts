@@ -20,7 +20,7 @@ import {
   type TransitTripLeg,
   type TransitTripPlace,
 } from './transit';
-import { resolveSelectedTrip, tripIsDisplayableAt } from './transit/tripTimeline';
+import { resolveSelectedTripResult, tripIsDisplayableAt } from './transit/tripTimeline';
 
 const TRANSIT_SOURCE_ID = 'transit-stops';
 const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
@@ -56,7 +56,7 @@ type SelectedTrip = {
   showRoute: boolean;
   provider: TransitProviderId;
   serviceDate?: string;
-  boardingStop?: { stopId: string; coordinates: [number, number]; departureTime: number };
+  boardingStop?: { stopId: string; coordinates: [number, number]; departureTime: number; scheduledDeparture?: string };
 };
 
 export type TransitVehiclePose = {
@@ -729,7 +729,7 @@ export class TransitStopsLayer {
     showRoute = true,
     provider: TransitProviderId = 'transitous',
     serviceDate?: string,
-    boardingStop?: { stopId: string; coordinates: [number, number]; departure: string },
+    boardingStop?: { stopId: string; coordinates: [number, number]; departure: string; scheduledDeparture?: string },
   ) {
     if (!this.map || !tripId) return;
     this.clearSelectedTrip();
@@ -744,6 +744,7 @@ export class TransitStopsLayer {
         stopId: boardingStop.stopId,
         coordinates: boardingStop.coordinates,
         departureTime: timestamp(boardingStop.departure) ?? Number.NEGATIVE_INFINITY,
+        scheduledDeparture: boardingStop.scheduledDeparture,
       } : undefined,
     };
     void this.loadSelectedTrip();
@@ -774,14 +775,17 @@ export class TransitStopsLayer {
       ) return;
 
       const validatesBoardingStop = selection.boardingStop && !selection.boardingStop.stopId.startsWith('route-origin:');
-      const resolved = resolveSelectedTrip(payload, {
+      const resolution = resolveSelectedTripResult(payload, {
         tripId: selection.tripId,
         provider: selection.provider,
         serviceDate: selection.serviceDate,
         boardingStopId: validatesBoardingStop ? selection.boardingStop?.stopId : undefined,
-        selectedDeparture: validatesBoardingStop && Number.isFinite(selection.boardingStop?.departureTime)
-          ? new Date(selection.boardingStop!.departureTime).toISOString() : undefined,
+        scheduledDeparture: validatesBoardingStop ? selection.boardingStop?.scheduledDeparture : undefined,
       });
+      if (!resolution.ok) console.warn('Selected map trip could not be resolved.', {
+        provider: selection.provider, reason: resolution.reason,
+      });
+      const resolved = resolution.ok ? resolution.trip : undefined;
       const estimatedLegs: EstimatedTripLeg[] = [];
       const features: RouteLineFeature[] = resolved && resolved.leg.coordinates.length >= 2
         ? [{
@@ -791,7 +795,7 @@ export class TransitStopsLayer {
         }] : [];
       if (resolved) {
         const estimatedLeg = buildEstimatedTripLeg(resolved.leg, resolved.leg.coordinates);
-        if (estimatedLeg) estimatedLegs.push(estimatedLeg);
+        if (estimatedLeg && resolved.vehicleTimelineUsable) estimatedLegs.push(estimatedLeg);
       }
       this.estimatedTripLegs = estimatedLegs;
       const source = this.map.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
