@@ -14,7 +14,9 @@ import {
   CARTOON_SUN_POLAR_DEGREES,
 } from './CartoonLighting';
 
+
 const TREE_MIN_ZOOM = 12;
+const TREE_MAX_VIEWPORT_METERS = 4_000;
 const MAX_TREE_COUNT = 5000;
 const MAX_ELEVATION_CACHE_ENTRIES = MAX_TREE_COUNT * 2;
 const FOREST_TREE_SPACING_METERS = 32;
@@ -283,7 +285,39 @@ function treeGrowth(start: number, now: number) {
   return 1 - (1 - progress) ** 3;
 }
 
+function viewportSpanMeters(
+  bounds: { west: number; south: number; east: number; north: number },
+) {
+  const southWest = toMetricPoint([bounds.west, bounds.south]);
+  const northEast = toMetricPoint([bounds.east, bounds.north]);
+  if (!southWest || !northEast) return Number.POSITIVE_INFINITY;
+  const averageY = (southWest[1] + northEast[1]) * 0.5;
+  // toMetricPoint's x axis ignores latitude compression (see its comment-free
+  // equirectangular math above); apply the same longitude scale used
+  // elsewhere in this file so the span is a real-world metre distance rather
+  // than one inflated by 1/cos(latitude) at higher latitudes.
+  const xSpan = Math.abs(northEast[0] - southWest[0]) * longitudeScaleAtMetricY(averageY);
+  const ySpan = Math.abs(northEast[1] - southWest[1]);
+  return Math.max(xSpan, ySpan);
+}
+
+export function shouldRenderTreesForViewport(
+  bounds: { west: number; south: number; east: number; north: number },
+  zoom: number,
+) {
+  if (zoom < TREE_MIN_ZOOM) return false;
+  return viewportSpanMeters(bounds) <= TREE_MAX_VIEWPORT_METERS;
+}
+
 function visibleTrees(map: MaplibreMap, sources: TreeSourceConfig) {
+  const zoom = map.getZoom();
+  const bounds = map.getBounds();
+  if (!shouldRenderTreesForViewport({
+    west: bounds.getWest(),
+    south: bounds.getSouth(),
+    east: bounds.getEast(),
+    north: bounds.getNorth(),
+  }, zoom)) return [];
   const budget = MAX_TREE_COUNT;
   const samplingBounds = visibleMetricBounds(map);
   const waterFeatures = sourceFeatures(map, sources.sourceId, sources.waterLayers);
@@ -795,14 +829,14 @@ export class TreeModelLayer implements CustomLayerInterface {
     if (!map || !trunkMesh || !broadleafMesh || !coniferMesh
       || !shrubMesh || !shadowMesh) return;
 
-    if (map.getZoom() < TREE_MIN_ZOOM) {
-      this.displayedTrees.clear();
-      this.growthAnimationActive = false;
-      trunkMesh.count = 0;
-      broadleafMesh.count = 0;
-      coniferMesh.count = 0;
-      shrubMesh.count = 0;
-      shadowMesh.count = 0;
+    const bounds = map.getBounds();
+    if (!shouldRenderTreesForViewport({
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    }, map.getZoom())) {
+      this.clearDisplayedTrees();
       map.triggerRepaint();
       return;
     }
@@ -1007,10 +1041,39 @@ export class TreeModelLayer implements CustomLayerInterface {
     map.triggerRepaint();
   }
 
+  private clearDisplayedTrees() {
+    this.displayedTrees.clear();
+    this.growthAnimationActive = false;
+    for (const mesh of [
+      this.shadowMesh,
+      this.trunkMesh,
+      this.broadleafMesh,
+      this.coniferMesh,
+      this.shrubMesh,
+    ]) {
+      if (!mesh) continue;
+      mesh.count = 0;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
   render(_gl: WebGLRenderingContext | WebGL2RenderingContext, options: CustomRenderMethodInput) {
     const map = this.map;
     const renderer = this.renderer;
-    if (!map || !renderer || map.getZoom() < TREE_MIN_ZOOM) return;
+    if (!map || !renderer) return;
+
+    const bounds = map.getBounds();
+    const viewportAllowed = shouldRenderTreesForViewport({
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    }, map.getZoom());
+    if (!viewportAllowed) {
+      this.clearDisplayedTrees();
+      map.triggerRepaint();
+      return;
+    }
 
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
       this.sceneOrigin,

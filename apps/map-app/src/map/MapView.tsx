@@ -692,6 +692,7 @@ export function MapView() {
   const positionSheet = useMobileBottomSheet('half');
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const selectionCameraActiveRef = useRef(false);
+  const lastUserInteractionRef = useRef(0);
   const locationDetailsAbortRef = useRef<AbortController | null>(null);
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
   const transitSearchCacheRef = useRef(new globalThis.Map<string, PhotonFeature[]>());
@@ -1487,6 +1488,7 @@ export function MapView() {
       transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
       if (!pose || !vehicleFollowEnabledRef.current) return;
+      if (Date.now() - lastUserInteractionRef.current < 400) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
       // Keep camera tracking independent of style loading/animation state.
       // The vehicle pose is updated on every timer tick, so setCenter avoids
@@ -1711,6 +1713,7 @@ export function MapView() {
     };
     const handlePointerDown = (event: PointerEvent) => {
       // Let manual map gestures take ownership from vehicle following.
+      lastUserInteractionRef.current = Date.now();
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
       if (measurementControllerRef.current) return;
@@ -1741,6 +1744,7 @@ export function MapView() {
     };
     const handleWheel = () => {
       cancelLongPressTimer();
+      lastUserInteractionRef.current = Date.now();
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
     };
@@ -1759,7 +1763,10 @@ export function MapView() {
         }
       }
     };
-    const handleMapGestureStart = () => cancelLongPressTimer();
+    const handleMapGestureStart = () => {
+      cancelLongPressTimer();
+      lastUserInteractionRef.current = Date.now();
+    };
     map.once('load', async () => {
       // MapLibre uses image pixelRatio when determining pattern spacing. A
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
@@ -2820,8 +2827,14 @@ export function MapView() {
 
   useEffect(() => {
     if (!transitDetailsOpen || window.innerWidth > 760) return;
-    const frame = window.requestAnimationFrame(() => journeyBackButtonRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
+    let nextFrame: number | undefined;
+    const frame = window.requestAnimationFrame(() => {
+      nextFrame = window.requestAnimationFrame(() => journeyBackButtonRef.current?.focus());
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (nextFrame !== undefined) window.cancelAnimationFrame(nextFrame);
+    };
   }, [transitDetailsOpen]);
 
   const positionFavorite = positionInformation && favorites.find((favorite) => (
