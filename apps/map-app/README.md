@@ -63,17 +63,22 @@ npm run test:visual:scenario -- phone-search-autocomplete
 Open `test-results/visual-report/index.html` after the run. The self-contained
 gallery links to full-size PNG files and records the scenario, viewport, fixture,
 browser, MapLibre and WebGL diagnostics, console errors, and failed requests.
-Search responses and the clock are fixed by the test. Hosted map tiles remain
-external because maintaining a vector-tile pipeline solely for screenshots
-would be disproportionate; a tile outage therefore fails readiness instead of
-capturing a permanently loading screen.
+Search responses and scenario input dates are deterministic, but the browser's
+global clock continues to advance because MapLibre relies on normal timing for
+rendering and readiness. Hosted map tiles remain external because maintaining a
+vector-tile pipeline solely for screenshots would be disproportionate; a tile
+outage therefore fails readiness instead of capturing a permanently loading
+screen. The first readiness failure records a screenshot, page and console
+errors, failed requests, HTTP errors, WebGL details, and the visible map status.
+Later scenarios then fail quickly with the same readiness-gate diagnostic rather
+than repeating the full timeout.
 
 These images are intended to review hierarchy, spacing, responsive panels,
 overlap, route fitting, and marker/label relationships. SwiftShader does not
 measure phone frame rate, thermals, gestures, physical GPS, vendor GPU drivers,
-or Samsung/Chromium atlas corruption. The CI job is initially non-blocking;
-make it required only after tile availability and rendering variance have been
-stable over a representative run history.
+or Samsung/Chromium atlas corruption. The CI workflow reports failures honestly but is not configured as a required
+branch-protection check. Make it required only after tile availability and
+rendering variance have been stable over a representative run history.
 
 ## Attribution and service expectations
 
