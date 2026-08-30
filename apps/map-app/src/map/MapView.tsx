@@ -1369,6 +1369,7 @@ export function MapView() {
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
+      if (measurementControllerRef.current) return;
       setRouteContextMenu(null);
       if (!positionInformation && !pendingFavorite) setContextMenuMarker(null);
       const locationLayers = ['favorite-icons', 'search-result-icons', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
@@ -1449,6 +1450,7 @@ export function MapView() {
     };
     const handleMapContextMenu = (event: MapMouseEvent) => {
       event.originalEvent.preventDefault();
+      if (measurementControllerRef.current) return;
       // Touch and pen long-presses are handled explicitly below. MapLibre/browser
       // contextmenu events can also arrive during a pinch, so never turn a
       // pointer-generated contextmenu event into a second route menu.
@@ -1461,6 +1463,7 @@ export function MapView() {
       // Let manual map gestures take ownership from vehicle following.
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
+      if (measurementControllerRef.current) return;
       if (!supportsLongPress(event)) return;
       lastTouchOrPenInteractionAt = Date.now();
       activeLongPressPointers.add(event.pointerId);
@@ -1726,7 +1729,7 @@ export function MapView() {
         offset: closeRangeCameraOffset(),
         duration: 900,
         });
-      }).then(() => {
+      }, () => measurementControllerRef.current !== null).then(() => {
         if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
         map.moveLayer(transitVehicleLayer.id, 'transit-estimated-vehicle-label');
         updateTransitStops();
@@ -2662,14 +2665,21 @@ export function MapView() {
             </aside>
           )}
           {measurement && (
-            <>
-              <div className="measurement-crosshair" aria-hidden="true"><span /><span /></div>
-              <aside className="measurement-panel" aria-label="Distance measurement">
-                <span>Distance</span>
-                <strong aria-live="polite">{formatDistance(measurement.metres)}</strong>
-                <div><button type="button" onClick={stopMeasurement}>Finish</button><button type="button" onClick={stopMeasurement}>Cancel</button></div>
-              </aside>
-            </>
+            <aside className="measurement-panel" aria-label="Distance measurement">
+              <span>Distance · {measurement.points.length} {measurement.points.length === 1 ? 'point' : 'points'}</span>
+              <strong aria-live="polite">{formatDistance(measurement.metres)}</strong>
+              <small>Click the map to add points. Click a point to remove it.</small>
+              <div>
+                <button
+                  className="measurement-undo"
+                  type="button"
+                  disabled={measurement.points.length <= 1}
+                  onClick={() => measurementControllerRef.current?.undo()}
+                >Undo</button>
+                <button className="measurement-finish" type="button" onClick={stopMeasurement}>Finish</button>
+                <button type="button" onClick={stopMeasurement}>Cancel</button>
+              </div>
+            </aside>
           )}
           {pendingFavorite && (
             <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {

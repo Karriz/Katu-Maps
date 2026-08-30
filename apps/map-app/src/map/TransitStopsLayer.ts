@@ -446,7 +446,11 @@ export class TransitStopsLayer {
 
   constructor(private readonly onVehiclePose?: (pose: TransitVehiclePose | null) => void) {}
 
-  async install(map: Map, onStopClick: (stop: TransitStopSelection) => void) {
+  async install(
+    map: Map,
+    onStopClick: (stop: TransitStopSelection) => void,
+    interactionBlocked: () => boolean = () => false,
+  ) {
     this.map = map;
     map.addSource(TRANSIT_SOURCE_ID, {
       type: 'geojson',
@@ -691,6 +695,7 @@ export class TransitStopsLayer {
       onStopClick(selection);
     };
     map.on('click', (event) => {
+      if (interactionBlocked()) return;
       selectFeature(map.queryRenderedFeatures(event.point, { layers: clickableLayerIds })[0], event.point);
     });
     hitLayers.forEach(({ id: layerId }) => {
