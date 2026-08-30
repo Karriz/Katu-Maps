@@ -98,7 +98,7 @@ async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario,
 async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, failed: boolean) {
   if (page.isClosed() || page.url() === 'about:blank') return;
   const screenshotPath = info.outputPath(`${scenario.name}${failed ? '-failure' : ''}.png`);
-  await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled' });
+  await page.screenshot({ path: screenshotPath, fullPage: false, animations: 'disabled', timeout: 15_000 });
   await info.attach('visual-screenshot', { path: screenshotPath, contentType: 'image/png' });
 }
 
