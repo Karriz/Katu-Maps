@@ -10,7 +10,7 @@ permissions:
 jobs:
   visual-review:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/map-app
@@ -32,7 +32,7 @@ jobs:
         run: npm run test:visual
       - name: Add report location to summary
         if: always()
-        run: echo 'Download the **katu-maps-visual-report** artifact and open `index.html`.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Download the **katu-maps-visual-report** artifact and open `index.html`. A failed check means the report contains a visual runtime or scenario failure; this workflow is not a required branch-protection check.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload review report
         if: always()
         uses: actions/upload-artifact@v6
