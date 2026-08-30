@@ -441,6 +441,8 @@ export class TransitStopsLayer {
   private boardingContextUsable = false;
   private vehicleTimer: number | undefined;
   private tripRefreshTimer: number | undefined;
+  private lastTripFetchKey: string | undefined;
+  private lastTripFetchAt = 0;
 
   constructor(private readonly onVehiclePose?: (pose: TransitVehiclePose | null) => void) {}
 
@@ -733,6 +735,11 @@ export class TransitStopsLayer {
     boardingStop?: { stopId: string; coordinates: [number, number]; departure: string; scheduledDeparture?: string },
   ) {
     if (!this.map || !tripId) return;
+    const selectionKey = `${provider}:${tripId}:${serviceDate ?? ''}`;
+    // Repeated callbacks (for example while React state is settling) should
+    // not tear down and restart the same network request.
+    if (this.selectedTrip
+      && `${this.selectedTrip.provider}:${this.selectedTrip.tripId}:${this.selectedTrip.serviceDate ?? ''}` === selectionKey) return;
     this.clearSelectedTrip();
     this.selectedTrip = {
       tripId,
@@ -756,6 +763,11 @@ export class TransitStopsLayer {
   private async loadSelectedTrip() {
     const selection = this.selectedTrip;
     if (!this.map || !selection) return;
+    const fetchKey = `${selection.provider}:${selection.tripId}:${selection.serviceDate ?? ''}`;
+    const elapsed = Date.now() - this.lastTripFetchAt;
+    if (this.lastTripFetchKey === fetchKey && elapsed < 30_000) return;
+    this.lastTripFetchKey = fetchKey;
+    this.lastTripFetchAt = Date.now();
     this.tripController?.abort();
     const controller = new AbortController();
     this.tripController = controller;
@@ -855,6 +867,8 @@ export class TransitStopsLayer {
     this.vehicleTimer = undefined;
     this.tripRefreshTimer = undefined;
     this.selectedTrip = null;
+    this.lastTripFetchKey = undefined;
+    this.lastTripFetchAt = 0;
     this.estimatedTripLegs = [];
     this.boardingContextUsable = false;
     const routeSource = this.map?.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;

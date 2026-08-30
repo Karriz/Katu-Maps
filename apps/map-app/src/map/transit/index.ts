@@ -1,4 +1,4 @@
-import { digitransitProvider } from './DigitransitProvider';
+import { digitransitProvider, fetchDigitransitRoute } from './DigitransitProvider';
 import { providerForBounds, providerForRoute } from './geography';
 import { transitousProvider } from './TransitousProvider';
 import type {
@@ -49,3 +49,5 @@ export function fetchProviderTransitRoutes(
 ) {
   return PROVIDERS[providerForRoute(origin, destination)].fetchRoutes(origin, destination, options);
 }
+
+export { fetchDigitransitRoute };

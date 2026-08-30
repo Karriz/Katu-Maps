@@ -26,6 +26,19 @@ export type Favorite = {
 
 export const FAVORITES_STORAGE_KEY = 'maps-favorites-v1';
 
+export function isValidFavoriteCoordinates(coordinates: unknown): coordinates is [number, number] {
+  return Array.isArray(coordinates)
+    && coordinates.length === 2
+    && typeof coordinates[0] === 'number'
+    && Number.isFinite(coordinates[0])
+    && coordinates[0] >= -180
+    && coordinates[0] <= 180
+    && typeof coordinates[1] === 'number'
+    && Number.isFinite(coordinates[1])
+    && coordinates[1] >= -90
+    && coordinates[1] <= 90;
+}
+
 export function resolvedFavoriteEntityType(favorite: Favorite): FavoriteEntityType {
   if (favorite.entityType) return favorite.entityType;
   if (favorite.provider === 'transit') return 'transit-stop';
@@ -95,9 +108,7 @@ export function loadFavorites(storage: Pick<Storage, 'getItem'> = window.localSt
       const candidate = item as Partial<Favorite>;
       return typeof candidate.id === 'string'
         && typeof candidate.name === 'string'
-        && Array.isArray(candidate.coordinates)
-        && candidate.coordinates.length === 2
-        && candidate.coordinates.every(Number.isFinite);
+        && isValidFavoriteCoordinates(candidate.coordinates);
     });
   } catch { return []; }
 }

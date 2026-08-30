@@ -13,6 +13,24 @@ type Scenario = {
   viewport: keyof typeof viewports;
   setup?: (page: Page) => Promise<void>;
   state: string;
+  favorites?: StoredFavorite[];
+};
+
+type StoredFavorite = {
+  id: string;
+  name: string;
+  coordinates: [number, number];
+  category: string;
+  kind: 'home' | 'work' | 'favorite';
+  entityType: 'position' | 'place' | 'transit-stop';
+  createdAt: number;
+  provider?: string;
+  providerId?: string;
+  osmType?: string;
+  osmId?: string | number;
+  transitStopId?: string;
+  transitProvider?: 'digitransit' | 'transitous';
+  transitMode?: string;
 };
 
 type RuntimeDiagnostics = {
@@ -99,11 +117,100 @@ async function openExpandedItinerary(page: Page) {
   await openTransitAlternatives(page);
   const options = page.locator('.transit-route-option');
   await options.nth(1).click();
-  await page.getByRole('button', { name: 'View stops and legs' }).click();
+  const detailsButton = page.getByRole('button', { name: 'View journey details' });
+  await detailsButton.click();
   await expect(page.locator('.transit-route-legs')).toBeVisible();
   await expect(page.locator('.transit-transfer-marker')).toContainText('Change at');
-  await page.getByRole('button', { name: 'Expand panel' }).click();
+  await expect(page.locator('.transit-route-arrival')).toContainText('Tampere-talo');
   await expect(page.locator('.route-panel')).toHaveAttribute('data-snap', 'expanded');
+  await expect(page.locator('.route-planner-controls')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Back to route options' })).toBeFocused();
+
+  await page.getByRole('button', { name: 'Back to route options' }).click();
+  await expect(page.locator('.transit-route-options')).toBeVisible();
+  await expect(page.locator('.route-panel')).toHaveAttribute('data-snap', 'half');
+  await expect(options.nth(1)).toHaveAttribute('aria-pressed', 'true');
+
+  await detailsButton.click();
+  await page.evaluate(() => window.history.back());
+  await expect(page.locator('.transit-route-options')).toBeVisible();
+  await expect(page.locator('.route-panel')).toHaveAttribute('data-snap', 'half');
+  await expect(options.nth(1)).toHaveAttribute('aria-pressed', 'true');
+
+  await detailsButton.click();
+  await expect(page.locator('.transit-journey-header')).toBeVisible();
+}
+
+async function openDesktopItinerary(page: Page) {
+  await openTransitAlternatives(page);
+  await page.locator('.transit-route-option').nth(1).click();
+  await page.getByRole('button', { name: 'View journey details' }).click();
+  await expect(page.locator('.transit-route-legs')).toBeVisible();
+  await expect(page.locator('.route-planner-controls')).toBeVisible();
+  await expect(page.locator('.transit-route-options')).toBeVisible();
+  await expect(page.locator('.transit-journey-header')).toBeHidden();
+}
+
+const favoriteCameraFixtures: StoredFavorite[] = [
+  {
+    id: 'saved-position', name: 'Saved map position', coordinates: [23.7609, 61.4981],
+    category: 'Pinned location', kind: 'home', entityType: 'position', createdAt: 1,
+  },
+  {
+    id: 'saved-place', name: 'Saved Helsinki place', coordinates: [24.9384, 60.1699],
+    category: 'Arts centre', kind: 'work', entityType: 'place', createdAt: 2,
+    provider: 'osm', providerId: 'W2002', osmType: 'W', osmId: 2002,
+  },
+  {
+    id: 'saved-stop', name: 'Saved Jyvaskyla stop', coordinates: [25.7482, 62.2415],
+    category: 'Transit stop', kind: 'favorite', entityType: 'transit-stop', createdAt: 3,
+    provider: 'transit', providerId: 'digitransit:visual:FavoriteStop',
+    transitStopId: 'visual:FavoriteStop', transitProvider: 'digitransit', transitMode: 'TRAM',
+  },
+];
+
+async function expectFavoriteCamera(page: Page, favorite: StoredFavorite) {
+  const initialView = await page.evaluate(() => JSON.parse(localStorage.getItem('maps-viewport-v1') ?? 'null'));
+  expect(initialView).toMatchObject({ center: [0, 0], zoom: 2.2 });
+
+  await page.getByRole('button', { name: 'Show favourites' }).click();
+  const list = page.getByRole('listbox', { name: 'Favourite places' });
+  await expect(list).toBeVisible();
+  await list.getByRole('option', { name: new RegExp(`^${favorite.name}`) }).click();
+
+  if (favorite.entityType === 'position') {
+    await expect(page.locator('.position-information')).toContainText(
+      `${favorite.coordinates[1].toFixed(6)}, ${favorite.coordinates[0].toFixed(6)}`,
+    );
+  } else if (favorite.entityType === 'transit-stop') {
+    await expect(page.locator('.transit-departures-panel')).toHaveAttribute('aria-label', `Departures from ${favorite.name}`);
+  } else {
+    await expect(page.locator('.location-info-panel').getByRole('heading', { name: favorite.name })).toBeVisible();
+  }
+
+  const minimumZoom = favorite.entityType === 'transit-stop' ? 14.6 : 14;
+  await expect.poll(async () => page.evaluate(() => {
+    const view = JSON.parse(localStorage.getItem('maps-viewport-v1') ?? 'null') as { zoom?: number } | null;
+    return view?.zoom ?? -1;
+  })).toBeGreaterThanOrEqual(minimumZoom - 0.001);
+  await expect.poll(async () => page.evaluate((target) => {
+    const view = JSON.parse(localStorage.getItem('maps-viewport-v1') ?? 'null') as { center?: number[] } | null;
+    if (!view?.center) return Number.POSITIVE_INFINITY;
+    return Math.max(
+      Math.abs(view.center[0] - target[0]),
+      Math.abs(view.center[1] - target[1]),
+    );
+  }, favorite.coordinates)).toBeLessThan(0.05);
+}
+
+async function verifyFavoriteCameras(page: Page) {
+  for (let index = 0; index < favoriteCameraFixtures.length; index += 1) {
+    if (index > 0) {
+      await page.reload();
+      await expect(page.locator('.map-status')).toBeHidden({ timeout: 45_000 });
+    }
+    await expectFavoriteCamera(page, favoriteCameraFixtures[index]);
+  }
 }
 
 const scenarios: Scenario[] = [
@@ -193,10 +300,17 @@ const scenarios: Scenario[] = [
   },
   {
     name: 'phone-transit-itinerary',
-    description: 'Expanded bus-to-tram transfer itinerary',
+    description: 'Dedicated full-height bus-to-tram journey with Back-state restoration',
     viewport: 'phone',
     setup: openExpandedItinerary,
-    state: 'transfer itinerary expanded',
+    state: 'mobile journey detail open',
+  },
+  {
+    name: 'desktop-transit-itinerary',
+    description: 'Transit itinerary remains inline with route planning context on desktop',
+    viewport: 'desktop',
+    setup: openDesktopItinerary,
+    state: 'desktop inline journey detail open',
   },
   {
     name: 'phone-bottom-sheet-midpoint',
@@ -226,6 +340,14 @@ const scenarios: Scenario[] = [
     },
     state: 'provider error',
   },
+  ...(['phone', 'tablet', 'desktop'] as const).map((viewport): Scenario => ({
+    name: `${viewport}-favorite-camera-types`,
+    description: 'Position, place and transit-stop favourites restore exact coordinates and zoom from a world view',
+    viewport,
+    setup: verifyFavoriteCameras,
+    state: 'all favourite entity types verified after reload',
+    favorites: favoriteCameraFixtures,
+  })),
 ];
 
 async function browserDiagnostics(page: Page) {
@@ -280,17 +402,6 @@ async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, 
 
 test.beforeEach(async ({ page }) => {
   await installVisualProviderFixtures(page);
-  await page.addInitScript(() => {
-    localStorage.clear();
-    localStorage.setItem('tampere-map-layer-options', JSON.stringify({
-      globe: true,
-      trees: false,
-      buildings: true,
-      terrain: false,
-      transit: true,
-      transitModels: false,
-    }));
-  });
 });
 
 for (const scenario of scenarios) {
@@ -319,6 +430,21 @@ for (const scenario of scenarios) {
         throw new Error(`Map readiness preflight already failed; skipping repeated 45-second wait. First failure: ${readinessFailure}`);
       }
 
+      await page.addInitScript(({ favorites }) => {
+        localStorage.clear();
+        localStorage.setItem('tampere-map-layer-options', JSON.stringify({
+          globe: true,
+          trees: false,
+          buildings: true,
+          terrain: false,
+          transit: true,
+          transitModels: false,
+        }));
+        if (favorites.length) {
+          localStorage.setItem('maps-favorites-v1', JSON.stringify(favorites));
+          localStorage.setItem('maps-viewport-v1', JSON.stringify({ center: [0, 0], zoom: 2.2, bearing: 0, pitch: 0 }));
+        }
+      }, { favorites: scenario.favorites ?? [] });
       await page.goto('/');
       const webgl2 = await page.evaluate(() => Boolean(document.createElement('canvas').getContext('webgl2')));
       expect(webgl2, 'WebGL2 is unavailable. Install Chromium dependencies and run with the SwiftShader flags from playwright.config.ts.').toBe(true);

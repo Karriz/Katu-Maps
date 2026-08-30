@@ -204,6 +204,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-panel-heading div { display: flex; flex-direction: column; gap: 2px; }
 .route-panel-heading strong { font-size: 1.05rem; }
 .route-panel-heading span { color: #94a3b8; font-size: 0.72rem; }
+.transit-journey-header { display: none; }
 .route-panel-close { align-items: center; background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: #64748b; cursor: pointer; display: flex; flex: 0 0 auto; height: 34px; justify-content: center; padding: 0; width: 34px; }
 .route-panel-close:hover { background: #fff; color: var(--color-accent); }
 .route-panel-close:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
@@ -243,14 +244,34 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-time-toggle svg { height: 17px; width: 17px; }
 .route-panel-message, .route-panel-error { font-size: 0.74rem; margin: 10px 0 2px; }
 .route-panel-error { color: #b45353; }
+.route-provider-status { align-items: center; color: #64748b; display: flex; font-size: 0.7rem; gap: 6px; margin-top: 8px; }
+.route-provider-status-dot { background: #16a34a; border-radius: 999px; height: 6px; width: 6px; }
 .route-summary { align-items: baseline; display: flex; gap: 8px; margin-top: 12px; }
-.transit-route-options { border-top: 1px solid #edf0f3; display: grid; gap: 6px; margin-top: 12px; padding-top: 10px; }
+.transit-route-options { border-top: 1px solid #edf0f3; display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; }
 .transit-route-options-heading { color: #475569; font-size: 0.72rem; }
-.transit-route-option { align-items: center; background: #f8fafc; border: 1px solid #dbe4ee; border-radius: 9px; color: #263449; cursor: pointer; display: flex; font: inherit; justify-content: space-between; padding: 9px 10px; text-align: left; width: 100%; }
-.transit-route-option:hover { border-color: #9dbce5; background: #f1f6ff; }
-.transit-route-option.active { background: var(--color-accent-soft); border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
-.transit-route-option strong { font-size: 0.75rem; }
-.transit-route-option span { color: #64748b; font-size: 0.66rem; }
+.transit-route-option { background: #fff; border: 1px solid #dbe4ee; border-radius: 12px; color: #263449; cursor: pointer; display: grid; font: inherit; gap: 9px; padding: 11px 12px; text-align: left; width: 100%; }
+.transit-route-option:hover { background: #f8fbff; border-color: #9dbce5; }
+.transit-route-option:focus-visible { border-color: var(--color-accent); outline: 3px solid rgb(80 145 235 / 22%); outline-offset: 1px; }
+.transit-route-option.active { background: #f5f9ff; border-color: var(--color-accent); box-shadow: inset 3px 0 0 var(--color-accent); }
+.transit-option-heading { align-items: center; display: flex; gap: 7px; min-width: 0; }
+.transit-option-times { align-items: baseline; color: #17263a; display: flex; flex: 0 0 auto; font-size: 0.8rem; font-variant-numeric: tabular-nums; font-weight: 800; gap: 2px; }
+.transit-option-times time { color: inherit; }
+.transit-option-duration { color: #475569; font-size: 0.7rem; font-weight: 700; }
+.transit-option-transfer { background: #f1f5f9; border-radius: 999px; color: #526277; font-size: 0.62rem; font-weight: 750; padding: 4px 7px; white-space: nowrap; }
+.transit-option-selected { align-items: center; color: var(--color-accent); display: flex; font-size: 0.62rem; font-weight: 800; gap: 2px; margin-left: auto; white-space: nowrap; }
+.transit-option-selected svg { height: 13px; stroke-width: 3; width: 13px; }
+.transit-option-sequence { align-items: center; display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.transit-option-sequence-part { align-items: center; display: inline-flex; gap: 5px; }
+.transit-option-connector { color: #9aa8b8; font-size: 0.82rem; font-weight: 800; }
+.transit-option-route-badge { background: #42627f; border-radius: 6px; color: #fff; display: inline-block; font-size: 0.66rem; font-weight: 850; line-height: 1; max-width: 88px; overflow: hidden; padding: 5px 7px; text-overflow: ellipsis; white-space: nowrap; }
+.transit-option-route-badge.bus { background: #167052; }
+.transit-option-route-badge.tram { background: #1769e8; }
+.transit-option-route-badge.metro { background: #c45213; }
+.transit-option-route-badge.rail { background: #7146a0; }
+.transit-option-route-badge.ferry { background: #087b86; }
+.transit-option-walk { align-items: center; color: #64748b; display: inline-flex; font-size: 0.64rem; font-weight: 750; gap: 3px; white-space: nowrap; }
+.transit-option-walk svg { height: 13px; stroke-width: 2.3; width: 13px; }
+.transit-option-route-fallback { color: #64748b; font-size: 0.68rem; font-weight: 700; }
 .map-camera-actions { display: grid; gap: 8px; position: absolute; right: 28px; top: 28px; z-index: 40; }
 .map-floating-action { background: rgb(255 255 255 / 96%); border: 1px solid #cbd9e8; border-radius: 10px; box-shadow: 0 8px 20px rgb(37 55 79 / 16%); color: var(--color-accent); cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 750; padding: 9px 12px; }
 .map-floating-action:hover { background: #fff; border-color: #8ab7f5; }
@@ -276,7 +297,19 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-route-stations small { color: #94a3b8; font-size: 0.59rem; font-weight: 750; text-transform: uppercase; }
 .transit-route-stations strong { color: #475569; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transit-route-station-line { border-left: 1px solid #cbd5e1; height: 4px; margin-left: 24px; }
+.transit-route-arrival { align-items: center; border-top: 1px solid #e5eaf0; display: flex; gap: 10px; margin-top: 4px; padding: 12px 0 2px; }
+.transit-route-arrival > svg { background: #e9f8ef; border: 1px solid #87c9a0; border-radius: 50%; color: #16814a; flex: 0 0 auto; height: 22px; padding: 4px; width: 22px; }
+.transit-route-arrival > div { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+.transit-route-arrival small { color: #64748b; font-size: 0.59rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+.transit-route-arrival strong { color: #263449; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transit-route-arrival time { color: #334155; flex: 0 0 auto; font-size: 0.68rem; font-variant-numeric: tabular-nums; font-weight: 750; }
 .route-retry-button { margin: 14px 0 0; }
+
+/* Keep the journey chrome and route choices anchored while the detailed leg
+   timeline gets its own scroll container. */
+.route-panel.transit-journey-detail { display: flex; flex-direction: column; overflow: hidden; }
+.route-panel.transit-journey-detail .route-panel-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.route-panel.transit-journey-detail .transit-route-legs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 @media (min-width: 761px) {
   /* Keep map chrome together on the left; the active information surface lives
@@ -301,10 +334,14 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-status-error { border-color: #a85d5d; }
 .map-status-error strong { color: #ffb4b4; }
 .map-status-error small { color: #a9bed2; }
-.map-context-menu { backdrop-filter: blur(18px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: 13px; box-shadow: var(--shadow-card); color: var(--color-ink); display: flex; flex-direction: column; min-width: 190px; overflow: hidden; position: absolute; z-index: 150; }
-.map-context-menu strong { border-bottom: 1px solid var(--color-line); color: var(--color-muted); font-size: 0.68rem; letter-spacing: 0.06em; padding: 10px 13px 8px; text-transform: uppercase; }
-.map-context-menu button { background: transparent; border: 0; color: var(--color-ink); cursor: pointer; font: inherit; font-size: 0.82rem; padding: 11px 13px; text-align: left; }
+.map-context-menu { backdrop-filter: blur(18px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: 13px; box-shadow: var(--shadow-card); color: var(--color-ink); display: flex; flex-direction: column; min-width: 220px; overflow: hidden; padding: 4px 0; position: absolute; z-index: 150; }
+.map-context-menu strong { align-items: center; border-bottom: 1px solid var(--color-line); color: var(--color-muted); display: flex; font-size: 0.68rem; gap: 7px; letter-spacing: 0.06em; padding: 9px 13px 8px; text-transform: uppercase; }
+.map-context-menu strong svg { color: var(--color-accent); height: 14px; width: 14px; }
+.map-context-menu button { align-items: center; background: transparent; border: 0; color: var(--color-ink); cursor: pointer; display: flex; font: inherit; font-size: 0.82rem; gap: 9px; padding: 10px 13px; text-align: left; width: 100%; }
+.map-context-menu button svg { color: #718096; flex: 0 0 auto; height: 16px; width: 16px; }
+.map-context-menu button:hover svg, .map-context-menu button:focus-visible svg { color: var(--color-accent); }
 .map-context-menu button:hover, .map-context-menu button:focus-visible { background: var(--surface-hover); color: var(--color-accent); outline: 0; }
+.map-context-menu-separator { background: var(--color-line); height: 1px; margin: 4px 13px; }
 .measurement-crosshair { height: 34px; left: 50%; pointer-events: none; position: absolute; top: 50%; transform: translate(-50%, -50%); width: 34px; z-index: 80; }
 .measurement-crosshair span { background: #b45309; border: 1px solid #fff; box-shadow: 0 1px 4px rgb(15 23 42 / 45%); left: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); }
 .measurement-crosshair span:first-child { height: 3px; width: 34px; }
@@ -600,5 +637,34 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .route-panel.mobile-bottom-sheet .route-panel-heading { padding: 16px 16px 0; }
   .route-panel.mobile-bottom-sheet .route-panel-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
   .route-panel.mobile-bottom-sheet[data-snap='collapsed'] { height: var(--mobile-sheet-height); }
+  .route-panel.mobile-bottom-sheet.transit-journey-detail {
+    border-radius: 18px 18px 0 0;
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - 8px) !important;
+  }
+  .route-panel.transit-journey-detail > .mobile-sheet-handle,
+  .route-panel.transit-journey-detail > .route-panel-heading { display: none; }
+  .transit-journey-detail .transit-journey-header {
+    align-items: center;
+    background: rgb(255 255 255 / 98%);
+    border-bottom: 1px solid var(--color-line);
+    display: flex;
+    flex: 0 0 auto;
+    gap: 11px;
+    min-height: 82px;
+    padding: 12px calc(12px + env(safe-area-inset-right, 0px)) 12px calc(12px + env(safe-area-inset-left, 0px));
+  }
+  .transit-journey-back { align-items: center; background: var(--color-accent-soft); border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; flex: 0 0 auto; height: 36px; justify-content: center; padding: 0; width: 36px; }
+  .transit-journey-back:hover, .transit-journey-back:focus-visible { outline: 3px solid rgb(80 145 235 / 24%); outline-offset: 1px; }
+  .transit-journey-back svg { height: 18px; width: 18px; }
+  .transit-journey-heading { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+  .transit-journey-heading strong { color: #1e293b; font-size: 0.95rem; }
+  .transit-journey-heading span { color: #526277; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .transit-journey-heading small { color: #1769e8; font-size: 0.66rem; font-variant-numeric: tabular-nums; font-weight: 750; }
+  .transit-journey-detail .route-panel-body { padding: 0 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  .transit-journey-detail .route-planner-controls,
+  .transit-journey-detail .transit-route-details-toggle { display: none; }
+  .transit-journey-detail .transit-route-legs { border-top: 0; margin-top: 0; padding-top: 18px; }
+  .transit-journey-detail .transit-route-leg { min-height: 82px; }
+  .transit-journey-detail .transit-transfer-marker { margin: 6px 0 8px 1px; }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
 }

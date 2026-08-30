@@ -71,6 +71,13 @@ export type TransitTrip = {
   legs: TransitTripLeg[];
 };
 
+export type TransitRoutePlace = {
+  name?: string;
+  stopId?: string;
+  parentStopId?: string;
+  coordinates?: [number, number];
+};
+
 export type TransitRouteResult = {
   geometry: GeoJSON.LineString;
   distanceKm: number;
@@ -87,9 +94,12 @@ export type TransitRouteResult = {
     cancelled?: boolean;
     delaySeconds?: number;
     route?: string;
+    routeColor?: string;
+    routeTextColor?: string;
     headsign?: string;
-    from?: string;
-    to?: string;
+    distanceMeters?: number;
+    from?: TransitRoutePlace;
+    to?: TransitRoutePlace;
     startTime?: string;
     endTime?: string;
     serviceDate?: string;

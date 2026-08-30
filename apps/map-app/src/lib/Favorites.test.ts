@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
+import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, isValidFavoriteCoordinates, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
 
 const favorite = (overrides: Partial<Favorite> = {}): Favorite => ({
   id: 'one', name: 'Museum', coordinates: [23.7, 61.5], category: 'Museum',
@@ -19,6 +19,32 @@ it('persists and restores favorites', () => {
   saveFavorites([favorite()], storage);
   expect(values.has(FAVORITES_STORAGE_KEY)).toBe(true);
   expect(loadFavorites(storage)).toEqual([favorite()]);
+});
+
+it.each([
+  [[181, 61.5]],
+  [[-181, 61.5]],
+  [[23.7, 91]],
+  [[23.7, -91]],
+  [[Number.NaN, 61.5]],
+  [[23.7, Number.POSITIVE_INFINITY]],
+  [['23.7', 61.5]],
+  [[23.7]],
+])('rejects invalid persisted favourite coordinates: %j', (coordinates) => {
+  const storage = {
+    getItem: () => JSON.stringify([favorite({ coordinates: coordinates as [number, number] })]),
+  };
+  expect(isValidFavoriteCoordinates(coordinates)).toBe(false);
+  expect(loadFavorites(storage)).toEqual([]);
+});
+
+it.each([
+  [[-180, -90]],
+  [[0, 0]],
+  [[180, 90]],
+  [[23.7, 61.5]],
+])('accepts valid persisted favourite coordinates: %j', (coordinates) => {
+  expect(isValidFavoriteCoordinates(coordinates)).toBe(true);
 });
 
 describe('favorite matching and ordering', () => {
@@ -67,4 +93,13 @@ it('creates map features with the favorite kind used for marker icons', () => {
       website: undefined,
     },
   }]);
+});
+
+it.each([
+  ['position', [23.7609, 61.4981]],
+  ['place', [24.9384, 60.1699]],
+  ['transit-stop', [25.7482, 62.2415]],
+] as const)('keeps exact %s favourite coordinates in its map marker', (entityType, coordinates) => {
+  const value = favorite({ entityType, coordinates: [...coordinates] });
+  expect(favoriteMapFeatures([value])[0].geometry.coordinates).toEqual(coordinates);
 });

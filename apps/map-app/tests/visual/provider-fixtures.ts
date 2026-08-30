@@ -103,7 +103,15 @@ function tripCalls(clock: ReturnType<typeof fixtureClock>) {
 }
 
 function place(name: string, lat: number, lon: number) {
-  return { name, lat, lon };
+  return {
+    name,
+    lat,
+    lon,
+    stop: {
+      gtfsId: `visual:${name.replaceAll(' ', '')}`,
+      parentStation: null,
+    },
+  };
 }
 
 function planLeg({
@@ -121,8 +129,8 @@ function planLeg({
   mode: string;
   route?: string;
   headsign?: string;
-  from: { name: string; lat: number; lon: number };
-  to: { name: string; lat: number; lon: number };
+  from: ReturnType<typeof place>;
+  to: ReturnType<typeof place>;
   start: string;
   end: string;
   transit?: boolean;
@@ -142,7 +150,12 @@ function planLeg({
     to,
     headsign,
     trip: tripId ? { gtfsId: tripId } : null,
-    route: route ? { shortName: route, longName: route } : null,
+    route: route ? {
+      shortName: route,
+      longName: route,
+      color: mode === 'BUS' ? '167052' : mode === 'TRAM' ? '1769E8' : '7146A0',
+      textColor: 'FFFFFF',
+    } : null,
     legGeometry: null,
   };
 }

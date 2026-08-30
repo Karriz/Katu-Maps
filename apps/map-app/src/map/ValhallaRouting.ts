@@ -1,25 +1,14 @@
+import type { TransitRouteResult } from './transit';
+
 export type RouteMode = 'pedestrian' | 'bicycle' | 'auto' | 'transit';
 
 export type RouteResult = {
   geometry: GeoJSON.LineString;
   distanceKm: number;
   durationSeconds: number;
-  transitLegs?: Array<{
-    mode: string;
-    geometry?: GeoJSON.LineString;
-    tripId?: string;
-    realTime?: boolean;
-    cancelled?: boolean;
-    delaySeconds?: number;
-    route?: string;
-    headsign?: string;
-    from?: string;
-    to?: string;
-    startTime?: string;
-    endTime?: string;
-    provider?: 'digitransit' | 'transitous';
-    serviceDate?: string;
-  }>;
+  transitLegs?: TransitRouteResult['transitLegs'];
+  /** Router that produced this geometry, useful for transparency and diagnostics. */
+  provider?: TransitRouteResult['provider'] | 'valhalla' | 'osrm';
 };
 
 type ValhallaShape = string | GeoJSON.LineString | { type: 'LineString'; coordinates: number[][] } | number[][];
@@ -33,7 +22,25 @@ type ValhallaResponse = {
   error_code?: number;
 };
 
+type OsrmResponse = {
+  code?: string;
+  routes?: Array<{
+    distance?: number;
+    duration?: number;
+    geometry?: GeoJSON.LineString;
+  }>;
+  message?: string;
+};
+
 const VALHALLA_ENDPOINT = 'https://valhalla1.openstreetmap.de/route';
+// Public OSRM servers are not consistently CORS-enabled. Keep OSRM opt-in so
+// the browser only calls a deployment-owned CORS proxy or OSRM instance.
+const OSRM_ENDPOINT = import.meta.env.VITE_OSRM_ENDPOINT?.trim();
+const OSRM_ENDPOINTS: Record<Exclude<RouteMode, 'transit'>, string> = {
+  pedestrian: 'foot',
+  bicycle: 'bike',
+  auto: 'driving',
+};
 
 function decodePolyline6(encoded: string): [number, number][] {
   const coordinates: [number, number][] = [];
@@ -75,17 +82,55 @@ function shapeCoordinates(shape: ValhallaShape | undefined) {
   return shape.coordinates;
 }
 
+async function fetchOsrmRoute(
+  origin: [number, number],
+  destination: [number, number],
+  mode: Exclude<RouteMode, 'transit'>,
+  signal?: AbortSignal,
+): Promise<RouteResult> {
+  const profile = OSRM_ENDPOINTS[mode];
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    const coordinates = `${origin[0]},${origin[1]};${destination[0]},${destination[1]}`;
+    const response = await fetch(
+      `${OSRM_ENDPOINT}/route/v1/${profile}/${coordinates}?overview=full&geometries=geojson&steps=true`,
+      { headers: { 'x-client-id': 'katu-maps' }, signal: controller.signal },
+    );
+    const payload = await response.json() as OsrmResponse;
+    const route = payload.routes?.[0];
+    if (!response.ok || payload.code !== 'Ok' || !route?.geometry || route.geometry.coordinates.length < 2) {
+      throw new Error(payload.message || 'OSRM could not find a route');
+    }
+    return {
+      geometry: route.geometry,
+      distanceKm: (route.distance ?? 0) / 1000,
+      durationSeconds: route.duration ?? 0,
+      provider: 'osrm',
+    };
+  } finally {
+    window.clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 export async function fetchValhallaRoute(
   origin: [number, number],
   destination: [number, number],
-  mode: RouteMode,
+  mode: Exclude<RouteMode, 'transit'>,
   signal?: AbortSignal,
 ): Promise<RouteResult> {
   let response: Response | undefined;
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 20_000);
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 20_000);
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     try {
@@ -111,16 +156,42 @@ export async function fetchValhallaRoute(
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
+      // The per-attempt controller is also used for our timeout. Preserve
+      // that distinction so callers do not mistake a service timeout for a
+      // user-requested cancellation and leave the UI stuck loading.
+      if (timedOut || (error as Error).name === 'AbortError') {
+        lastError = new Error('Routing service timed out. Please try again.');
+      }
     } finally {
       window.clearTimeout(timeout);
       signal?.removeEventListener('abort', abort);
     }
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   }
-  if (!response) throw lastError instanceof Error ? lastError : new Error('Routing request timed out');
+  if (!response) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (!OSRM_ENDPOINT) throw lastError instanceof Error
+      ? lastError
+      : new Error('Valhalla routing is unavailable');
+    try {
+      return await fetchOsrmRoute(origin, destination, mode, signal);
+    } catch (fallbackError) {
+      if (signal?.aborted) throw fallbackError;
+      throw new Error(`Valhalla unavailable; OSRM fallback failed: ${(fallbackError as Error).message}`);
+    }
+  }
 
   const payload = await response.json() as ValhallaResponse;
   if (!response.ok || !payload.trip) {
+    if (response.status >= 500) {
+      if (!OSRM_ENDPOINT) throw new Error(payload.error || 'Valhalla routing is unavailable');
+      try {
+        return await fetchOsrmRoute(origin, destination, mode, signal);
+      } catch (fallbackError) {
+        if (signal?.aborted) throw fallbackError;
+        throw new Error(`Valhalla unavailable; OSRM fallback failed: ${(fallbackError as Error).message}`);
+      }
+    }
     throw new Error(payload.error || 'Valhalla could not find a route');
   }
 
@@ -131,5 +202,6 @@ export async function fetchValhallaRoute(
     geometry: { type: 'LineString', coordinates },
     distanceKm: payload.trip.summary?.length ?? 0,
     durationSeconds: payload.trip.summary?.time ?? 0,
+    provider: 'valhalla',
   };
 }

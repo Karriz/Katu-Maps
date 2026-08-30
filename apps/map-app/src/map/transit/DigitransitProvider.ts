@@ -2,6 +2,7 @@ import type {
   TransitBounds,
   TransitDeparture,
   TransitProvider,
+  TransitRoutePlace,
   TransitRouteResult,
   TransitStop,
   TransitTrip,
@@ -206,7 +207,7 @@ function tripPlace(call: TripCall): TransitTripPlace | undefined {
   };
 }
 
-const PLAN_QUERY = `
+const planQuery = (directMode: 'WALK' | 'BICYCLE' | 'CAR', directOnly = false) => `
   query Plan(
     $origin: PlanLabeledLocationInput!
     $destination: PlanLabeledLocationInput!
@@ -217,7 +218,7 @@ const PLAN_QUERY = `
       destination: $destination
       dateTime: $dateTime
       first: 3
-      modes: { direct: [WALK] }
+      modes: { direct: [${directMode}]${directOnly ? ', directOnly: true' : ''} }
     ) {
       edges {
         node {
@@ -234,11 +235,11 @@ const PLAN_QUERY = `
             serviceDate
             start { scheduledTime estimated { time delay } }
             end { scheduledTime estimated { time delay } }
-            from { name lat lon }
-            to { name lat lon }
+            from { name lat lon stop { gtfsId parentStation { gtfsId } } }
+            to { name lat lon stop { gtfsId parentStation { gtfsId } } }
             headsign
             trip { gtfsId }
-            route { shortName longName }
+            route { shortName longName color textColor }
             legGeometry { points length }
           }
         }
@@ -246,6 +247,13 @@ const PLAN_QUERY = `
     }
   }
 `;
+
+type PlanPlace = {
+  name?: unknown;
+  lat?: unknown;
+  lon?: unknown;
+  stop?: { gtfsId?: unknown; parentStation?: { gtfsId?: unknown } | null } | null;
+};
 
 type PlanLeg = {
   mode?: unknown;
@@ -256,11 +264,11 @@ type PlanLeg = {
   serviceDate?: unknown;
   start?: { scheduledTime?: unknown; estimated?: { time?: unknown; delay?: unknown } | null } | null;
   end?: { scheduledTime?: unknown; estimated?: { time?: unknown; delay?: unknown } | null } | null;
-  from?: { name?: unknown; lat?: unknown; lon?: unknown } | null;
-  to?: { name?: unknown; lat?: unknown; lon?: unknown } | null;
+  from?: PlanPlace | null;
+  to?: PlanPlace | null;
   headsign?: unknown;
   trip?: { gtfsId?: unknown } | null;
-  route?: { shortName?: unknown; longName?: unknown } | null;
+  route?: { shortName?: unknown; longName?: unknown; color?: unknown; textColor?: unknown } | null;
   legGeometry?: { points?: unknown } | null;
 };
 
@@ -291,6 +299,65 @@ function planLegCoordinates(leg: PlanLeg): [number, number][] {
       ? [[place.lon, place.lat] as [number, number]]
       : []
   ));
+}
+
+function planRoutePlace(place?: PlanPlace | null): TransitRoutePlace | undefined {
+  if (!place) return undefined;
+  const name = typeof place.name === 'string' ? place.name : undefined;
+  const stopId = typeof place.stop?.gtfsId === 'string' ? place.stop.gtfsId : undefined;
+  const parentStopId = typeof place.stop?.parentStation?.gtfsId === 'string'
+    ? place.stop.parentStation.gtfsId
+    : undefined;
+  const coordinates = finiteNumber(place.lon) && finiteNumber(place.lat)
+    ? [place.lon, place.lat] as [number, number]
+    : undefined;
+  return name || stopId || coordinates ? { name, stopId, parentStopId, coordinates } : undefined;
+}
+
+export function normalizeDigitransitRouteResults(itineraries: PlanItinerary[]): TransitRouteResult[] {
+  return itineraries.flatMap((itinerary): TransitRouteResult[] => {
+    const legs = itinerary.legs ?? [];
+    const coordinates = legs.flatMap(planLegCoordinates);
+    if (coordinates.length < 2) return [];
+    const transitLegCount = legs.filter((leg) => leg.transitLeg === true).length;
+    return [{
+      geometry: { type: 'LineString', coordinates },
+      distanceKm: legs.reduce((sum, leg) => sum + (finiteNumber(leg.distance) ? leg.distance : 0), 0) / 1000,
+      durationSeconds: finiteNumber(itinerary.duration) ? itinerary.duration : 0,
+      departureTime: typeof itinerary.start === 'string' ? itinerary.start : undefined,
+      arrivalTime: typeof itinerary.end === 'string' ? itinerary.end : undefined,
+      transfers: finiteNumber(itinerary.numberOfTransfers)
+        ? itinerary.numberOfTransfers
+        : Math.max(0, transitLegCount - 1),
+      provider: 'digitransit',
+      transitLegs: legs.map((leg) => ({
+        mode: typeof leg.mode === 'string' ? leg.mode : 'TRANSIT',
+        geometry: { type: 'LineString', coordinates: planLegCoordinates(leg) },
+        tripId: typeof leg.trip?.gtfsId === 'string' ? leg.trip.gtfsId : undefined,
+        realTime: leg.realTime === true,
+        cancelled: leg.realtimeState === 'CANCELED',
+        delaySeconds: isoDurationSeconds(leg.start?.estimated?.delay),
+        route: typeof leg.route?.shortName === 'string'
+          ? leg.route.shortName
+          : typeof leg.route?.longName === 'string' ? leg.route.longName : undefined,
+        routeColor: typeof leg.route?.color === 'string' ? leg.route.color : undefined,
+        routeTextColor: typeof leg.route?.textColor === 'string' ? leg.route.textColor : undefined,
+        headsign: typeof leg.headsign === 'string' ? leg.headsign : undefined,
+        distanceMeters: finiteNumber(leg.distance) && leg.distance >= 0 ? leg.distance : undefined,
+        from: planRoutePlace(leg.from),
+        to: planRoutePlace(leg.to),
+        startTime: legTime(leg.start),
+        endTime: legTime(leg.end),
+        serviceDate: typeof leg.serviceDate === 'string' ? leg.serviceDate : undefined,
+        provider: 'digitransit',
+      })),
+    }];
+  });
+}
+
+/** Keep direct-mode results free of vehicle legs even if a provider ignores directOnly. */
+export function isDirectDigitransitItinerary(itinerary: PlanItinerary) {
+  return (itinerary.legs ?? []).every((leg) => leg.transitLeg !== true);
 }
 
 export const digitransitProvider: TransitProvider = {
@@ -396,7 +463,7 @@ export const digitransitProvider: TransitProvider = {
     const requestedTime = options.time ?? new Date().toISOString();
     const data = await graphQl<{
       planConnection?: { edges?: Array<{ node?: PlanItinerary | null }> } | null;
-    }>(PLAN_QUERY, {
+    }>(planQuery('WALK'), {
       origin: planLocation(origin, originStopId),
       destination: planLocation(destination, destinationStopId),
       dateTime: options.arriveBy
@@ -405,40 +472,27 @@ export const digitransitProvider: TransitProvider = {
     }, options.signal);
     const itineraries = (data.planConnection?.edges ?? []).flatMap((edge) => edge.node ? [edge.node] : []);
     if (!itineraries.length) throw new Error('Digitransit could not find a transit route');
-    return itineraries.flatMap((itinerary): TransitRouteResult[] => {
-      const legs = itinerary.legs ?? [];
-      const coordinates = legs.flatMap(planLegCoordinates);
-      if (coordinates.length < 2) return [];
-      const transitLegCount = legs.filter((leg) => leg.transitLeg === true).length;
-      return [{
-        geometry: { type: 'LineString', coordinates },
-        distanceKm: legs.reduce((sum, leg) => sum + (finiteNumber(leg.distance) ? leg.distance : 0), 0) / 1000,
-        durationSeconds: finiteNumber(itinerary.duration) ? itinerary.duration : 0,
-        departureTime: typeof itinerary.start === 'string' ? itinerary.start : undefined,
-        arrivalTime: typeof itinerary.end === 'string' ? itinerary.end : undefined,
-        transfers: finiteNumber(itinerary.numberOfTransfers)
-          ? itinerary.numberOfTransfers
-          : Math.max(0, transitLegCount - 1),
-        provider: 'digitransit',
-        transitLegs: legs.map((leg) => ({
-          mode: typeof leg.mode === 'string' ? leg.mode : 'TRANSIT',
-          geometry: { type: 'LineString', coordinates: planLegCoordinates(leg) },
-          tripId: typeof leg.trip?.gtfsId === 'string' ? leg.trip.gtfsId : undefined,
-          realTime: leg.realTime === true,
-          cancelled: leg.realtimeState === 'CANCELED',
-          delaySeconds: isoDurationSeconds(leg.start?.estimated?.delay),
-          route: typeof leg.route?.shortName === 'string'
-            ? leg.route.shortName
-            : typeof leg.route?.longName === 'string' ? leg.route.longName : undefined,
-          headsign: typeof leg.headsign === 'string' ? leg.headsign : undefined,
-          from: typeof leg.from?.name === 'string' ? leg.from.name : undefined,
-          to: typeof leg.to?.name === 'string' ? leg.to.name : undefined,
-          startTime: legTime(leg.start),
-          endTime: legTime(leg.end),
-          serviceDate: typeof leg.serviceDate === 'string' ? leg.serviceDate : undefined,
-          provider: 'digitransit',
-        })),
-      }];
-    });
+    return normalizeDigitransitRouteResults(itineraries);
   },
 };
+
+export async function fetchDigitransitRoute(
+  origin: [number, number],
+  destination: [number, number],
+  mode: 'pedestrian' | 'bicycle' | 'auto',
+  signal?: AbortSignal,
+) {
+  const directMode = mode === 'pedestrian' ? 'WALK' : mode === 'bicycle' ? 'BICYCLE' : 'CAR';
+  const data = await graphQl<{
+    planConnection?: { edges?: Array<{ node?: PlanItinerary | null }> } | null;
+  }>(planQuery(directMode, true), {
+    origin: planLocation(origin),
+    destination: planLocation(destination),
+    dateTime: { earliestDeparture: new Date().toISOString() },
+  }, signal);
+  const itineraries = (data.planConnection?.edges ?? []).flatMap((edge) => edge.node ? [edge.node] : []);
+  const directItineraries = itineraries.filter(isDirectDigitransitItinerary);
+  const result = normalizeDigitransitRouteResults(directItineraries)[0];
+  if (!result) throw new Error('Digitransit could not find a route');
+  return result;
+}

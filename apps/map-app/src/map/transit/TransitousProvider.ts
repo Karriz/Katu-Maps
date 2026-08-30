@@ -2,6 +2,7 @@ import type {
   TransitBounds,
   TransitDeparture,
   TransitProvider,
+  TransitRoutePlace,
   TransitRouteOptions,
   TransitRouteResult,
   TransitStop,
@@ -24,7 +25,7 @@ type RawStop = {
   modes?: unknown;
 };
 
-type RawPlace = TransitTripPlace & { lat?: number; lon?: number };
+type RawPlace = TransitTripPlace & { parentId?: string; lat?: number; lon?: number };
 type RawLeg = {
   tripId?: unknown;
   mode?: unknown;
@@ -32,11 +33,14 @@ type RawLeg = {
   cancelled?: unknown;
   delaySeconds?: unknown;
   routeShortName?: unknown;
+  routeColor?: unknown;
+  routeTextColor?: unknown;
   displayName?: unknown;
   headsign?: unknown;
   startTime?: unknown;
   endTime?: unknown;
   duration?: unknown;
+  distance?: unknown;
   from?: RawPlace;
   to?: RawPlace;
   intermediateStops?: unknown;
@@ -89,6 +93,63 @@ function tripLeg(raw: RawLeg) {
       : [],
     coordinates,
   };
+}
+
+function routePlace(raw?: RawPlace): TransitRoutePlace | undefined {
+  if (!raw) return undefined;
+  const name = text(raw.name, text(raw.stopName)) || undefined;
+  const stopId = text(raw.stopId) || undefined;
+  const parentStopId = text(raw.parentId, text(raw.parentStopId)) || undefined;
+  const coordinates = finiteNumber(raw.lon) && finiteNumber(raw.lat)
+    ? [raw.lon, raw.lat] as [number, number]
+    : undefined;
+  return name || stopId || coordinates ? { name, stopId, parentStopId, coordinates } : undefined;
+}
+
+type TransitousItinerary = { startTime?: unknown; endTime?: unknown; transfers?: unknown; legs?: RawLeg[] };
+
+export function normalizeTransitousRouteResults(itineraries: TransitousItinerary[]): TransitRouteResult[] {
+  return itineraries.flatMap((itinerary): TransitRouteResult[] => {
+    const legs = itinerary.legs ?? [];
+    const legRoutes = legs.map((leg) => tripLeg(leg));
+    const coordinates = legRoutes.flatMap((leg) => leg.coordinates);
+    if (coordinates.length < 2) return [];
+    const startTime = absoluteTime(itinerary.startTime);
+    const endTime = absoluteTime(itinerary.endTime);
+    const durationSeconds = startTime && endTime
+      ? Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000)
+      : legs.reduce((sum, leg) => sum + (finiteNumber(leg.duration) ? leg.duration : 0), 0);
+    const transitLegs = legs.filter((leg) => text(leg.mode) && !['WALK', 'FOOT'].includes(text(leg.mode)));
+    return [{
+      geometry: { type: 'LineString', coordinates },
+      distanceKm: 0,
+      durationSeconds,
+      departureTime: startTime,
+      arrivalTime: endTime,
+      transfers: finiteNumber(itinerary.transfers)
+        ? Math.max(0, itinerary.transfers)
+        : Math.max(0, transitLegs.length - 1),
+      provider: 'transitous',
+      transitLegs: legs.map((leg, index) => ({
+        mode: text(leg.mode, 'TRANSIT'),
+        geometry: { type: 'LineString', coordinates: legRoutes[index].coordinates },
+        tripId: text(leg.tripId) || undefined,
+        realTime: leg.realTime === true,
+        cancelled: leg.cancelled === true,
+        delaySeconds: finiteNumber(leg.delaySeconds) ? leg.delaySeconds : undefined,
+        route: text(leg.routeShortName, text(leg.displayName)) || undefined,
+        routeColor: text(leg.routeColor) || undefined,
+        routeTextColor: text(leg.routeTextColor) || undefined,
+        headsign: text(leg.headsign) || undefined,
+        distanceMeters: finiteNumber(leg.distance) && leg.distance >= 0 ? leg.distance : undefined,
+        from: routePlace(leg.from),
+        to: routePlace(leg.to),
+        startTime: absoluteTime(leg.startTime),
+        endTime: absoluteTime(leg.endTime),
+        provider: 'transitous',
+      })),
+    }];
+  });
 }
 
 async function jsonRequest<T>(url: string, signal?: AbortSignal): Promise<T> {
@@ -218,49 +279,14 @@ export const transitousProvider: TransitProvider = {
     }
     if (!response) throw lastError instanceof Error ? lastError : new Error('Transitous request timed out');
     const payload = await response.json() as {
-      itineraries?: Array<{ startTime?: string; endTime?: string; legs?: RawLeg[] }>;
-      connections?: Array<{ startTime?: string; endTime?: string; legs?: RawLeg[] }>;
+      itineraries?: TransitousItinerary[];
+      connections?: TransitousItinerary[];
       error?: string;
     };
     const itineraries = payload.itineraries ?? payload.connections ?? [];
     if (!response.ok || itineraries.length === 0) {
       throw new Error(payload.error || 'Transitous could not find a transit route');
     }
-    return itineraries.flatMap((itinerary): TransitRouteResult[] => {
-      const legs = itinerary.legs ?? [];
-      const legRoutes = legs.map((leg) => tripLeg(leg));
-      const coordinates = legRoutes.flatMap((leg) => leg.coordinates);
-      if (coordinates.length < 2) return [];
-      const startTime = absoluteTime(itinerary.startTime);
-      const endTime = absoluteTime(itinerary.endTime);
-      const durationSeconds = startTime && endTime
-        ? Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000)
-        : legs.reduce((sum, leg) => sum + (finiteNumber(leg.duration) ? leg.duration : 0), 0);
-      const transitLegs = legs.filter((leg) => text(leg.mode) && !['WALK', 'FOOT'].includes(text(leg.mode)));
-      return [{
-        geometry: { type: 'LineString', coordinates },
-        distanceKm: 0,
-        durationSeconds,
-        departureTime: startTime,
-        arrivalTime: endTime,
-        transfers: Math.max(0, transitLegs.length - 1),
-        provider: 'transitous',
-        transitLegs: legs.map((leg) => ({
-          mode: text(leg.mode, 'TRANSIT'),
-          geometry: { type: 'LineString', coordinates: legRoutes[legs.indexOf(leg)].coordinates },
-          tripId: text(leg.tripId) || undefined,
-          realTime: leg.realTime === true,
-          cancelled: leg.cancelled === true,
-          delaySeconds: finiteNumber(leg.delaySeconds) ? leg.delaySeconds : undefined,
-          route: text(leg.routeShortName, text(leg.displayName)) || undefined,
-          headsign: text(leg.headsign) || undefined,
-          from: leg.from?.name,
-          to: leg.to?.name,
-          startTime: absoluteTime(leg.startTime),
-          endTime: absoluteTime(leg.endTime),
-          provider: 'transitous',
-        })),
-      }];
-    });
+    return normalizeTransitousRouteResults(itineraries);
   },
 };
