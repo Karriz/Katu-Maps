@@ -38,6 +38,7 @@ import {
   Copy,
   Droplets,
   Mountain,
+  Navigation,
   ShoppingBag,
   Share2,
   SquareParking,
@@ -3015,58 +3016,78 @@ export function MapView() {
                 <span className="location-info-icon" aria-hidden="true"><Mountain size={20} /></span>
                 <div><span className="location-info-category">Map point</span><h2 id="position-information-title">Position information</h2></div>
               </div>
-              <div className="position-information-field">
-                <strong>Address</strong>
-                {positionInformation.address.status === 'loading' && <span className="position-information-muted" aria-live="polite">Finding street address...</span>}
-                {positionInformation.address.status === 'available' && <span>{positionInformation.address.address}</span>}
-                {positionInformation.address.status === 'unavailable' && <span className="position-information-muted">No street address found</span>}
-              </div>
-              <div className="position-information-field">
-                <strong>Latitude, longitude</strong>
-                <span>{formatCoordinates(positionInformation.coordinates)}</span>
-              </div>
-              <div className="position-information-actions">
-                <button className="position-copy" type="button" onClick={() => {
-                  void navigator.clipboard.writeText(formatCoordinates(positionInformation.coordinates)).then(
-                    () => showMapToolNotice('Coordinates copied'),
-                    () => showMapToolNotice('Could not copy coordinates'),
-                  );
-                }}><Copy size={16} aria-hidden="true" /> Copy</button>
-                <button className="position-copy" type="button" onClick={() => shareSelection({
-                  type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
-                }, 'Map position')}><Share2 size={16} aria-hidden="true" /> Share</button>
-              </div>
-              {!positionFavorite && (
-                <button
-                  className="route-start-button route-secondary-button position-save-favorite"
-                  type="button"
-                  disabled={positionInformation.address.status === 'loading'}
-                  onClick={() => saveSelection({
-                    name: 'Map point',
+              <div className="position-information-primary-actions">
+                <button className="route-start-button" type="button" title="Use this position as the route destination" onClick={() => {
+                  const selection: LocationSelection = {
+                    name: defaultPositionName(
+                      positionInformation.coordinates,
+                      positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
+                    ),
                     category: 'Pinned location',
                     coordinates: positionInformation.coordinates,
                     source: 'map',
                     address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
-                  })}
-                ><Star size={16} aria-hidden="true" /> {positionInformation.address.status === 'loading' ? 'Finding address...' : 'Save as favourite'}</button>
-              )}
-              {hasDisplayableElevation(positionInformation.elevation, is3dMode) && (
-                <>
+                  };
+                  openRoute();
+                  setRouteEndpoint('destination', selection);
+                  setPositionInformation(null);
+                  setContextMenuMarker(null);
+                }}><Navigation size={16} aria-hidden="true" /> Directions</button>
+                {positionFavorite ? (
+                  <button className="route-start-button route-secondary-button" type="button" onClick={() => editFavorite(positionFavorite)}>
+                    <Star size={16} aria-hidden="true" /> Edit favourite
+                  </button>
+                ) : (
+                  <button
+                    className="route-start-button route-secondary-button"
+                    type="button"
+                    disabled={positionInformation.address.status === 'loading'}
+                    onClick={() => saveSelection({
+                      name: 'Map point',
+                      category: 'Pinned location',
+                      coordinates: positionInformation.coordinates,
+                      source: 'map',
+                      address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
+                    })}
+                  ><Star size={16} aria-hidden="true" /> Favourite</button>
+                )}
+              </div>
+              <div className="position-information-content">
+                <div className="position-information-field">
+                  <strong>Address</strong>
+                  {positionInformation.address.status === 'loading' && <span className="position-information-muted" aria-live="polite">Finding street address...</span>}
+                  {positionInformation.address.status === 'available' && <span>{positionInformation.address.address}</span>}
+                  {positionInformation.address.status === 'unavailable' && <span className="position-information-muted">No street address found</span>}
+                </div>
+                <div className="position-information-field">
+                  <strong>Latitude, longitude</strong>
+                  <span>{formatCoordinates(positionInformation.coordinates)}</span>
+                </div>
+                <div className="position-information-actions">
+                  <button className="position-copy" type="button" onClick={() => {
+                    void navigator.clipboard.writeText(formatCoordinates(positionInformation.coordinates)).then(
+                      () => showMapToolNotice('Coordinates copied'),
+                      () => showMapToolNotice('Could not copy coordinates'),
+                    );
+                  }}><Copy size={16} aria-hidden="true" /> Copy</button>
+                  <button className="position-copy" type="button" onClick={() => shareSelection({
+                    type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
+                  }, 'Map position')}><Share2 size={16} aria-hidden="true" /> Share</button>
+                </div>
+                {hasDisplayableElevation(positionInformation.elevation, is3dMode) && (<>
                   <div className="position-information-field">
                     <strong>Approximate terrain elevation</strong>
                     <span>{formatElevation(positionInformation.elevation.metres)}</span>
                   </div>
                   <small>Ground surface from the configured terrain DEM.</small>
-                </>
-              )}
-              {positionFavorite && <div className="favorite-actions">
-                  <button type="button" onClick={() => editFavorite(positionFavorite)}>Edit favourite</button>
+                </>)}
+                {positionFavorite && <div className="favorite-actions">
                   <button type="button" onClick={() => {
                     setFavorites((items) => items.filter((item) => item.id !== positionFavorite.id));
                     setPositionInformation(null);
                   }}>Remove favourite</button>
                 </div>}
-
+              </div>
             </aside>
           )}
           {measurement && (

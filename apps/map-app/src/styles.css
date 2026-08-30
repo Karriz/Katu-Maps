@@ -366,7 +366,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .measurement-panel button { background: #fff7ed; border: 1px solid #fdba74; border-radius: 9px; color: #9a3412; cursor: pointer; flex: 1; font: inherit; font-size: .76rem; font-weight: 700; padding: 8px 10px; }
 .measurement-panel .measurement-finish { background: #b45309; border-color: #b45309; color: #fff; }
 .measurement-panel button:disabled { cursor: default; opacity: .45; }
-.position-information { backdrop-filter: blur(20px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: var(--radius-card); box-shadow: var(--shadow-card); color: var(--color-ink); padding: 22px; position: absolute; right: 28px; top: 28px; width: min(350px, calc(100% - 56px)); z-index: 160; }
+.position-information { backdrop-filter: blur(20px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: var(--radius-card); box-shadow: var(--shadow-card); color: var(--color-ink); display: flex; flex-direction: column; max-height: calc(100dvh - 56px); overflow: hidden; padding: 22px; position: absolute; right: 28px; top: 28px; width: min(350px, calc(100% - 56px)); z-index: 160; }
 .position-information-heading { align-items: center; display: flex; gap: 12px; margin-bottom: 18px; padding-right: 28px; }
 .position-information-heading .location-info-icon { background: var(--color-accent); }
 .position-information h2 { font-size: 1.12rem; margin: 4px 0 0; }
@@ -374,11 +374,13 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .position-information-field strong { color: #64748b; font-size: 0.65rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .position-information-field span { font-size: 0.84rem; font-variant-numeric: tabular-nums; }
 .position-information-field .position-information-muted { color: #94a3b8; font-style: italic; }
+.position-information-primary-actions { display: flex; flex: 0 0 auto; gap: 8px; margin-bottom: 10px; }
+.position-information-primary-actions button { align-items: center; display: flex; flex: 1 1 0; gap: 6px; justify-content: center; min-width: 0; padding-inline: 9px; white-space: nowrap; }
+.position-information-primary-actions button:disabled { background: #f1f5f9; border-color: #d8e0e9; color: #94a3b8; cursor: wait; }
+.position-information-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .position-copy { align-items: center; background: #eef5ff; border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.76rem; font-weight: 700; gap: 7px; padding: 8px 10px; }
 .position-information-actions { display: flex; gap: 8px; }
 .position-information-actions .position-copy { flex: 1; justify-content: center; }
-.position-save-favorite { align-items: center; display: flex; gap: 7px; justify-content: center; margin: 10px 0 0; }
-.position-save-favorite:disabled { background: #f1f5f9; border-color: #d8e0e9; color: #94a3b8; cursor: wait; }
 .position-information small { color: #94a3b8; display: block; font-size: 0.68rem; line-height: 1.4; margin-top: 3px; }
 .terrain-toggle { background: #f4fbff; border: 1px solid #86aac2; border-radius: 8px; color: #163047; cursor: pointer; font: inherit; font-size: 0.8rem; padding: 8px 10px; position: absolute; right: 16px; top: 84px; z-index: 1; }
 .terrain-toggle:hover { background: #dff3ff; }
@@ -457,7 +459,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     bottom: 0;
     left: 0;
     max-height: min(68dvh, 560px);
-    overflow-y: auto;
+    overflow: hidden;
     padding: 0 22px calc(22px + env(safe-area-inset-bottom, 0px));
     right: 0;
     top: auto;
