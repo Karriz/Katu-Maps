@@ -1824,19 +1824,28 @@ export function MapView() {
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
           'line-color': [
-            'coalesce', ['get', 'routeColor'], [
-              'match', ['get', 'mode'],
-            'WALK', '#64748b', 'FOOT', '#64748b',
-            'PEDESTRIAN', '#64748b', 'BICYCLE', '#16834b', 'BIKE', '#16834b',
+            'match', ['upcase', ['to-string', ['get', 'mode']]],
+            'WALK', '#64748b', 'FOOT', '#64748b', 'PEDESTRIAN', '#64748b',
+            'BICYCLE', '#16834b', 'BIKE', '#16834b', 'CYCLING', '#16834b',
             'CAR', '#2563eb', 'DRIVING', '#2563eb',
-            'TRAM', '#8b5cf6', 'BUS', '#1769e8',
-            'SUBWAY', '#f97316', 'RAIL', '#16a34a',
-            'REGIONAL_RAIL', '#16a34a', '#0ea5e9',
+            [
+              'coalesce', ['get', 'routeColor'], [
+                'match', ['upcase', ['to-string', ['get', 'mode']]],
+                'TRAM', '#8b5cf6', 'BUS', '#1769e8',
+                'SUBWAY', '#f97316', 'RAIL', '#16a34a',
+                'REGIONAL_RAIL', '#16a34a', '#0ea5e9',
               ],
+            ],
           ] as unknown as ExpressionSpecification,
           'line-width': 5,
           'line-opacity': 0.98,
-          'line-dasharray': ['match', ['get', 'mode'], 'WALK', ['literal', [1.2, 1.2]], 'FOOT', ['literal', [1.2, 1.2]], ['literal', [1, 0]]] as unknown as ExpressionSpecification,
+          'line-dasharray': [
+            'match', ['upcase', ['to-string', ['get', 'mode']]],
+            'WALK', ['literal', [1.2, 1.2]],
+            'FOOT', ['literal', [1.2, 1.2]],
+            'PEDESTRIAN', ['literal', [1.2, 1.2]],
+            ['literal', [1, 0]],
+          ] as unknown as ExpressionSpecification,
         },
       });
       map.addLayer({
