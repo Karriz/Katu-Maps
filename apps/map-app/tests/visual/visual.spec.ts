@@ -12,6 +12,14 @@ const photonFixture = { features: [
 ] };
 
 type Scenario = { name: string; description: string; viewport: keyof typeof viewports; setup?: (page: Page) => Promise<void>; state: string };
+type RuntimeDiagnostics = {
+  consoleErrors: string[];
+  pageErrors: string[];
+  failedRequests: string[];
+  failedResponses: string[];
+};
+
+let readinessFailure: string | null = null;
 
 async function openSearch(page: Page) {
   const input = page.getByLabel('Search for a place');
@@ -44,27 +52,59 @@ const scenarios: Scenario[] = [
   { name: 'phone-provider-error', description: 'Deterministic provider failure surfaced without hanging', viewport: 'phone', setup: async page => { await page.route('**/api/?q=ProviderError**', route => route.fulfill({ status: 503, body: 'fixture outage' })); const input = page.getByLabel('Search for a place'); await input.fill('ProviderError'); await expect(page.locator('.location-search-results')).toBeVisible(); }, state: 'provider empty/error' },
 ];
 
-async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario, runtime: { consoleErrors: string[]; failedRequests: string[] }) {
-  const diagnostics = await page.evaluate(() => {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2');
-    const debug = gl?.getExtension('WEBGL_debug_renderer_info');
-    return {
-      browser: navigator.userAgent,
-      webgl2: Boolean(gl),
-      webglVendor: gl && debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl?.getParameter(gl.VENDOR),
-      webglRenderer: gl && debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl?.getParameter(gl.RENDERER),
-      devicePixelRatio: window.devicePixelRatio,
-      maplibre: document.querySelector('.maplibregl-map') ? '6.6.0' : 'not initialized',
-    };
+async function browserDiagnostics(page: Page) {
+  if (page.isClosed() || page.url() === 'about:blank') return { diagnostic: 'Page did not navigate before failure' };
+  try {
+    return await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl2');
+      const debug = gl?.getExtension('WEBGL_debug_renderer_info');
+      const mapStatus = document.querySelector('.map-status');
+      return {
+        browser: navigator.userAgent,
+        webgl2: Boolean(gl),
+        webglVendor: gl && debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl?.getParameter(gl.VENDOR),
+        webglRenderer: gl && debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl?.getParameter(gl.RENDERER),
+        devicePixelRatio: window.devicePixelRatio,
+        maplibre: document.querySelector('.maplibregl-map') ? '6.6.0' : 'not initialized',
+        mapStatus: mapStatus?.textContent?.trim() || 'hidden',
+        documentReadyState: document.readyState,
+        pageUrl: location.href,
+      };
+    });
+  } catch (error) {
+    return { diagnostic: `Could not read browser diagnostics: ${String(error)}` };
+  }
+}
+
+async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario, runtime: RuntimeDiagnostics, failure?: unknown) {
+  const diagnostics = await browserDiagnostics(page);
+  await info.attach('scenario-metadata', {
+    contentType: 'application/json',
+    body: Buffer.from(JSON.stringify({
+      description: scenario.description,
+      viewport: viewports[scenario.viewport],
+      fixture: 'visual-fixtures-v1',
+      layers: 'default',
+      uiState: scenario.state,
+      readinessGate: readinessFailure,
+      ...diagnostics,
+      ...runtime,
+      failure: failure ? String(failure) : null,
+    })),
   });
-  await info.attach('scenario-metadata', { contentType: 'application/json', body: Buffer.from(JSON.stringify({ description: scenario.description, viewport: viewports[scenario.viewport], fixture: 'visual-fixtures-v1', layers: 'default', uiState: scenario.state, ...diagnostics, ...runtime })) });
+}
+
+async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, failed: boolean) {
+  if (page.isClosed() || page.url() === 'about:blank') return;
+  const screenshotPath = info.outputPath(`${scenario.name}${failed ? '-failure' : ''}.png`);
+  await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled' });
+  await info.attach('visual-screenshot', { path: screenshotPath, contentType: 'image/png' });
 }
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/?q=**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(photonFixture) }));
   await page.addInitScript(() => {
-    Date.now = () => new Date('2026-01-15T10:00:00Z').valueOf();
     localStorage.clear();
   });
 });
@@ -73,21 +113,50 @@ for (const scenario of scenarios) {
   test(scenario.name, async ({ page, browserName }, testInfo) => {
     test.skip(browserName !== 'chromium', 'The visual WebGL suite targets Chromium/SwiftShader.');
     await page.setViewportSize(viewports[scenario.viewport]);
-    const runtime = { consoleErrors: [] as string[], failedRequests: [] as string[] };
+
+    const runtime: RuntimeDiagnostics = {
+      consoleErrors: [],
+      pageErrors: [],
+      failedRequests: [],
+      failedResponses: [],
+    };
     page.on('console', message => { if (message.type() === 'error') runtime.consoleErrors.push(message.text()); });
+    page.on('pageerror', error => runtime.pageErrors.push(error.message));
     page.on('requestfailed', request => runtime.failedRequests.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText}`));
-    await page.goto('/');
-    const webgl2 = await page.evaluate(() => Boolean(document.createElement('canvas').getContext('webgl2')));
-    expect(webgl2, 'WebGL2 is unavailable. Install Chromium dependencies and run with the SwiftShader flags from playwright.config.ts.').toBe(true);
-    await expect(page.locator('.map-view')).toBeVisible();
-    await expect(page.locator('.map-status')).toBeHidden({ timeout: 45_000 });
-    await documentFontsReady(page);
-    if (scenario.setup) await scenario.setup(page);
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const screenshotPath = testInfo.outputPath(`${scenario.name}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled' });
-    await testInfo.attach('visual-screenshot', { path: screenshotPath, contentType: 'image/png' });
-    await attachDiagnostics(page, testInfo, scenario, runtime);
+    page.on('response', response => {
+      if (response.status() >= 400) runtime.failedResponses.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    });
+
+    let failure: unknown;
+    try {
+      if (readinessFailure) {
+        throw new Error(`Map readiness preflight already failed; skipping repeated 45-second wait. First failure: ${readinessFailure}`);
+      }
+
+      await page.goto('/');
+      const webgl2 = await page.evaluate(() => Boolean(document.createElement('canvas').getContext('webgl2')));
+      expect(webgl2, 'WebGL2 is unavailable. Install Chromium dependencies and run with the SwiftShader flags from playwright.config.ts.').toBe(true);
+      await expect(page.locator('.map-view')).toBeVisible();
+
+      try {
+        await expect(page.locator('.map-status')).toBeHidden({ timeout: 45_000 });
+      } catch (error) {
+        const status = await page.locator('.map-status').textContent().catch(() => null);
+        const diagnostic = `Map did not become ready (status: ${status?.trim() || 'unknown'}; failed requests: ${runtime.failedRequests.length}; HTTP errors: ${runtime.failedResponses.length}; console errors: ${runtime.consoleErrors.length}; page errors: ${runtime.pageErrors.length})`;
+        readinessFailure = diagnostic;
+        throw new Error(`${diagnostic}\n${String(error)}`);
+      }
+
+      await documentFontsReady(page);
+      if (scenario.setup) await scenario.setup(page);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      await attachScreenshot(page, testInfo, scenario, Boolean(failure)).catch(error => runtime.pageErrors.push(`Screenshot failed: ${String(error)}`));
+      await attachDiagnostics(page, testInfo, scenario, runtime, failure);
+    }
   });
 }
 
