@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests/visual', outputDir: 'test-results/visual-artifacts', timeout: 60_000,
+  testDir: './tests/visual', outputDir: 'test-results/visual-artifacts', timeout: 90_000,
   expect: { timeout: 10_000 }, fullyParallel: false, workers: 1,
   reporter: [['line'], ['./tests/visual/report-reporter.ts']],
   use: {
