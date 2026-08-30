@@ -11,6 +11,15 @@ export const visualFixture = {
   destination: [23.7812, 61.4957] as [number, number],
 };
 
+const stationStop = {
+  gtfsId: 'visual:TampereStation',
+  name: 'Tampere railway station',
+  lat: 61.4984,
+  lon: 23.7730,
+  vehicleMode: 'RAIL',
+  locationType: 'STATION',
+};
+
 const stops = [
   { gtfsId: 'visual:Pyynikintori', name: 'Pyynikintori', lat: 61.4974, lon: 23.7429, vehicleMode: 'TRAM', locationType: 'STOP' },
   { gtfsId: visualFixture.stopId, name: 'Keskustori', lat: 61.4981, lon: 23.7609, vehicleMode: 'TRAM', locationType: 'STOP' },
@@ -238,7 +247,7 @@ async function handleDigitransit(route: Route, clock: ReturnType<typeof fixtureC
   const query = requestBody?.query ?? '';
 
   if (query.includes('StopsByBounds')) {
-    return json(route, { data: { stopsByBbox: stops } });
+    return json(route, { data: { stopsByBbox: [...stops, stationStop] } });
   }
   if (query.includes('Departures')) {
     return json(route, {
