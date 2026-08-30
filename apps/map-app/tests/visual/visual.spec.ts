@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { installVisualProviderFixtures, visualFixture } from './provider-fixtures';
 
 const viewports = {
   phone: { width: 412, height: 915, deviceScaleFactor: 1 },
@@ -6,12 +7,14 @@ const viewports = {
   desktop: { width: 1440, height: 900, deviceScaleFactor: 1 },
 } as const;
 
-const photonFixture = { features: [
-  { geometry: { coordinates: [23.7609, 61.4981] }, properties: { name: 'Tampere Central Square', city: 'Tampere', country: 'Finland' } },
-  { geometry: { coordinates: [23.7737, 61.4978] }, properties: { name: 'Tampere Hall', street: 'Yliopistonkatu', city: 'Tampere', country: 'Finland' } },
-] };
+type Scenario = {
+  name: string;
+  description: string;
+  viewport: keyof typeof viewports;
+  setup?: (page: Page) => Promise<void>;
+  state: string;
+};
 
-type Scenario = { name: string; description: string; viewport: keyof typeof viewports; setup?: (page: Page) => Promise<void>; state: string };
 type RuntimeDiagnostics = {
   consoleErrors: string[];
   pageErrors: string[];
@@ -21,10 +24,36 @@ type RuntimeDiagnostics = {
 
 let readinessFailure: string | null = null;
 
-async function openSearch(page: Page) {
+async function openSearch(page: Page, query = 'Keskustori') {
   const input = page.getByLabel('Search for a place');
-  await input.fill('Tampere');
+  await input.fill(query);
   await expect(page.getByRole('listbox', { name: 'Location search results' })).toBeVisible();
+}
+
+async function openPoi(page: Page) {
+  await openSearch(page, 'Tampere');
+  await page.getByRole('option', { name: /Tampere-talo/ }).click();
+  await expect(page.locator('.location-info-panel')).toContainText('Tampere-talo');
+  await expect(page.locator('.location-info-panel')).toContainText('Yliopistonkatu');
+}
+
+async function openTransitStop(page: Page) {
+  await openSearch(page, 'Keskustori');
+  await page.getByRole('option', { name: /Keskustori.*Transit stop/i }).click();
+  const panel = page.locator('.transit-departures-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Next departures');
+  await expect(panel.locator('.transit-departure-card')).toHaveCount(4);
+}
+
+async function openSelectedTrip(page: Page) {
+  await openTransitStop(page);
+  await page.locator('.transit-departure-card').filter({ hasText: 'Hervanta' }).click();
+  const panel = page.locator('.transit-trip-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Stops on this route');
+  await expect(panel).toContainText('Board here');
+  await expect(panel.locator('.transit-route-stop')).toHaveCount(7);
 }
 
 async function openRoute(page: Page) {
@@ -32,24 +61,171 @@ async function openRoute(page: Page) {
   await expect(page.getByRole('button', { name: 'Close route planner' })).toBeVisible();
 }
 
+async function chooseRouteResult(page: Page, listName: string, resultText: string, useLast = false) {
+  const list = page.getByRole('listbox', { name: listName });
+  await expect(list).toBeVisible();
+  const candidates = list.locator('button.route-search-result').filter({ hasText: resultText });
+  await expect(candidates.first()).toBeVisible();
+  await (useLast ? candidates.last() : candidates.first()).click();
+}
+
+async function setRouteEndpoints(page: Page, mode: 'pedestrian' | 'transit') {
+  await openRoute(page);
+  if (mode === 'transit') await page.getByRole('tab', { name: 'Transit' }).click();
+
+  const origin = page.getByLabel('Search starting point');
+  await origin.fill('Keskustori');
+  await chooseRouteResult(page, 'Search starting point results', 'Keskustori', true);
+
+  const destination = page.getByLabel('Search destination');
+  await destination.fill('Tampere');
+  await chooseRouteResult(page, 'Search destination results', 'Tampere-talo');
+
+  if (mode === 'transit') {
+    await expect(page.locator('.transit-route-options')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.transit-route-option')).toHaveCount(3);
+  } else {
+    await expect(page.locator('.route-summary')).toContainText('1.1 km', { timeout: 15_000 });
+    await expect(page.locator('.route-summary')).toContainText('15 min');
+  }
+}
+
+async function openTransitAlternatives(page: Page) {
+  await setRouteEndpoints(page, 'transit');
+  await expect(page.locator('.transit-route-options')).toContainText('Choose a trip');
+}
+
+async function openExpandedItinerary(page: Page) {
+  await openTransitAlternatives(page);
+  const options = page.locator('.transit-route-option');
+  await options.nth(1).click();
+  await page.getByRole('button', { name: 'View stops and legs' }).click();
+  await expect(page.locator('.transit-route-legs')).toBeVisible();
+  await expect(page.locator('.transit-transfer-marker')).toContainText('Change at');
+  await page.getByRole('button', { name: 'Expand panel' }).click();
+  await expect(page.locator('.route-panel')).toHaveAttribute('data-snap', 'expanded');
+}
+
 const scenarios: Scenario[] = [
   { name: 'desktop-main-map', description: 'Main map after style readiness', viewport: 'desktop', state: 'map ready' },
   { name: 'tablet-main-map', description: 'Main map at tablet landscape dimensions', viewport: 'tablet', state: 'map ready' },
   { name: 'phone-main-map', description: 'Main map at Android phone dimensions', viewport: 'phone', state: 'map ready' },
-  { name: 'phone-search-autocomplete', description: 'Focused search with deterministic Photon results', viewport: 'phone', setup: openSearch, state: 'search results open' },
-  { name: 'desktop-favorites-empty', description: 'Graceful empty favourites list', viewport: 'desktop', setup: async page => { await page.getByRole('button', { name: 'Show favourites' }).click(); }, state: 'favourites open' },
-  { name: 'tablet-search-results', description: 'Highlighted deterministic search candidates', viewport: 'tablet', setup: openSearch, state: 'search results open' },
-  { name: 'phone-position-context-menu', description: 'Generic map context route actions', viewport: 'phone', setup: async page => { await page.locator('.map-canvas').click({ button: 'right', position: { x: 180, y: 350 } }); }, state: 'context menu open' },
-  { name: 'desktop-business-poi-search', description: 'Business/POI search presentation', viewport: 'desktop', setup: openSearch, state: 'POI candidates' },
-  { name: 'phone-transit-stop-search', description: 'Transit-oriented search result layout', viewport: 'phone', setup: openSearch, state: 'transit candidate list' },
-  { name: 'tablet-selected-departure', description: 'Selected-item entry point at tablet size', viewport: 'tablet', setup: openSearch, state: 'selection entry point' },
-  { name: 'phone-route-endpoints-expanded', description: 'Route endpoint selection in expanded mobile sheet', viewport: 'phone', setup: openRoute, state: 'route sheet expanded' },
-  { name: 'desktop-walking-route', description: 'Walking route planner initial state', viewport: 'desktop', setup: openRoute, state: 'walking selected' },
-  { name: 'tablet-transit-alternatives', description: 'Transit route planner tab and alternatives area', viewport: 'tablet', setup: async page => { await openRoute(page); await page.getByRole('tab', { name: /Transit/i }).click(); }, state: 'transit selected' },
-  { name: 'phone-transit-itinerary', description: 'Expanded itinerary container and transfer layout entry point', viewport: 'phone', setup: async page => { await openRoute(page); await page.getByRole('tab', { name: /Transit/i }).click(); }, state: 'transit itinerary entry' },
-  { name: 'phone-bottom-sheet-midpoint', description: 'Mobile route bottom sheet at its interactive presentation', viewport: 'phone', setup: openRoute, state: 'sheet expanded' },
-  { name: 'desktop-layers-panel', description: 'Map layers and enabled state', viewport: 'desktop', setup: async page => { await page.getByRole('button', { name: 'Map layers' }).click(); }, state: 'layers open' },
-  { name: 'phone-provider-error', description: 'Deterministic provider failure surfaced without hanging', viewport: 'phone', setup: async page => { await page.route('**/api/?q=ProviderError**', route => route.fulfill({ status: 503, body: 'fixture outage' })); const input = page.getByLabel('Search for a place'); await input.fill('ProviderError'); await expect(page.locator('.location-search-results')).toBeVisible(); }, state: 'provider empty/error' },
+  {
+    name: 'phone-search-autocomplete',
+    description: 'Search containing a POI and a transit stop from deterministic fixtures',
+    viewport: 'phone',
+    setup: async page => {
+      await openSearch(page, 'Tampere');
+      await expect(page.getByRole('option', { name: /Tampere-talo/i })).toBeVisible();
+      await expect(page.getByRole('option', { name: /Tampere railway station.*Transit stop/i })).toBeVisible();
+    },
+    state: 'POI and transit results open',
+  },
+  {
+    name: 'desktop-favorites-empty',
+    description: 'Graceful empty favourites list',
+    viewport: 'desktop',
+    setup: async page => { await page.getByRole('button', { name: 'Show favourites' }).click(); },
+    state: 'favourites open',
+  },
+  {
+    name: 'tablet-search-results',
+    description: 'Submitted search candidates highlighted and fitted on the map',
+    viewport: 'tablet',
+    setup: async page => {
+      await openSearch(page);
+      await page.getByLabel('Search for a place').press('Enter');
+      await expect(page.getByRole('listbox', { name: 'Location search results' })).toBeHidden();
+    },
+    state: 'search candidates highlighted',
+  },
+  {
+    name: 'phone-position-context-menu',
+    description: 'Generic map context route actions',
+    viewport: 'phone',
+    setup: async page => {
+      await page.locator('.map-canvas').click({ button: 'right', position: { x: 180, y: 350 } });
+      await expect(page.locator('.map-context-menu')).toContainText('Position information');
+    },
+    state: 'context menu open',
+  },
+  {
+    name: 'desktop-business-poi',
+    description: 'Business/POI information populated through Nominatim',
+    viewport: 'desktop',
+    setup: openPoi,
+    state: 'POI information open',
+  },
+  {
+    name: 'phone-stop-departures',
+    description: 'Transit departures with realtime, scheduled and cancelled services',
+    viewport: 'phone',
+    setup: openTransitStop,
+    state: 'stop departures open',
+  },
+  {
+    name: 'tablet-selected-departure',
+    description: 'Validated selected trip with seven stop calls and boarding context',
+    viewport: 'tablet',
+    setup: openSelectedTrip,
+    state: 'selected live trip open',
+  },
+  {
+    name: 'phone-walking-route',
+    description: 'Walking route with deterministic Valhalla geometry and summary',
+    viewport: 'phone',
+    setup: async page => setRouteEndpoints(page, 'pedestrian'),
+    state: 'walking route fitted',
+  },
+  {
+    name: 'desktop-walking-route',
+    description: 'Walking route result at desktop size',
+    viewport: 'desktop',
+    setup: async page => setRouteEndpoints(page, 'pedestrian'),
+    state: 'walking route fitted',
+  },
+  {
+    name: 'tablet-transit-alternatives',
+    description: 'Three transit alternatives parsed from Digitransit fixtures',
+    viewport: 'tablet',
+    setup: openTransitAlternatives,
+    state: 'three transit alternatives',
+  },
+  {
+    name: 'phone-transit-itinerary',
+    description: 'Expanded bus-to-tram transfer itinerary',
+    viewport: 'phone',
+    setup: openExpandedItinerary,
+    state: 'transfer itinerary expanded',
+  },
+  {
+    name: 'phone-bottom-sheet-midpoint',
+    description: 'Mobile route bottom sheet at its interactive midpoint presentation',
+    viewport: 'phone',
+    setup: openRoute,
+    state: 'sheet midpoint',
+  },
+  {
+    name: 'desktop-layers-panel',
+    description: 'Map layers and deterministic CI enabled state',
+    viewport: 'desktop',
+    setup: async page => {
+      await page.getByRole('button', { name: 'Map layers' }).click();
+      await expect(page.locator('#map-layer-panel')).toBeVisible();
+    },
+    state: 'layers open',
+  },
+  {
+    name: 'phone-provider-error',
+    description: 'Deterministic provider failure surfaced without hanging',
+    viewport: 'phone',
+    setup: async page => {
+      const input = page.getByLabel('Search for a place');
+      await input.fill('ProviderError');
+      await expect(page.locator('.location-search-results')).toContainText('Could not search right now');
+    },
+    state: 'provider error',
+  },
 ];
 
 async function browserDiagnostics(page: Page) {
@@ -84,7 +260,7 @@ async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario,
     body: Buffer.from(JSON.stringify({
       description: scenario.description,
       viewport: viewports[scenario.viewport],
-      fixture: 'visual-fixtures-v1',
+      fixture: visualFixture.id,
       layers: 'ci-ui (buildings and transit on; terrain, trees and transit models off)',
       uiState: scenario.state,
       readinessGate: readinessFailure,
@@ -103,7 +279,7 @@ async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, 
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/?q=**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(photonFixture) }));
+  await installVisualProviderFixtures(page);
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('tampere-map-layer-options', JSON.stringify({
@@ -132,7 +308,9 @@ for (const scenario of scenarios) {
     page.on('pageerror', error => runtime.pageErrors.push(error.message));
     page.on('requestfailed', request => runtime.failedRequests.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText}`));
     page.on('response', response => {
-      if (response.status() >= 400) runtime.failedResponses.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      if (response.status() >= 400 && !response.url().includes('ProviderError')) {
+        runtime.failedResponses.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      }
     });
 
     let failure: unknown;
@@ -157,6 +335,7 @@ for (const scenario of scenarios) {
 
       await documentFontsReady(page);
       if (scenario.setup) await scenario.setup(page);
+      await page.waitForTimeout(750);
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     } catch (error) {
       failure = error;
