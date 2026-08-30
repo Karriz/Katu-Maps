@@ -102,6 +102,8 @@ async function openExpandedItinerary(page: Page) {
   await page.getByRole('button', { name: 'View stops and legs' }).click();
   await expect(page.locator('.transit-route-legs')).toBeVisible();
   await expect(page.locator('.transit-transfer-marker')).toContainText('Change at');
+  await page.getByRole('button', { name: 'Expand panel' }).click();
+  await expect(page.locator('.route-panel')).toHaveAttribute('data-snap', 'expanded');
 }
 
 const scenarios: Scenario[] = [
@@ -113,9 +115,9 @@ const scenarios: Scenario[] = [
     description: 'Search containing a POI and a transit stop from deterministic fixtures',
     viewport: 'phone',
     setup: async page => {
-      await openSearch(page);
-      await expect(page.getByRole('option', { name: /Keskustori.*Transit stop/i })).toBeVisible();
-      await expect(page.getByRole('option', { name: /^Keskustori.*Tampere/i })).toBeVisible();
+      await openSearch(page, 'Tampere');
+      await expect(page.getByRole('option', { name: /Tampere-talo/i })).toBeVisible();
+      await expect(page.getByRole('option', { name: /Tampere railway station.*Transit stop/i })).toBeVisible();
     },
     state: 'POI and transit results open',
   },
@@ -333,6 +335,7 @@ for (const scenario of scenarios) {
 
       await documentFontsReady(page);
       if (scenario.setup) await scenario.setup(page);
+      await page.waitForTimeout(750);
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     } catch (error) {
       failure = error;
