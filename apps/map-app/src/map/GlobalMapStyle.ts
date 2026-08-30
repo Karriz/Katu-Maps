@@ -49,6 +49,86 @@ const OVERVIEW_RAIL_FILTER: ExpressionSpecification = [
   ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
 ] as ExpressionSpecification;
 
+const CYCLING_ROUTE_NETWORKS = ['icn', 'ncn', 'rcn', 'lcn'] as const;
+const HIKING_ROUTE_NETWORKS = ['iwn', 'nwn', 'rwn', 'lwn'] as const;
+const LOCAL_RAIL_SUBCLASSES = ['subway', 'light_rail', 'tram', 'monorail', 'funicular', 'rail', 'train'] as const;
+
+function routeNetworkFilter(networks: readonly string[]): ExpressionSpecification {
+  return [
+    'any',
+    ...Array.from({ length: 6 }, (_, index) => (
+      ['in', ['get', `route_${index + 1}_network`], ['literal', networks]]
+    )),
+  ] as ExpressionSpecification;
+}
+
+function routeNetworkExpression(networks: readonly string[]): ExpressionSpecification {
+  return [
+    'case',
+    ...Array.from({ length: 6 }, (_, index) => {
+      const property = `route_${index + 1}_network`;
+      return [
+        ['in', ['get', property], ['literal', networks]],
+        ['get', property],
+      ];
+    }).flat(),
+    '',
+  ] as ExpressionSpecification;
+}
+
+const CYCLING_ROUTE_FILTER = routeNetworkFilter(CYCLING_ROUTE_NETWORKS);
+const HIKING_ROUTE_FILTER = routeNetworkFilter(HIKING_ROUTE_NETWORKS);
+const CYCLING_ROUTE_NETWORK = routeNetworkExpression(CYCLING_ROUTE_NETWORKS);
+const HIKING_ROUTE_NETWORK = routeNetworkExpression(HIKING_ROUTE_NETWORKS);
+
+const CYCLING_EMPHASIS_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  CYCLING_ROUTE_FILTER,
+] as ExpressionSpecification;
+
+const HIKING_EMPHASIS_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  HIKING_ROUTE_FILTER,
+] as ExpressionSpecification;
+
+const CYCLING_PATH_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  ['==', ['get', 'class'], 'path'],
+  [
+    'any',
+    ['==', ['get', 'subclass'], 'cycleway'],
+    ['in', ['get', 'bicycle'], ['literal', ['yes', 'designated', 'official']]],
+    ['==', ['get', 'official'], 1],
+  ],
+] as ExpressionSpecification;
+
+const HIKING_PATH_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  [
+    'any',
+    ['==', ['get', 'class'], 'track'],
+    [
+      'all',
+      ['==', ['get', 'class'], 'path'],
+      ['in', ['get', 'subclass'], ['literal', ['path', 'footway', 'bridleway']]],
+    ],
+  ],
+] as ExpressionSpecification;
+
+const LOCAL_TRANSIT_RAIL_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  [
+    'any',
+    ['==', ['get', 'class'], 'transit'],
+    ['in', ['get', 'subclass'], ['literal', LOCAL_RAIL_SUBCLASSES]],
+  ],
+] as ExpressionSpecification;
+
 const SURFACE_ROAD_FILTER: ExpressionSpecification = [
   'all',
   ROAD_FILTER,
@@ -188,6 +268,30 @@ export const GLOBAL_ROAD_LAYER_IDS = [
   'global-road-bridges',
 ];
 
+export const GLOBAL_CYCLING_LAYER_IDS = [
+  'global-cycling-path-casing',
+  'global-cycling-paths',
+  'global-cycling-route-casing',
+  'global-cycling-routes',
+  'global-cycling-route-labels',
+];
+
+export const GLOBAL_HIKING_LAYER_IDS = [
+  'global-hiking-path-casing',
+  'global-hiking-paths',
+  'global-hiking-route-casing',
+  'global-hiking-routes',
+  'global-hiking-route-labels',
+  'global-hiking-pois',
+];
+
+export const GLOBAL_TRANSIT_LINE_LAYER_IDS = [
+  'global-local-transit-casing',
+  'global-local-transit-lines',
+  'global-local-transit-route-colors',
+  'global-transit-line-labels',
+];
+
 const GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES = 5.5;
 const GLOBAL_MAP_SUN_COLOR = MAP_COLORS.sun;
 
@@ -211,6 +315,13 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
 
 const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
 const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
+
+const WATER_COLOR: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  0, '#5fa9bc',
+  3, '#6db5c7',
+  6, MAP_COLORS.water,
+] as ExpressionSpecification;
 
 const GLOBAL_BUILDING_BASE: ExpressionSpecification = [
   'coalesce', ['get', 'render_min_height'], 0,
@@ -305,6 +416,25 @@ export function roadWidthExpression(
     // Damp the closest view slightly so wide motorways do not dominate a
     // highly pitched scene while retaining approximately physical scaling.
     18, ['*', widthMetres, pixelsPerMetre(18, latitude) * 0.82],
+  ] as ExpressionSpecification;
+}
+
+export function aerowayWidthExpression(latitude: number): ExpressionSpecification {
+  const widthMetres: ExpressionSpecification = [
+    'match', ['get', 'class'],
+    'runway', 45,
+    'taxiway', 23,
+    'apron', 12,
+    6,
+  ] as ExpressionSpecification;
+
+  return [
+    'interpolate', ['exponential', 2], ['zoom'],
+    10, ['max', 1, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
+    12, ['max', 1.5, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
+    14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
+    16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
+    18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
   ] as ExpressionSpecification;
 }
 
@@ -541,7 +671,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'aeroway',
       minzoom: 10,
-      filter: ['==', ['geometry-type'], 'LineString'],
+      filter: [
+        'all',
+        ['==', ['geometry-type'], 'LineString'],
+        ['!=', ['get', 'class'], 'runway'],
+      ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': [
@@ -550,11 +684,24 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'taxiway', '#b5b9b5',
           '#c1c4bf',
         ],
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          10, ['match', ['get', 'class'], 'runway', 2, 0.8],
-          16, ['match', ['get', 'class'], 'runway', 18, 'taxiway', 7, 3],
-        ],
+        'line-width': aerowayWidthExpression(0),
+      },
+    },
+    {
+      id: 'global-aeroway-runways',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'aeroway',
+      minzoom: 10,
+      filter: [
+        'all',
+        ['==', ['geometry-type'], 'LineString'],
+        ['==', ['get', 'class'], 'runway'],
+      ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#9ea29f',
+        'line-width': aerowayWidthExpression(0),
       },
     },
     {
@@ -583,7 +730,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'waterway',
       paint: {
-        'line-color': MAP_COLORS.waterEdge,
+        'line-color': WATER_COLOR,
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 16, 3],
       },
     },
@@ -609,12 +756,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
       paint: {
-        'fill-color': [
-          'interpolate', ['linear'], ['zoom'],
-          0, '#5fa9bc',
-          3, '#6db5c7',
-          6, MAP_COLORS.water,
-        ],
+        'fill-color': WATER_COLOR,
       },
     },
     {
@@ -1554,6 +1696,303 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
+      id: 'global-hiking-path-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 10.5,
+      filter: HIKING_PATH_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#fff8e8',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10.5, 2.2, 14, 4.2, 18, 7],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11.5, 0.78],
+      },
+    },
+    {
+      id: 'global-hiking-paths',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 10.5,
+      filter: HIKING_PATH_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'surface'],
+          'paved', '#b47750',
+          'unpaved', '#a96343',
+          '#b26e48',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10.5, 0.85, 14, 1.8, 18, 3.4],
+        'line-dasharray': [1.8, 1.1],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11.5, 0.88],
+      },
+    },
+    {
+      id: 'global-hiking-route-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 6,
+      filter: HIKING_EMPHASIS_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#fff8e8',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 6, 2.1, 11, 3.8, 16, 7],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0.62, 11, 0.88],
+      },
+    },
+    {
+      id: 'global-hiking-routes',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 6,
+      filter: HIKING_EMPHASIS_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', HIKING_ROUTE_NETWORK,
+          'iwn', '#a33b35',
+          'nwn', '#ba4b3d',
+          'rwn', '#cf7045',
+          'lwn', '#dc8a52',
+          '#b67b4f',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 6, 1.05, 11, 1.8, 16, 3.6],
+        'line-dasharray': [2.1, 1.15],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0.75, 11, 0.96],
+      },
+    },
+    {
+      id: 'global-hiking-route-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 9,
+      filter: ['all', ['==', ['geometry-type'], 'LineString'], HIKING_ROUTE_FILTER],
+      layout: {
+        visibility: 'none',
+        'symbol-placement': 'line',
+        'text-field': [
+          'coalesce',
+          ['get', 'route_1_ref'], ['get', 'route_2_ref'], ['get', 'route_3_ref'],
+          ['get', 'route_1_name'], ['get', 'route_2_name'], LOCALIZED_NAME,
+        ],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 9, 9.5, 15, 11.5],
+        'text-font': ['Noto Sans Regular'],
+        'text-padding': 24,
+      },
+      paint: {
+        'text-color': '#97433a',
+        'text-halo-color': '#fff8e8',
+        'text-halo-width': 1.5,
+      },
+    },
+    {
+      id: 'global-cycling-path-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 10,
+      filter: CYCLING_PATH_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#f5fbff',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2.4, 14, 4.6, 18, 7.6],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 11, 0.82],
+      },
+    },
+    {
+      id: 'global-cycling-paths',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 10,
+      filter: CYCLING_PATH_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'surface'],
+          'unpaved', '#b44a4a',
+          '#c94a4a',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 14, 2.2, 18, 4],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 11, 0.92],
+      },
+    },
+    {
+      id: 'global-cycling-route-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 5,
+      filter: CYCLING_EMPHASIS_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#f5fbff',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2.1, 11, 4.2, 16, 7.5],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.64, 11, 0.92],
+      },
+    },
+    {
+      id: 'global-cycling-routes',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 5,
+      filter: CYCLING_EMPHASIS_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', CYCLING_ROUTE_NETWORK,
+          'icn', '#d93d3d',
+          'ncn', '#e14a4a',
+          'rcn', '#ef5d5d',
+          'lcn', '#f06f6f',
+          '#d93d3d',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.1, 11, 2.1, 16, 4],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 11, 0.98],
+      },
+    },
+    {
+      id: 'global-cycling-route-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 9,
+      filter: ['all', ['==', ['geometry-type'], 'LineString'], CYCLING_ROUTE_FILTER],
+      layout: {
+        visibility: 'none',
+        'symbol-placement': 'line',
+        'text-field': [
+          'coalesce',
+          ['get', 'route_1_ref'], ['get', 'route_2_ref'], ['get', 'route_3_ref'],
+          ['get', 'route_1_name'], ['get', 'route_2_name'], LOCALIZED_NAME,
+        ],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 9, 9.5, 15, 11.5],
+        'text-font': ['Noto Sans Regular'],
+        'text-padding': 24,
+      },
+      paint: {
+        'text-color': '#8b2d2d',
+        'text-halo-color': '#f5fbff',
+        'text-halo-width': 1.5,
+      },
+    },
+    {
+      id: 'global-local-transit-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 4,
+      filter: LOCAL_TRANSIT_RAIL_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#fffdf8',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 2.4, 11, 5, 16, 8],
+        'line-opacity': 0.94,
+      },
+    },
+    {
+      id: 'global-local-transit-lines',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 4,
+      filter: LOCAL_TRANSIT_RAIL_FILTER,
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'subclass'],
+          'subway', '#e06b2f',
+          'tram', '#c84059',
+          'light_rail', '#7565bb',
+          'monorail', '#16878c',
+          'funicular', '#b77932',
+          'rail', '#4f9b70',
+          'train', '#4f9b70',
+          '#4f9b70',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.1, 11, 2.7, 16, 4.8],
+        'line-opacity': 0.96,
+      },
+    },
+    {
+      id: 'global-local-transit-route-colors',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 4,
+      filter: [
+        'all',
+        ['==', ['geometry-type'], 'LineString'],
+        ['==', ['get', 'class'], 'transit'],
+        ['has', 'route_1_colour'],
+      ],
+      layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': ['to-color', ['get', 'route_1_colour'], '#c84059'],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.4, 12, 3, 16, 5],
+        'line-opacity': 0.98,
+      },
+    },
+    {
+      id: 'global-hiking-pois',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'poi',
+      minzoom: 10,
+      maxzoom: 13.5,
+      filter: [
+        'any',
+        ['in', ['get', 'class'], ['literal', ['shelter', 'wilderness_hut', 'alpine_hut', 'viewpoint', 'information', 'guidepost', 'picnic_site', 'campsite', 'camp_site', 'drinking_water', 'toilets']]],
+        ['in', ['get', 'subclass'], ['literal', ['shelter', 'wilderness_hut', 'alpine_hut', 'viewpoint', 'information', 'guidepost', 'picnic_site', 'campsite', 'camp_site', 'drinking_water', 'toilets']]],
+      ],
+      layout: {
+        visibility: 'none',
+        'icon-image': [
+          'match', ['get', 'class'],
+          'viewpoint', 'location-viewpoint-icon',
+          'information', 'location-guidepost-icon',
+          'guidepost', 'location-guidepost-icon',
+          'picnic_site', 'location-picnic_site-icon',
+          'campsite', 'location-campsite-icon',
+          'camp_site', 'location-campsite-icon',
+          'drinking_water', 'location-drinking_water-icon',
+          'toilets', 'location-toilets-icon',
+          [
+            'match', ['get', 'subclass'],
+            'viewpoint', 'location-viewpoint-icon',
+            'information', 'location-guidepost-icon',
+            'guidepost', 'location-guidepost-icon',
+            'picnic_site', 'location-picnic_site-icon',
+            'campsite', 'location-campsite-icon',
+            'camp_site', 'location-campsite-icon',
+            'drinking_water', 'location-drinking_water-icon',
+            'toilets', 'location-toilets-icon',
+            'location-shelter-icon',
+          ],
+        ],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.9, 13.5, 1.18],
+        'icon-padding': 8,
+        'text-field': LOCALIZED_NAME,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 9.5, 13.5, 11],
+        'text-font': ['Noto Sans Regular'],
+        'text-offset': [0, 1.25],
+        'text-anchor': 'top',
+        'text-padding': 10,
+        'text-optional': true,
+      },
+      paint: {
+        'text-color': '#6f563b',
+        'text-halo-color': '#fff9eb',
+        'text-halo-width': 1.35,
+      },
+    },
+    {
       id: 'global-bus-stops',
       type: 'circle',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1638,6 +2077,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
       ],
       layout: {
+        visibility: 'none',
         'symbol-placement': 'line',
         'text-field': LOCALIZED_NAME,
         'text-size': ['interpolate', ['linear'], ['zoom'], 11, 9.5, 16, 11.5],
@@ -1718,6 +2158,30 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-color': MAP_COLORS.label,
         'text-halo-color': MAP_COLORS.labelHalo,
         'text-halo-width': 1.75,
+      },
+    },
+    {
+      id: 'global-major-protected-area-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'park',
+      minzoom: 5,
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['in', ['get', 'class'], ['literal', ['national_park', 'nature_reserve']]],
+      ],
+      layout: {
+        'text-field': LOCALIZED_NAME,
+        'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 5, 10.5, 9, 13, 14, 15],
+        'text-max-width': 12,
+        'text-padding': 14,
+      },
+      paint: {
+        'text-color': '#4e6b4d',
+        'text-halo-color': '#f7fbf2',
+        'text-halo-width': 1.4,
       },
     },
     {
@@ -1843,8 +2307,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
         'text-font': ['Noto Sans Regular'],
-        'text-offset': [0, 1],
+        'icon-image': 'location-airport-icon',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.9, 14, 1.15],
+        'icon-padding': 12,
+        'text-offset': [0, 1.25],
+        'text-anchor': 'top',
         'text-padding': 18,
+        'text-optional': true,
       },
       paint: {
         'text-color': '#59676b',
@@ -1937,17 +2406,20 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'housenumber',
-      minzoom: 16,
+      minzoom: 17,
       layout: {
         'text-field': ['get', 'housenumber'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 16, 9, 18, 11],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 17, 9, 19, 12],
         'text-font': ['Noto Sans Regular'],
-        'text-padding': 4,
+        'text-padding': 2,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
       },
       paint: {
         'text-color': '#78817b',
         'text-halo-color': '#f5f7f3',
         'text-halo-width': 1,
+        'text-opacity': ['interpolate', ['linear'], ['zoom'], 17, 0, 17.25, 0.9],
       },
     },
   ]),

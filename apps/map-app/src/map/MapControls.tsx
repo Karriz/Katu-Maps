@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import {
+  Bike,
   Building2,
   Box,
   Compass,
   Crosshair,
+  Footprints,
   Globe2,
   Layers3,
   Route,
@@ -13,6 +15,7 @@ import {
   Search,
   Star,
   TrainFront,
+  TrainTrack,
   Trees,
   X,
   type LucideIcon,
@@ -23,7 +26,10 @@ export type MapLayerKey =
   | 'terrain'
   | 'buildings'
   | 'trees'
+  | 'cycling'
+  | 'hiking'
   | 'transit'
+  | 'transitLines'
   | 'transitModels';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
@@ -44,12 +50,15 @@ type LayerDefinition = {
 const primaryLayers: LayerDefinition[] = [
   { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
   { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
-  { key: 'trees', label: 'Trees', description: 'Vegetation', icon: Trees },
-  { key: 'transit', label: 'Transit', description: 'Routes & stops', icon: TrainFront },
-  { key: 'transitModels', label: '3D vehicles', description: 'Live vehicle models', icon: Box },
+  { key: 'cycling', label: 'Cycling routes', description: 'Emphasized cycle networks', icon: Bike },
+  { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
+  { key: 'transitLines', label: 'Transit lines', description: 'Colored metro, tram & rail', icon: TrainTrack },
+  { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
 ];
 
 const advancedLayers: LayerDefinition[] = [
+  { key: 'trees', label: 'Trees', description: '3D vegetation models', icon: Trees },
+  { key: 'transitModels', label: '3D vehicles', description: 'Live vehicle models', icon: Box },
   { key: 'globe', label: 'Globe', description: 'World projection', icon: Globe2 },
 ];
 
@@ -82,6 +91,7 @@ export function MapControls({
   searchLoading,
   searchError,
   searchResults,
+  searchPoweredByPhoton,
   onQueryChange,
   onSearchClear,
   onSearchFocus,
@@ -111,6 +121,7 @@ export function MapControls({
   searchLoading: boolean;
   searchError: string | null;
   searchResults: SearchResult[];
+  searchPoweredByPhoton: boolean;
   onQueryChange: (query: string) => void;
   onSearchClear: () => void;
   onSearchFocus: () => void;
@@ -223,7 +234,7 @@ export function MapControls({
                 {result.secondary && <span>{result.secondary}</span>}
               </button>
             ))}
-            {!favoritesOpen && query.trim().length >= 2 && <div className="location-search-attribution">Powered by Photon</div>}
+            {!favoritesOpen && searchPoweredByPhoton && query.trim().length >= 2 && <div className="location-search-attribution">Powered by Photon</div>}
           </div>
         )}
       </div>}

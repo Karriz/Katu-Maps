@@ -19,3 +19,16 @@ export function availableGpsEndpoint(coordinates: Coordinates | null) {
     source: 'map' as const,
   } : null;
 }
+
+export function normalizedLocationAccuracy(accuracy: number) {
+  return Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 100;
+}
+
+export function locationZoomForAccuracy(accuracy: number) {
+  const normalized = normalizedLocationAccuracy(accuracy);
+  return normalized > 1_000 ? 12 : normalized > 250 ? 13 : 14;
+}
+
+export function isMeaningfullyBetterLocation(bestAccuracy: number, nextAccuracy: number) {
+  return normalizedLocationAccuracy(nextAccuracy) < normalizedLocationAccuracy(bestAccuracy) * 0.75;
+}
