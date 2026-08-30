@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import {
   type ExpressionSpecification,
@@ -2825,17 +2825,10 @@ export function MapView() {
     [transitRouteOptions, selectedTransitRouteIndex],
   );
 
-  useEffect(() => {
-    if (!transitDetailsOpen || window.innerWidth > 760) return;
-    let nextFrame: number | undefined;
-    const frame = window.requestAnimationFrame(() => {
-      nextFrame = window.requestAnimationFrame(() => journeyBackButtonRef.current?.focus());
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (nextFrame !== undefined) window.cancelAnimationFrame(nextFrame);
-    };
-  }, [transitDetailsOpen]);
+  const setJourneyBackButton = useCallback((button: HTMLButtonElement | null) => {
+    journeyBackButtonRef.current = button;
+    if (button && window.innerWidth <= 760) button.focus();
+  }, []);
 
   const positionFavorite = positionInformation && favorites.find((favorite) => (
     favorite.id === positionInformation.favoriteId
@@ -3361,7 +3354,7 @@ export function MapView() {
                   originName={routeOriginSelection?.name}
                   destinationName={routeDestinationSelection?.name}
                   selectedOption={selectedTransitOption}
-                  backButtonRef={journeyBackButtonRef}
+                  backButtonRef={setJourneyBackButton}
                   onBack={closeTransitDetails}
                 /></Suspense>
               )}

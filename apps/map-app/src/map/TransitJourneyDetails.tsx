@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import type { Ref } from 'react';
 import { ArrowDown, ArrowLeft, MapPin } from 'lucide-react';
 import type { RouteResult } from './ValhallaRouting';
 import type { TransitRouteResult } from './transit';
@@ -15,7 +15,7 @@ type TransitJourneyDetailsProps = {
   originName?: string;
   destinationName?: string;
   selectedOption?: TransitRouteResult;
-  backButtonRef: RefObject<HTMLButtonElement | null>;
+  backButtonRef: Ref<HTMLButtonElement>;
   onBack: () => void;
 };
 
