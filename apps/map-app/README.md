@@ -63,9 +63,12 @@ npm run test:visual:scenario -- phone-search-autocomplete
 Open `test-results/visual-report/index.html` after the run. The self-contained
 gallery links to full-size PNG files and records the scenario, viewport, fixture,
 browser, MapLibre and WebGL diagnostics, console errors, and failed requests.
-Search responses and scenario input dates are deterministic, but the browser's
-global clock continues to advance because MapLibre relies on normal timing for
-rendering and readiness. Hosted map tiles remain external because maintaining a
+Search, Nominatim details, Digitransit stops/departures/trips/plans, and
+Valhalla routes are intercepted with the coherent `tampere-ui-v1` fixture set.
+The responses still pass through the production provider parsers and UI flows;
+the suite does not inject ready-made component state. Fixture times are created
+relative to the test start, while the browser's global clock continues to
+advance because MapLibre relies on normal timing for rendering and readiness. Hosted map tiles remain external because maintaining a
 vector-tile pipeline solely for screenshots would be disproportionate; a tile
 outage therefore fails readiness instead of capturing a permanently loading
 screen. The CI UI scenarios use a deterministic software-rendering layer profile with
