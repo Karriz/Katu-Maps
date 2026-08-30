@@ -312,20 +312,9 @@ export function MapControls({
                 <X aria-hidden="true" />
               </button>
             </div>
-            <div className="layer-list">
-              {primaryLayers.map((definition) => (
-                <LayerRow
-                  key={definition.key}
-                  definition={definition}
-                  enabled={layers[definition.key]}
-                  onChange={(enabled) => onLayerChange(definition.key, enabled)}
-                />
-              ))}
-            </div>
-            <details className="layer-advanced">
-              <summary>Advanced details</summary>
+            <div className="layer-panel-content" tabIndex={0}>
               <div className="layer-list">
-                {advancedLayers.map((definition) => (
+                {primaryLayers.map((definition) => (
                   <LayerRow
                     key={definition.key}
                     definition={definition}
@@ -334,7 +323,20 @@ export function MapControls({
                   />
                 ))}
               </div>
-            </details>
+              <details className="layer-advanced">
+                <summary>Advanced details</summary>
+                <div className="layer-list">
+                  {advancedLayers.map((definition) => (
+                    <LayerRow
+                      key={definition.key}
+                      definition={definition}
+                      enabled={layers[definition.key]}
+                      onChange={(enabled) => onLayerChange(definition.key, enabled)}
+                    />
+                  ))}
+                </div>
+              </details>
+            </div>
           </section>
         )}
       </div>
