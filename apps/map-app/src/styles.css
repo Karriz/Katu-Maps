@@ -34,6 +34,18 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 
 .map-frame { flex: 1 1 auto; min-height: 0; overflow: hidden; position: relative; }
 .map-view { height: 100%; position: relative; width: 100%; }
+.pwa-install-card { align-items: center; backdrop-filter: blur(20px); background: var(--surface-card); border: 1px solid rgb(215 222 231 / 94%); border-radius: 14px; bottom: 28px; box-shadow: var(--shadow-card); display: flex; gap: 11px; left: 28px; max-width: calc(100% - 56px); padding: 12px; pointer-events: auto; position: absolute; width: 390px; z-index: 110; }
+.pwa-install-icon { align-items: center; background: var(--color-accent-soft); border-radius: 10px; color: var(--color-accent); display: flex; flex: 0 0 auto; height: 38px; justify-content: center; width: 38px; }
+.pwa-install-icon svg { height: 19px; width: 19px; }
+.pwa-install-copy { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
+.pwa-install-copy strong { font-size: 0.8rem; }
+.pwa-install-copy span { color: var(--color-muted); font-size: 0.68rem; }
+.pwa-install-actions { align-items: center; display: flex; flex: 0 0 auto; gap: 5px; }
+.pwa-install-actions button { background: transparent; border: 0; border-radius: 8px; color: var(--color-muted); cursor: pointer; font: inherit; font-size: 0.7rem; font-weight: 750; padding: 8px; }
+.pwa-install-actions button:hover { background: var(--surface-hover); }
+.pwa-install-actions .pwa-install-primary { background: var(--color-accent); color: #fff; }
+.pwa-install-actions .pwa-install-primary:hover { background: #0e5ccc; }
+.pwa-install-actions button:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
 .map-canvas {
   background-color: #07111c;
   background-image:
@@ -462,6 +474,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 }
 
 @media (max-width: 640px) {
+  .pwa-install-card { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); max-width: none; width: calc(100% - 94px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)); }
+  .pwa-install-card { align-items: flex-start; flex-wrap: wrap; }
+  .pwa-install-actions { flex-basis: 100%; justify-content: flex-end; }
   .map-hint { display: none; }
   .location-search {
     left: calc(12px + env(safe-area-inset-left, 0px));
