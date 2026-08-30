@@ -3276,17 +3276,21 @@ export function MapView() {
                   });
                 }}
               />
-              <div
-                className="location-info-icon"
-                aria-hidden="true"
-                style={{ backgroundColor: LOCATION_ICON_COLORS[selectedIconKey] ?? '#64748b' }}
-              >
-                <SelectedLocationIcon size={20} strokeWidth={2.4} />
+              <div className="location-info-header">
+                <div
+                  className="location-info-icon"
+                  aria-hidden="true"
+                  style={{ backgroundColor: LOCATION_ICON_COLORS[selectedIconKey] ?? '#64748b' }}
+                >
+                  <SelectedLocationIcon size={20} strokeWidth={2.4} />
+                </div>
+                <div>
+                  <span className="location-info-category">{selectedLocation.category}</span>
+                  <h2>{selectedLocation.name}</h2>
+                  {selectedLocation.address && <p>{selectedLocation.address}</p>}
+                </div>
               </div>
-              <div className="location-info-content">
-                <span className="location-info-category">{selectedLocation.category}</span>
-                <h2>{selectedLocation.name}</h2>
-                {selectedLocation.address && <p>{selectedLocation.address}</p>}
+              <div className="location-info-content" tabIndex={0}>
                 {locationDetailsLoading && <p className="location-info-loading">Loading OpenStreetMap details…</p>}
                 {(selectedLocation.openingHours || selectedLocation.phone || selectedLocation.email || selectedLocation.website) && (
                   <div className="location-info-details">
