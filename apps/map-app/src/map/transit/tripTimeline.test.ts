@@ -22,13 +22,30 @@ describe('selected trip identity resolution', () => {
   it('matches a station selection to its child platform', () => {
     expect(resolve(digitransit, 'digitransit', { boardingStopId: 'tampere:station' }).ok).toBe(true);
   });
-  it('selects a repeated occurrence by schedule and rejects ambiguity without it', () => {
+  it('selects a repeated occurrence by schedule without discarding ambiguous route calls', () => {
     const loop = structuredClone(transitous);
     loop.trip.legs[0].intermediateStops.push({ ...loop.trip.legs[0].intermediateStops[0],
       scheduledArrival: '2026-08-29T09:10:00Z', scheduledDeparture: '2026-08-29T09:10:00Z' });
     expect(resolve(loop, 'transitous').ok).toBe(true);
-    expect(resolve(loop, 'transitous', { scheduledDeparture: undefined }))
-      .toEqual({ ok: false, reason: 'boarding-occurrence-ambiguous' });
+    const ambiguous = resolve(loop, 'transitous', { scheduledDeparture: undefined });
+    expect(ambiguous.ok && ambiguous.trip.stops).toHaveLength(4);
+    expect(ambiguous.ok && ambiguous.trip.boardingContextUsable).toBe(false);
+  });
+  it.each([
+    ['digitransit', digitransit],
+    ['transitous', transitous],
+  ] as const)('keeps %s calls when the boarding stop cannot be validated', (provider, fixture) => {
+    const result = resolve(fixture, provider, { boardingStopId: 'missing-stop' });
+    expect(result.ok && result.trip.stops.length).toBeGreaterThanOrEqual(2);
+    expect(result.ok && result.trip.boardingContextUsable).toBe(false);
+  });
+  it.each([
+    ['digitransit', digitransit],
+    ['transitous', transitous],
+  ] as const)('keeps %s calls when the boarding time cannot be validated', (provider, fixture) => {
+    const result = resolve(fixture, provider, { scheduledDeparture: '2026-08-29T23:00:00Z' });
+    expect(result.ok && result.trip.stops.length).toBeGreaterThanOrEqual(2);
+    expect(result.ok && result.trip.boardingContextUsable).toBe(false);
   });
   it('supports schedule-only Transitous without inventing a service-date requirement', () => {
     const result = resolve(transitous, 'transitous', { serviceDate: undefined });

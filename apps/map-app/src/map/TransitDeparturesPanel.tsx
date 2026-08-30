@@ -155,6 +155,8 @@ export function TransitDeparturesPanel({
   const [routeStops, setRouteStops] = useState<TripPlace[]>([]);
   const [routeStopsLoading, setRouteStopsLoading] = useState(false);
   const [routeStopsError, setRouteStopsError] = useState<string | null>(null);
+  const [resolvedBoardingStopIndex, setResolvedBoardingStopIndex] = useState(-1);
+  const [vehicleTimelineUsable, setVehicleTimelineUsable] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const routeStopScrollRef = useRef<HTMLDivElement>(null);
@@ -167,6 +169,8 @@ export function TransitDeparturesPanel({
     setSelectedDepartureKey(null);
     setSelectedDeparture(null);
     setRouteStops([]);
+    setResolvedBoardingStopIndex(-1);
+    setVehicleTimelineUsable(false);
     setShowAll(false);
   }, [stop]);
 
@@ -206,6 +210,8 @@ export function TransitDeparturesPanel({
     const controller = new AbortController();
     setRouteStopsLoading(true);
     setRouteStopsError(null);
+    setResolvedBoardingStopIndex(-1);
+    setVehicleTimelineUsable(false);
     fetchTransitTrip(
       selectedDeparture.provider,
       tripId,
@@ -228,6 +234,8 @@ export function TransitDeparturesPanel({
         }
         const resolved = resolution.trip;
         setRouteStops(resolved.stops);
+        setResolvedBoardingStopIndex(resolved.boardingStopIndex);
+        setVehicleTimelineUsable(resolved.vehicleTimelineUsable);
       })
       .catch((requestError: unknown) => {
         if ((requestError as { name?: string }).name !== 'AbortError') setRouteStopsError('Route stops are temporarily unavailable.');
@@ -278,12 +286,6 @@ export function TransitDeparturesPanel({
   const detailDestination = selectedDeparture
     ? text(selectedDeparture.headsign, text(selectedDeparture.routeLongName, ''))
     : '';
-  const boardingStopIndex = selectedRouteStopIndex(
-    routeStops,
-    stop.stopId,
-    selectedDeparture?.departure,
-  );
-
   if (selectedDeparture) {
     const DetailIcon = modeIcon(detailMode);
     return (
@@ -296,6 +298,8 @@ export function TransitDeparturesPanel({
             setSelectedDepartureKey(null);
             setSelectedDeparture(null);
             setRouteStops([]);
+            setResolvedBoardingStopIndex(-1);
+            setVehicleTimelineUsable(false);
           }}>
             <ArrowLeft aria-hidden="true" />
             <span>All departures</span>
@@ -312,13 +316,13 @@ export function TransitDeparturesPanel({
             <div>
               <div className="transit-panel-eyebrow" style={{ color: modeColor(detailMode) }}>
                 <DetailIcon aria-hidden="true" />
-                <span>{modeLabel(detailMode)} · Live trip</span>
+                <span>{modeLabel(detailMode)} · {vehicleTimelineUsable ? 'Live trip' : 'Trip timetable'}</span>
               </div>
               <h2>{detailDestination || 'Route stops'}</h2>
-              <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsError ? 'Validated live timeline unavailable' : isFollowing ? 'Following estimated vehicle' : 'Estimated position · follow paused'}</div>
-              <button className="transit-follow-button" disabled={Boolean(routeStopsError)} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
+              <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsLoading ? 'Loading trip details' : routeStopsError ? 'Trip details unavailable' : !vehicleTimelineUsable ? 'Timetable · live vehicle unavailable' : isFollowing ? 'Following estimated vehicle' : 'Estimated position · follow paused'}</div>
+              <button className="transit-follow-button" disabled={Boolean(routeStopsError) || !vehicleTimelineUsable} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
                 <LocateFixed aria-hidden="true" />
-                {isFollowing ? 'Following vehicle' : 'Follow vehicle'}
+                {!vehicleTimelineUsable ? 'Vehicle unavailable' : isFollowing ? 'Following vehicle' : 'Follow vehicle'}
               </button>
             </div>
           </div>
@@ -329,7 +333,7 @@ export function TransitDeparturesPanel({
           {!routeStopsLoading && routeStopsError && <div className="transit-panel-state error">{routeStopsError}</div>}
           {!routeStopsLoading && !routeStopsError && routeStops.length === 0 && <div className="transit-panel-state">No route stops found.</div>}
           {!routeStopsLoading && !routeStopsError && routeStops.map((routeStop, index) => {
-            const isSelectedStop = index === boardingStopIndex;
+            const isSelectedStop = index === resolvedBoardingStopIndex;
             const name = text(routeStop.name, text(routeStop.stopName, `Stop ${index + 1}`));
             const rawTime = isSelectedStop
               ? selectedDeparture.departure
@@ -440,6 +444,8 @@ export function TransitDeparturesPanel({
                   if (!tripId) return;
                   hasPositionedRouteRef.current = false;
                   setRouteStops([]);
+                  setResolvedBoardingStopIndex(-1);
+                  setVehicleTimelineUsable(false);
                   setSelectedDepartureKey(departureKey);
                   setSelectedDeparture(departure);
                   onDepartureSelect({

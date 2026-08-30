@@ -438,6 +438,7 @@ export class TransitStopsLayer {
   private requestGeneration = 0;
   private selectedTrip: SelectedTrip | null = null;
   private estimatedTripLegs: EstimatedTripLeg[] = [];
+  private boardingContextUsable = false;
   private vehicleTimer: number | undefined;
   private tripRefreshTimer: number | undefined;
 
@@ -797,6 +798,7 @@ export class TransitStopsLayer {
         const estimatedLeg = buildEstimatedTripLeg(resolved.leg, resolved.leg.coordinates);
         if (estimatedLeg && resolved.vehicleTimelineUsable) estimatedLegs.push(estimatedLeg);
       }
+      this.boardingContextUsable = resolved?.boardingContextUsable ?? false;
       this.estimatedTripLegs = estimatedLegs;
       const source = this.map.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
       source?.setData(selection.showRoute ? { type: 'FeatureCollection', features } : emptyRouteCollection());
@@ -823,7 +825,7 @@ export class TransitStopsLayer {
         now,
         this.selectedTrip.mode,
         this.selectedTrip.color,
-        this.selectedTrip.boardingStop,
+        this.boardingContextUsable ? this.selectedTrip.boardingStop : undefined,
       )
       : undefined;
     if (!displayableLeg || !pose) {
@@ -854,6 +856,7 @@ export class TransitStopsLayer {
     this.tripRefreshTimer = undefined;
     this.selectedTrip = null;
     this.estimatedTripLegs = [];
+    this.boardingContextUsable = false;
     const routeSource = this.map?.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
     const vehicleSource = this.map?.getSource(ESTIMATED_VEHICLE_SOURCE_ID) as GeoJSONSource | undefined;
     routeSource?.setData(emptyRouteCollection());

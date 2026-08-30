@@ -24,6 +24,8 @@ export type ResolvedTrip = {
   leg: TransitTripLeg;
   stops: TransitTripPlace[];
   boardingStopIndex: number;
+  /** Whether the selected departure could be tied to one exact stop call. */
+  boardingContextUsable: boolean;
   /** Best available timeline. Route identity does not depend on its validity. */
   times: number[];
   vehicleTimelineUsable: boolean;
@@ -67,21 +69,16 @@ export function resolveSelectedTripResult(payload: TransitTrip, context: Selecte
     const candidates = stops.flatMap((stop, index) => (
       stop.stopId === context.boardingStopId || stop.parentStopId === context.boardingStopId ? [index] : []
     ));
-    if (!candidates.length) return { ok: false, reason: 'boarding-stop-not-found' };
-    if (context.scheduledDeparture) {
+    if (candidates.length && context.scheduledDeparture) {
       const selectedTime = Date.parse(context.scheduledDeparture);
       const matchingCalls = candidates.filter((index) => {
         const callTime = tripPlaceTime(stops[index], true, true);
         return Number.isFinite(selectedTime) && callTime !== undefined
           && Math.abs(callTime - selectedTime) <= BOARDING_TIME_TOLERANCE_MS;
       });
-      if (!matchingCalls.length) return { ok: false, reason: 'scheduled-call-time-mismatch' };
-      if (matchingCalls.length > 1) return { ok: false, reason: 'boarding-occurrence-ambiguous' };
-      [boardingStopIndex] = matchingCalls;
+      if (matchingCalls.length === 1) [boardingStopIndex] = matchingCalls;
     } else if (candidates.length === 1) {
       [boardingStopIndex] = candidates;
-    } else {
-      return { ok: false, reason: 'boarding-occurrence-ambiguous' };
     }
   }
 
@@ -89,7 +86,14 @@ export function resolveSelectedTripResult(payload: TransitTrip, context: Selecte
   const times = parsed.filter((time): time is number => time !== undefined);
   const vehicleTimelineUsable = times.length === stops.length
     && times.every((time, index) => index === 0 || time >= times[index - 1]);
-  return { ok: true, trip: { leg, stops, boardingStopIndex, times, vehicleTimelineUsable } };
+  return { ok: true, trip: {
+    leg,
+    stops,
+    boardingStopIndex,
+    boardingContextUsable: boardingStopIndex >= 0,
+    times,
+    vehicleTimelineUsable,
+  } };
 }
 
 /** Compatibility convenience for callers that only need a resolved route. */
