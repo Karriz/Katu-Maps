@@ -85,7 +85,7 @@ async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario,
       description: scenario.description,
       viewport: viewports[scenario.viewport],
       fixture: 'visual-fixtures-v1',
-      layers: 'default',
+      layers: 'ci-ui (buildings and transit on; terrain, trees and transit models off)',
       uiState: scenario.state,
       readinessGate: readinessFailure,
       ...diagnostics,
@@ -98,7 +98,7 @@ async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario,
 async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, failed: boolean) {
   if (page.isClosed() || page.url() === 'about:blank') return;
   const screenshotPath = info.outputPath(`${scenario.name}${failed ? '-failure' : ''}.png`);
-  await page.screenshot({ path: screenshotPath, fullPage: false, animations: 'disabled', timeout: 15_000 });
+  await page.screenshot({ path: screenshotPath, fullPage: false, animations: 'disabled', timeout: 30_000 });
   await info.attach('visual-screenshot', { path: screenshotPath, contentType: 'image/png' });
 }
 
@@ -106,6 +106,14 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/?q=**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(photonFixture) }));
   await page.addInitScript(() => {
     localStorage.clear();
+    localStorage.setItem('tampere-map-layer-options', JSON.stringify({
+      globe: true,
+      trees: false,
+      buildings: true,
+      terrain: false,
+      transit: true,
+      transitModels: false,
+    }));
   });
 });
 
@@ -154,8 +162,15 @@ for (const scenario of scenarios) {
       failure = error;
       throw error;
     } finally {
-      await attachScreenshot(page, testInfo, scenario, Boolean(failure)).catch(error => runtime.pageErrors.push(`Screenshot failed: ${String(error)}`));
-      await attachDiagnostics(page, testInfo, scenario, runtime, failure);
+      let screenshotFailure: unknown;
+      try {
+        await attachScreenshot(page, testInfo, scenario, Boolean(failure));
+      } catch (error) {
+        screenshotFailure = error;
+        runtime.pageErrors.push(`Screenshot failed: ${String(error)}`);
+      }
+      await attachDiagnostics(page, testInfo, scenario, runtime, failure ?? screenshotFailure);
+      if (!failure && screenshotFailure) throw screenshotFailure;
     }
   });
 }
