@@ -998,9 +998,12 @@ export function MapView() {
         routeColor: !isWalkingTransitMode(leg.mode) ? mapRouteColor(leg.routeColor) : undefined,
       },
     })) ?? [];
+    const directMode = routeMode === 'pedestrian' ? 'WALK'
+      : routeMode === 'bicycle' ? 'BICYCLE'
+        : routeMode === 'auto' ? 'CAR' : undefined;
     source?.setData(legFeatures.length
       ? { type: 'FeatureCollection', features: legFeatures }
-      : { type: 'Feature', geometry: result.geometry, properties: {} });
+      : { type: 'Feature', geometry: result.geometry, properties: { mode: directMode } });
   };
 
   const setRoutePoints = () => {
