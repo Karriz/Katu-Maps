@@ -52,7 +52,7 @@ import {
 } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { TreeModelLayer } from './TreeModelLayer';
+import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
@@ -1564,18 +1564,19 @@ export function MapView() {
     };
     const modelUpdateSignature = () => {
       const bounds = map.getBounds();
-      return [
-        modelDataRevision,
+      return treeViewportSignature(
+        {
+          west: bounds.getWest(),
+          south: bounds.getSouth(),
+          east: bounds.getEast(),
+          north: bounds.getNorth(),
+        },
+        map.getZoom(),
+        map.getPitch(),
         terrainSourceRef.current,
-        terrainEnabledRef.current ? 1 : 0,
-        map.getZoom().toFixed(2),
-        map.getPitch().toFixed(1),
-        map.getBearing().toFixed(1),
-        bounds.getWest().toFixed(5),
-        bounds.getSouth().toFixed(5),
-        bounds.getEast().toFixed(5),
-        bounds.getNorth().toFixed(5),
-      ].join(':');
+        terrainEnabledRef.current,
+        Math.floor(map.getZoom() + 1e-6),
+      );
     };
     const updateTreeModels = () => {
       treeUpdateTimer = undefined;
@@ -2046,11 +2047,16 @@ export function MapView() {
     };
     const removeBackgroundReload = installBackgroundReload(document, () => window.location.reload());
     const handleCameraMove = () => {
-      updateGlobalLabelDensity();
-      const nextOrientationChanged = Math.abs(map.getBearing()) > 1 || map.getPitch() > 1;
+      const zoom = map.getZoom();
+      const pitch = map.getPitch();
+      const nextLabelSignature = `${Math.round(zoom * 2) / 2}:${Math.round(pitch / 10) * 10}`;
+      const nextOrientationChanged = Math.abs(map.getBearing()) > 1 || pitch > 1;
       if (nextOrientationChanged !== previousOrientationChanged) {
         previousOrientationChanged = nextOrientationChanged;
         setOrientationChanged(nextOrientationChanged);
+      }
+      if (nextLabelSignature !== globalLabelDensitySignature) {
+        updateGlobalLabelDensity();
       }
     };
       map.on('move', handleCameraMove);

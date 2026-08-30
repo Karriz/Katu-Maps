@@ -205,7 +205,9 @@ function sourceFeatures(
   sourceId: string,
   sourceLayers: string[],
 ): SourceFeature[] {
-  return sourceLayers.flatMap((sourceLayer) => {
+  const validLayers = [...new Set(sourceLayers.filter(Boolean))];
+  if (!validLayers.length || !map.getSource(sourceId)) return [];
+  return validLayers.flatMap((sourceLayer) => {
     try {
       return map.querySourceFeatures(sourceId, { sourceLayer });
     } catch (error) {
@@ -213,6 +215,35 @@ function sourceFeatures(
       return [];
     }
   });
+}
+
+export function treeViewportSignature(
+  bounds: { west: number; south: number; east: number; north: number },
+  zoom: number,
+  pitch: number,
+  terrainSourceId: string,
+  terrainEnabled: boolean,
+  terrainZoomBucket: number,
+) {
+  const zoomBucket = Math.round(zoom * 2) / 2;
+  const pitchBucket = Math.round(pitch / 5) * 5;
+  const normalizedBounds = {
+    west: Number(bounds.west.toFixed(4)),
+    south: Number(bounds.south.toFixed(4)),
+    east: Number(bounds.east.toFixed(4)),
+    north: Number(bounds.north.toFixed(4)),
+  };
+  return [
+    terrainSourceId,
+    terrainEnabled ? '1' : '0',
+    terrainZoomBucket,
+    zoomBucket.toFixed(2),
+    pitchBucket,
+    normalizedBounds.west,
+    normalizedBounds.south,
+    normalizedBounds.east,
+    normalizedBounds.north,
+  ].join(':');
 }
 
 function visibleMetricBounds(
