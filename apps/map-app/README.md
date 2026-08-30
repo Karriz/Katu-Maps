@@ -68,10 +68,14 @@ global clock continues to advance because MapLibre relies on normal timing for
 rendering and readiness. Hosted map tiles remain external because maintaining a
 vector-tile pipeline solely for screenshots would be disproportionate; a tile
 outage therefore fails readiness instead of capturing a permanently loading
-screen. The first readiness failure records a screenshot, page and console
-errors, failed requests, HTTP errors, WebGL details, and the visible map status.
-Later scenarios then fail quickly with the same readiness-gate diagnostic rather
-than repeating the full timeout.
+screen. The CI UI scenarios use a deterministic software-rendering layer profile with
+buildings and transit enabled and terrain, procedural trees, and 3D transit
+models disabled. Those expensive layers are unsuitable for repeated large
+SwiftShader captures and require separate focused coverage. The first readiness
+failure records a screenshot, page and console errors, failed requests, HTTP
+errors, WebGL details, and the visible map status. Later scenarios then fail
+quickly with the same readiness-gate diagnostic rather than repeating the full
+timeout. A scenario also fails if its required screenshot cannot be produced.
 
 These images are intended to review hierarchy, spacing, responsive panels,
 overlap, route fitting, and marker/label relationships. SwiftShader does not
