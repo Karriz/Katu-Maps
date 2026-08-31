@@ -300,10 +300,26 @@ const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
 // assigned the outline role in a type=building relation. Näsinneula's broad
 // outline is not related to its detailed 3D parts, so suppress that one outline
 // while retaining its flat footprint and the separately mapped tower parts.
+const NASINNEULA_BUILDING_OUTLINE_MATCH: ExpressionSpecification = [
+  'any',
+  ['==', ['id'], NASINNEULA_BUILDING_OUTLINE_ID],
+  [
+    'all',
+    // OpenFreeMap can merge building polygons and replace their source IDs.
+    // Keep a narrow geometry/property fallback for this landmark outline.
+    ['<=', ['distance', {
+      type: 'Point',
+      coordinates: [23.74329, 61.50496],
+    }], 40],
+    ['==', ['get', 'render_height'], 135],
+    ['==', ['get', 'render_min_height'], 7],
+  ],
+] as ExpressionSpecification;
+
 const GLOBAL_BUILDING_3D_FILTER: ExpressionSpecification = [
   'all',
   ['!', ['has', 'hide_3d']],
-  ['!=', ['id'], NASINNEULA_BUILDING_OUTLINE_ID],
+  ['!', NASINNEULA_BUILDING_OUTLINE_MATCH],
 ] as ExpressionSpecification;
 
 const GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES = 5.5;
