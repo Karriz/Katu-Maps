@@ -90,13 +90,23 @@ function createTramSection(
   color: string,
   index: number,
   sectionCount: number,
+  dark: boolean,
 ) {
   const root = new THREE.Group();
   const bodyColor = new THREE.Color(color);
+  if (dark) bodyColor.multiplyScalar(0.35);
   const skirtColor = bodyColor.clone().multiplyScalar(0.72);
   const bodyMaterial = new THREE.MeshLambertMaterial({ color: bodyColor });
   const skirtMaterial = new THREE.MeshLambertMaterial({ color: skirtColor });
-  const glassMaterial = new THREE.MeshLambertMaterial({ color: 0x172d39 });
+  // A restrained emissive blue makes vehicle windows read at night without
+  // adding window textures, bloom, or map-wide light sprites.
+  const glassMaterial = new THREE.MeshStandardMaterial({
+    color: dark ? 0x665d42 : 0x29485d,
+    emissive: dark ? 0xd5b15f : 0x6d9fbd,
+    emissiveIntensity: dark ? 0.62 : 0.18,
+    roughness: 0.72,
+    metalness: 0.05,
+  });
   const collarMaterial = new THREE.MeshLambertMaterial({ color: 0x30373b });
   const roofMaterial = new THREE.MeshLambertMaterial({ color: 0xabb5b6 });
   const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1bd });
@@ -181,16 +191,24 @@ function createVehicleSection(
   mode: string,
   index: number,
   sectionCount: number,
+  dark: boolean,
 ) {
   if (mode === 'TRAM') {
-    return createTramSection(dimensions, color, index, sectionCount);
+    return createTramSection(dimensions, color, index, sectionCount, dark);
   }
   const root = new THREE.Group();
   const bodyColor = new THREE.Color(color);
+  if (dark) bodyColor.multiplyScalar(0.35);
   const skirtColor = bodyColor.clone().multiplyScalar(0.7);
   const bodyMaterial = new THREE.MeshLambertMaterial({ color: bodyColor });
   const skirtMaterial = new THREE.MeshLambertMaterial({ color: skirtColor });
-  const glassMaterial = new THREE.MeshLambertMaterial({ color: 0x172d39 });
+  const glassMaterial = new THREE.MeshStandardMaterial({
+    color: dark ? 0x665d42 : 0x172d39,
+    emissive: dark ? 0xd5b15f : 0x000000,
+    emissiveIntensity: dark ? 0.62 : 0,
+    roughness: 0.72,
+    metalness: 0.05,
+  });
   const collarMaterial = new THREE.MeshLambertMaterial({ color: 0x3a4245 });
   const roofMaterial = new THREE.MeshLambertMaterial({ color: 0xaeb7b7 });
   const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1bd });
@@ -318,6 +336,16 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   private dimensions: VehicleDimensions = dimensionsForMode('BUS');
   private lastFrameTime = 0;
   private currentInitialized = false;
+  private darkMode = false;
+
+  setTheme(dark: boolean) {
+    if (this.darkMode === dark) return;
+    this.darkMode = dark;
+    if (this.pose) {
+      this.rebuildModel(this.pose);
+      this.applyPose(this.pose);
+    }
+  }
 
   setPose(pose: TransitVehiclePose | null) {
     this.pose = pose;
@@ -386,11 +414,12 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
         pose.mode,
         index,
         pose.parts.length,
+        this.darkMode,
       );
       this.modelGroup!.add(section);
       this.sectionRoots.push(section);
     });
-    this.modelKey = `${pose.mode}:${pose.color}:${pose.parts.length}`;
+    this.modelKey = `${pose.mode}:${pose.color}:${pose.parts.length}:${this.darkMode}`;
     this.currentInitialized = false;
   }
 
@@ -405,7 +434,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   private applyPose(pose: TransitVehiclePose) {
     const map = this.map;
     if (!map || pose.parts.length === 0) return;
-    const key = `${pose.mode}:${pose.color}:${pose.parts.length}`;
+    const key = `${pose.mode}:${pose.color}:${pose.parts.length}:${this.darkMode}`;
     if (key !== this.modelKey) this.rebuildModel(pose);
     if (!this.hasOrigin) this.resetOrigin(pose);
 

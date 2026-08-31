@@ -687,6 +687,7 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowTexture?: THREE.DataTexture;
   private shadowsEnabled = true;
   private growthAnimationActive = false;
+  private darkMode = false;
 
   constructor(private readonly sources: TreeSourceConfig) {}
 
@@ -717,6 +718,12 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.shadowsEnabled = enabled;
     if (this.shadowMesh) this.shadowMesh.visible = enabled;
     this.map?.triggerRepaint();
+  }
+
+  setTheme(dark: boolean) {
+    if (this.darkMode === dark) return;
+    this.darkMode = dark;
+    if (this.map) this.updateTrees();
   }
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
@@ -966,7 +973,7 @@ export class TreeModelLayer implements CustomLayerInterface {
         );
         this.transformHelper.updateMatrix();
         trunkMesh.setMatrixAt(trunkCount, this.transformHelper.matrix);
-        this.color.setHSL(0.075, 0.38, 0.27 + tree.colorVariation * 0.06);
+        this.color.setHSL(0.075, this.darkMode ? 0.24 : 0.38, (this.darkMode ? 0.07 : 0.27) + tree.colorVariation * (this.darkMode ? 0.015 : 0.06));
         trunkMesh.setColorAt(trunkCount, this.color);
         trunkCount += 1;
       }
@@ -1007,17 +1014,17 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       if (isConifer) {
         coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
-        this.color.setHSL(0.31, 0.54, 0.26 + tree.colorVariation * 0.08);
+        this.color.setHSL(0.31, this.darkMode ? 0.32 : 0.54, (this.darkMode ? 0.065 : 0.26) + tree.colorVariation * (this.darkMode ? 0.02 : 0.08));
         coniferMesh.setColorAt(coniferCount, this.color);
         coniferCount += 1;
       } else if (isShrub) {
         shrubMesh.setMatrixAt(shrubCount, this.transformHelper.matrix);
-        this.color.setHSL(0.24 + tree.colorVariation * 0.04, 0.47, 0.34 + tree.colorVariation * 0.1);
+        this.color.setHSL(0.24 + tree.colorVariation * 0.04, this.darkMode ? 0.29 : 0.47, (this.darkMode ? 0.08 : 0.34) + tree.colorVariation * (this.darkMode ? 0.02 : 0.1));
         shrubMesh.setColorAt(shrubCount, this.color);
         shrubCount += 1;
       } else {
         broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
-        this.color.setHSL(0.29 + tree.colorVariation * 0.04, 0.53, 0.36 + tree.colorVariation * 0.1);
+        this.color.setHSL(0.29 + tree.colorVariation * 0.04, this.darkMode ? 0.32 : 0.53, (this.darkMode ? 0.09 : 0.36) + tree.colorVariation * (this.darkMode ? 0.02 : 0.1));
         broadleafMesh.setColorAt(broadleafCount, this.color);
         broadleafCount += 1;
       }

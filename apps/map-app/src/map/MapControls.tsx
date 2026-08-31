@@ -18,8 +18,12 @@ import {
   TrainTrack,
   Trees,
   X,
+  Moon,
+  Sun,
+  Monitor,
   type LucideIcon,
 } from 'lucide-react';
+import type { ThemePreference } from '../theme';
 
 export type MapLayerKey =
   | 'globe'
@@ -115,6 +119,8 @@ export function MapControls({
   onToggle3dMode,
   orientationChanged,
   notice,
+  themePreference,
+  onThemeChange,
 }: {
   query: string;
   searchOpen: boolean;
@@ -145,6 +151,8 @@ export function MapControls({
   onToggle3dMode: () => void;
   orientationChanged: boolean;
   notice: string | null;
+  themePreference: ThemePreference;
+  onThemeChange: (theme: ThemePreference) => void;
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
@@ -336,6 +344,20 @@ export function MapControls({
                   ))}
                 </div>
               </details>
+              <div className="theme-setting">
+                <span className="theme-setting-label">Appearance</span>
+                <div className="theme-options" role="group" aria-label="Appearance">
+                  {([['light', 'Light', Sun], ['dark', 'Dark', Moon], ['system', 'System', Monitor]] as const).map(([value, label, Icon]) => (
+                    <button
+                      className={themePreference === value ? 'selected' : ''}
+                      key={value}
+                      type="button"
+                      aria-pressed={themePreference === value}
+                      onClick={() => onThemeChange(value)}
+                    ><Icon aria-hidden="true" /><span>{label}</span></button>
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
         )}

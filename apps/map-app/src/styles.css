@@ -592,6 +592,132 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   }
 }
 
+/* Dark mode is a blue-hour palette, not an inversion of the daytime UI. */
+[data-theme='dark'] {
+  --color-accent: #74b8ff;
+  --color-accent-strong: #9dccff;
+  --color-accent-soft: rgb(43 91 139 / 45%);
+  --color-ink: #e3eef8;
+  --color-muted: #9db3c8;
+  --color-line: #294257;
+  --color-line-strong: #39566d;
+  --color-success: #72d59a;
+  --color-warning: #f2c879;
+  --color-danger: #ff9e9e;
+  --surface-card: linear-gradient(165deg, rgb(100 145 180 / 13%) 0%, rgb(12 29 46 / 0%) 100%), rgb(20 39 57 / 96%);
+  --surface-raised: rgb(25 47 67 / 97%);
+  --surface-header: rgb(18 37 55 / 94%);
+  --surface-panel: linear-gradient(165deg, rgb(91 137 172 / 12%) 0%, transparent 100%), rgb(18 37 55 / 97%);
+  --surface-control: rgb(25 48 68 / 95%);
+  --surface-subtle: #1a354d;
+  --surface-hover: #244760;
+  --shadow-card: 0 16px 40px rgb(0 8 18 / 38%), 0 2px 8px rgb(0 8 18 / 25%);
+  --shadow-control: 0 5px 14px rgb(0 8 18 / 35%);
+  --focus-ring: 0 0 0 3px rgb(116 184 255 / 38%);
+  color: var(--color-ink);
+  background: #081827;
+}
+[data-theme='dark'] body { background: #081827; }
+[data-theme='dark'] .map-status { background: rgb(18 37 55 / 96%); color: var(--color-ink); border-color: var(--color-line-strong); }
+[data-theme='dark'] .map-tool-dock button { border-color: #38566e; color: #c6d9e8; }
+[data-theme='dark'] .map-tool-dock button:hover { background: #2a4d68; border-color: #6eaddd; color: #fff; }
+[data-theme='dark'] .map-tool-dock button.active { background: #214e72; border-color: #74b8ff; color: #d9edff; }
+[data-theme='dark'] .location-search-form,
+[data-theme='dark'] .route-search-field { background: rgb(20 41 59 / 96%); border-color: #38566e; color: var(--color-ink); }
+[data-theme='dark'] input { color: var(--color-ink) !important; }
+[data-theme='dark'] input::placeholder { color: #8ca5bb !important; }
+[data-theme='dark'] .transit-departure-card,
+[data-theme='dark'] .transit-stop-destination-button,
+[data-theme='dark'] .favorite-name-field input,
+[data-theme='dark'] .route-endpoint-swap { background: #1a354d; border-color: #3b5b73; color: var(--color-ink); }
+[data-theme='dark'] .transit-panel-state { background: #173149; }
+[data-theme='dark'] .transit-panel-state.error { background: #4a2833; }
+[data-theme='dark'] .theme-setting { border-top: 1px solid var(--color-line); margin-top: 14px; padding: 14px 0 2px; }
+[data-theme='dark'] .theme-options button { color: var(--color-muted); }
+.theme-setting { border-top: 1px solid var(--color-line); margin-top: 14px; padding: 14px 0 2px; }
+.theme-setting-label { color: var(--color-muted); display: block; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+.theme-options { display: grid; gap: 6px; grid-template-columns: repeat(3, 1fr); }
+.theme-options button { align-items: center; background: var(--surface-subtle); border: 1px solid var(--color-line); border-radius: 9px; color: var(--color-muted); cursor: pointer; display: flex; flex-direction: column; font: inherit; font-size: .67rem; gap: 5px; padding: 8px 4px; }
+.theme-options button svg { height: 16px; width: 16px; }
+.theme-options button:hover, .theme-options button.selected { background: var(--color-accent-soft); border-color: var(--color-accent); color: var(--color-accent); }
+.theme-options button:focus-visible { box-shadow: var(--focus-ring); outline: 0; }
+
+/* Dark overrides for controls and route cards whose daytime rules use white
+   surfaces directly. */
+[data-theme='dark'] .transit-panel-close,
+[data-theme='dark'] .transit-panel-refresh,
+[data-theme='dark'] .panel-icon-action,
+[data-theme='dark'] .favorite-actions button,
+[data-theme='dark'] .favorite-menu-close,
+[data-theme='dark'] .favorite-kind-options button,
+[data-theme='dark'] .favorite-menu-actions button,
+[data-theme='dark'] .location-info-close,
+[data-theme='dark'] .route-panel-close,
+[data-theme='dark'] .route-endpoint-swap,
+[data-theme='dark'] .transit-time-toggle,
+[data-theme='dark'] .layer-panel-close,
+[data-theme='dark'] .mobile-sheet-close { background: var(--surface-subtle); border-color: var(--color-line); color: var(--color-muted); }
+[data-theme='dark'] .transit-panel-close:hover,
+[data-theme='dark'] .transit-panel-refresh:hover,
+[data-theme='dark'] .favorite-menu-close:hover,
+[data-theme='dark'] .location-info-close:hover,
+[data-theme='dark'] .route-panel-close:hover,
+[data-theme='dark'] .layer-panel-close:hover { background: var(--surface-hover); color: var(--color-accent); }
+[data-theme='dark'] .route-selection-banner,
+[data-theme='dark'] .route-search-results { background: var(--surface-panel); color: var(--color-ink); }
+[data-theme='dark'] .route-search-results,
+[data-theme='dark'] .route-search-result { border-color: var(--color-line); }
+[data-theme='dark'] .route-mode-tabs,
+[data-theme='dark'] .transit-time-tabs,
+[data-theme='dark'] .transit-option-transfer { background: #173149; }
+[data-theme='dark'] .route-mode-tabs button,
+[data-theme='dark'] .transit-time-tabs button,
+[data-theme='dark'] .transit-route-options-heading,
+[data-theme='dark'] .transit-option-duration,
+[data-theme='dark'] .transit-option-walk,
+[data-theme='dark'] .transit-option-route-fallback,
+[data-theme='dark'] .route-endpoint-current,
+[data-theme='dark'] .route-provider-status,
+[data-theme='dark'] .transit-route-leg-title time,
+[data-theme='dark'] .transit-route-stations strong,
+[data-theme='dark'] .transit-route-arrival small,
+[data-theme='dark'] .route-summary span { color: var(--color-muted); }
+[data-theme='dark'] .route-mode-tabs button.active,
+[data-theme='dark'] .transit-time-tabs button.active { background: #2b5270; color: #e5f2ff; }
+[data-theme='dark'] .transit-route-option { background: #183149; border-color: #38566d; color: #e4eff8; box-shadow: 0 4px 12px rgb(0 8 18 / 18%); }
+[data-theme='dark'] .transit-route-option:hover { background: #21445e; border-color: #6b9dc2; }
+[data-theme='dark'] .transit-route-option.active { background: #214b68; border-color: #74b8ff; }
+[data-theme='dark'] .transit-option-times,
+[data-theme='dark'] .route-summary strong,
+[data-theme='dark'] .transit-route-leg-title strong,
+[data-theme='dark'] .transit-route-arrival strong,
+[data-theme='dark'] .transit-journey-heading strong { color: #e8f3fb; }
+[data-theme='dark'] .transit-route-options { border-color: var(--color-line); }
+[data-theme='dark'] .layer-switch span { background: #a9c5d8; box-shadow: 0 1px 3px rgb(0 8 18 / 45%); }
+[data-theme='dark'] .location-favorites-toggle,
+[data-theme='dark'] .position-copy,
+[data-theme='dark'] .route-secondary-button,
+[data-theme='dark'] .map-floating-action { background: #1d4059; border-color: #426985; color: #d9edff; }
+[data-theme='dark'] .location-favorites-toggle:hover,
+[data-theme='dark'] .location-favorites-toggle:focus-visible,
+[data-theme='dark'] .position-copy:hover,
+[data-theme='dark'] .route-secondary-button:hover,
+[data-theme='dark'] .map-floating-action:hover { background: #28536f; border-color: #74b8ff; color: #f1f8ff; }
+[data-theme='dark'] .route-panel { color: #e3eef8; }
+[data-theme='dark'] .map-context-menu strong { color: #c4d7e6; }
+[data-theme='dark'] .map-context-menu button { color: #e3eef8; }
+[data-theme='dark'] .map-context-menu button svg { color: #9bb5c9; }
+[data-theme='dark'] .layer-toggle { color: #d9e8f4; }
+[data-theme='dark'] .layer-toggle + .layer-toggle { border-color: var(--color-line); }
+[data-theme='dark'] .layer-toggle-icon { color: #a9c9df; }
+[data-theme='dark'] .route-map-button { background: #1d4059; border-color: #426985; color: #d9edff; }
+[data-theme='dark'] .route-map-button:hover { background: #28536f; border-color: #74b8ff; }
+[data-theme='dark'] .location-search-shortcut { background: #1b384f; border-color: #42627a; box-shadow: 0 1px 2px rgb(0 8 18 / 35%); color: #b8cddd; }
+
+@media (prefers-reduced-motion: reduce) {
+  .map-canvas { transition: none !important; }
+}
+
 @media (max-width: 640px) {
   .pwa-install-card { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); max-width: none; width: calc(100% - 94px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)); }
   .pwa-install-card { align-items: flex-start; flex-wrap: wrap; }

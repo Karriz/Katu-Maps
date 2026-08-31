@@ -114,6 +114,20 @@ async function openRoute(page: Page) {
   await expect(page.getByRole('button', { name: 'Close route planner' })).toBeVisible();
 }
 
+async function verifyThemeSettings(page: Page) {
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  await expect(page.getByRole('group', { name: 'Appearance' })).toBeVisible();
+  await page.getByRole('button', { name: 'Dark' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'System' }).click();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.getByRole('button', { name: 'Dark' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+}
+
 async function openRouteAutocomplete(page: Page) {
   await openRoute(page);
   await page.getByLabel('Search starting point').fill('Tampere');
@@ -439,6 +453,13 @@ const scenarios: Scenario[] = [
     state: 'all favourite entity types verified after reload',
     favorites: favoriteCameraFixtures,
   })),
+  {
+    name: 'desktop-theme-settings',
+    description: 'Light, Dark, and System appearance options update the shared UI without losing map state',
+    viewport: 'desktop',
+    setup: verifyThemeSettings,
+    state: 'dark panel and system preference transitions verified',
+  },
 ];
 
 async function browserDiagnostics(page: Page) {

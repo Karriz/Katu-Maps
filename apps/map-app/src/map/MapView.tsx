@@ -92,6 +92,7 @@ import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { installForegroundRecovery } from '../lib/ForegroundRecovery';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
+import { useTheme } from '../theme';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
@@ -108,6 +109,7 @@ import {
   OPENFREEMAP_SOURCE_ID,
   aerowayWidthExpression,
   roadWidthExpression,
+  applyMapTheme,
 } from './GlobalMapStyle';
 
 const TAMPERE: [number, number] = [23.7609, 61.4981];
@@ -480,6 +482,21 @@ async function addLocationIcons(map: Map) {
       image.onerror = () => reject(new Error(`Unable to load ${imageId}`));
     });
     if (!map.hasImage(imageId)) map.addImage(imageId, image, { pixelRatio: 2 });
+    if (id === 'airport' && !map.hasImage('location-airport-icon-dark')) {
+      const darkSvg = renderToStaticMarkup(createElement(Icon, {
+        color: '#d7e9f5', size: 22, strokeWidth: 2.4,
+      })).replace(
+        /(<svg[^>]*>)/,
+        '$1<circle cx="12" cy="12" r="11" fill="#31566d"/>',
+      );
+      const darkImage = new Image();
+      darkImage.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(darkSvg)}`;
+      await new Promise<void>((resolve, reject) => {
+        darkImage.onload = () => resolve();
+        darkImage.onerror = () => reject(new Error('Unable to load location-airport-icon-dark'));
+      });
+      if (!map.hasImage('location-airport-icon-dark')) map.addImage('location-airport-icon-dark', darkImage, { pixelRatio: 2 });
+    }
   }));
 
   await Promise.all(FAVORITE_ICON_DEFINITIONS.map(async ([imageId, Icon]) => {
@@ -630,12 +647,14 @@ function globalWaterPatternLayer(): FillLayerSpecification {
 }
 
 export function MapView() {
+  const { preference: themePreference, resolvedTheme, setPreference: setThemePreference } = useTheme();
   const initialDeepLinkRef = useRef<MapDeepLink | null>(parseMapDeepLink(window.location.search));
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
+  const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
   const plannedVehicleTripRef = useRef<string | null>(null);
   const terrainSourceRef = useRef('terrain');
@@ -1556,6 +1575,7 @@ export function MapView() {
     });
     treeLayerRef.current = treeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
+    transitVehicleLayerRef.current = transitVehicleLayer;
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       latestVehiclePoseRef.current = pose;
       // Keep the custom model layer synchronized with the same estimated pose
@@ -2223,6 +2243,7 @@ export function MapView() {
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
       transitStopsLayerRef.current = null;
+      transitVehicleLayerRef.current = null;
     };
   }, []);
 
@@ -2283,6 +2304,15 @@ export function MapView() {
       setSelectedTransitStop(null);
     }
   }, [layerToggles, mapLoaded]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    treeLayerRef.current?.setTheme(resolvedTheme === 'dark');
+    transitVehicleLayerRef.current?.setTheme(resolvedTheme === 'dark');
+    applyMapTheme(map, resolvedTheme);
+    map.triggerRepaint();
+  }, [resolvedTheme, mapLoaded]);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -3066,6 +3096,8 @@ export function MapView() {
             contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop)}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
+            themePreference={themePreference}
+            onThemeChange={setThemePreference}
           />
           {routeContextMenu && (
             <MapContextMenu

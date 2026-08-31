@@ -9,6 +9,7 @@ import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
 import { MAP_COLORS } from './MapPalette';
+import type { Map as MapLibreMap } from 'maplibre-gl';
 
 export const OPENFREEMAP_SOURCE_ID = 'openfreemap';
 export const MAPTERHORN_SOURCE_ID = 'terrain';
@@ -2424,3 +2425,75 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     },
   ]),
 };
+
+/** Recolors the already-loaded style in place. This intentionally avoids
+ * setStyle(): custom Three.js layers, sources, camera state, and selections
+ * therefore survive an appearance change. */
+export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
+  const originalPaints = mapThemePaints.get(map) ?? new Map<string, Record<string, unknown>>();
+  if (!mapThemePaints.has(map)) {
+    (map.getStyle().layers ?? []).forEach((layer) => {
+      if (layer.paint) originalPaints.set(layer.id, { ...layer.paint } as Record<string, unknown>);
+    });
+    mapThemePaints.set(map, originalPaints);
+  }
+  if (theme === 'light') {
+    originalPaints.forEach((paint, id) => Object.entries(paint).forEach(([property, value]) => {
+      if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
+    }));
+    if (map.getLayer('global-aerodrome-labels')) map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon');
+    if (map.getLayer('location-poi-icons')) map.setPaintProperty('location-poi-icons', 'icon-opacity', 1);
+    if (map.getLayer('location-poi-labels')) map.setPaintProperty('location-poi-labels', 'icon-opacity', 1);
+    map.triggerRepaint();
+    return;
+  }
+  const dark = true;
+  const colors = dark ? {
+    background: '#071525', land: '#10253a', green: '#17384a', park: '#163944',
+    water: '#0a2c46', waterEdge: '#164c66', road: '#b8aa80', roadCasing: '#625e53',
+    path: '#8b9e9d', rail: '#6b8295', building: '#293f53', buildingBand: '#625f52',
+    label: '#d9e8f5', halo: '#10253a', shadow: '#061322', boundary: '#7391a5',
+  } : {
+    background: '#f3f4f1', land: '#c9e0b4', green: '#a8c88c', park: '#bfdda0',
+    water: '#7fc4d6', waterEdge: '#5d9fb3', road: '#f7f5ee', roadCasing: '#adb8af',
+    path: '#fff8e8', rail: '#8ea097', building: '#fffdf8', buildingBand: '#dedad1',
+    label: MAP_COLORS.label, halo: MAP_COLORS.labelHalo, shadow: '#4b5d52', boundary: '#8ea097',
+  };
+  const set = (id: string, property: string, value: unknown) => {
+    if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
+  };
+  set('global-background', 'background-color', colors.background);
+  ['global-landcover', 'global-landuse'].forEach((id) => set(id, 'fill-color', colors.land));
+  ['global-protected-areas', 'global-parks'].forEach((id) => set(id, 'fill-color', colors.park));
+  set('global-aeroway-areas', 'fill-color', '#29465a');
+  set('global-aeroway-lines', 'line-color', '#7190a2');
+  set('global-aeroway-runways', 'line-color', '#617f92');
+  set('terrain-hillshade', 'hillshade-shadow-color', '#020b14');
+  set('terrain-hillshade', 'hillshade-highlight-color', '#173149');
+  set('terrain-hillshade', 'hillshade-accent-color', '#0b2033');
+  ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
+  set('global-water-edge-shade', 'fill-color', colors.waterEdge);
+  ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
+  ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
+  ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads'].forEach((id) => set(id, 'line-color', colors.road));
+  ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
+  ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
+  ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', colors.building); set(id, 'fill-outline-color', colors.boundary); });
+  set('global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
+  set('global-buildings', 'fill-extrusion-color', colors.building);
+  set('global-building-ground-storeys', 'fill-extrusion-vertical-gradient', false);
+  set('global-buildings', 'fill-extrusion-vertical-gradient', false);
+  ['global-building-shadow', 'global-building-contact-shadow'].forEach((id) => set(id, 'line-color', colors.shadow));
+  ['global-boundaries'].forEach((id) => set(id, 'line-color', colors.boundary));
+  (map.getStyle().layers ?? []).filter((layer) => layer.id.startsWith('global-') && layer.id.includes('label')).forEach((layer) => {
+    set(layer.id, 'text-color', colors.label);
+    set(layer.id, 'text-halo-color', colors.halo);
+  });
+  if (map.getLayer('global-aerodrome-labels')) {
+    map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon-dark');
+  }
+  ['location-poi-icons', 'location-poi-labels'].forEach((id) => set(id, 'icon-opacity', 0.78));
+  map.triggerRepaint();
+}
+
+const mapThemePaints = new WeakMap<MapLibreMap, Map<string, Record<string, unknown>>>();
