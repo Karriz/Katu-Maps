@@ -167,4 +167,16 @@ describe('transit vehicle estimation', () => {
     expect(estimatedDistance(leg, baseTime + 5 * minute + 30_000)).toBe(stopDistance);
     expect(estimatedDistance(leg, baseTime + 6 * minute)).toBe(stopDistance);
   });
+
+  it('clamps estimated positions before departure and after arrival', () => {
+    const leg = buildEstimatedTripLeg({
+      from: { stopId: 'a', lon: 24, lat: 60, departure: baseTime },
+      to: { stopId: 'b', lon: 24.02, lat: 60, arrival: baseTime + 10 * minute },
+      coordinates: [],
+    }, [[24, 60], [24.01, 60], [24.02, 60]])!;
+
+    expect(estimatedDistance(leg, baseTime - minute)).toBe(leg.anchors[0].distance);
+    expect(estimatedDistance(leg, baseTime + 11 * minute)).toBe(leg.anchors[leg.anchors.length - 1].distance);
+  });
+
 });

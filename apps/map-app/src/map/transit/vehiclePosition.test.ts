@@ -3,6 +3,7 @@ import fixture from './__fixtures__/digitransit-vehicle-positions.json';
 import { normalizeDigitransitVehicleObservations } from './DigitransitProvider';
 import {
   beginObservedPositionTransition,
+  LIVE_OBSERVATION_FUTURE_TOLERANCE_MS,
   LIVE_OBSERVATION_MAX_AGE_MS,
   matchLiveObservation,
   observedPositionAt,
@@ -34,6 +35,27 @@ describe('normalized live vehicle observations', () => {
     expect(matchLiveObservation([live], { ...context, serviceDate: undefined }, now)).toBeUndefined();
   });
 
+  it('keeps observations on the freshness boundaries but rejects just-outside values', () => {
+    const [live] = normalizeDigitransitVehicleObservations(fixture.positions);
+    expect(matchLiveObservation([{ ...live, recordedAt: now - LIVE_OBSERVATION_MAX_AGE_MS }], context, now))
+      .toBeDefined();
+    expect(matchLiveObservation([{ ...live, recordedAt: now + LIVE_OBSERVATION_FUTURE_TOLERANCE_MS }], context, now))
+      .toBeDefined();
+    expect(matchLiveObservation([{ ...live, recordedAt: now - LIVE_OBSERVATION_MAX_AGE_MS - 1 }], context, now))
+      .toBeUndefined();
+    expect(matchLiveObservation([{ ...live, recordedAt: now + LIVE_OBSERVATION_FUTURE_TOLERANCE_MS + 1 }], context, now))
+      .toBeUndefined();
+  });
+
+  it('does not normalize observations with unusable identity, coordinates, or timestamp', () => {
+    const [live] = fixture.positions;
+    expect(normalizeDigitransitVehicleObservations([
+      { ...live, trip: undefined },
+      { ...live, lon: 'not-a-number' },
+      { ...live, lastUpdate: 'not-a-date' },
+    ])).toEqual([]);
+  });
+
   it('smooths to an observation and never extrapolates beyond it', () => {
     const [observation] = normalizeDigitransitVehicleObservations(fixture.positions);
     const transition = beginObservedPositionTransition([23.7, 61.4], observation, now, 5_000);
@@ -42,6 +64,13 @@ describe('normalized live vehicle observations', () => {
       (61.4 + 61.4991) / 2,
     ]);
     expect(observedPositionAt(transition, now + 60_000)).toEqual(observation.coordinates);
+  });
+
+  it('snaps immediately when smoothing is disabled and handles time before the transition', () => {
+    const [observation] = normalizeDigitransitVehicleObservations(fixture.positions);
+    const transition = beginObservedPositionTransition([23.7, 61.4], observation, now, 0);
+    expect(observedPositionAt(transition, now - 1)).toEqual(observation.coordinates);
+    expect(observedPositionAt(transition, now)).toEqual(observation.coordinates);
   });
 
   it('rejects late responses from a previous departure or provider generation', () => {
