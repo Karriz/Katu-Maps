@@ -32,8 +32,29 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/map-app/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
+      - name: Start visual test server
+        run: |
+          npm run test:visual:server > "$RUNNER_TEMP/katu-vite.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/katu-vite.pid"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/katu-vite.log"
+          exit 1
       - name: Capture visual scenarios
-        run: npm run test:visual
+        run: npm run test:visual:external
+      - name: Stop visual test server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/katu-vite.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/katu-vite.pid")"
+          fi
+          if [ -f "$RUNNER_TEMP/katu-vite.log" ]; then
+            tail -n 80 "$RUNNER_TEMP/katu-vite.log"
+          fi
       - name: Add report location to summary
         if: always()
         run: echo 'Download the **katu-maps-visual-report** artifact and open `index.html`. A failed check means the report contains a visual runtime or scenario failure; this workflow is not a required branch-protection check.' >> "$GITHUB_STEP_SUMMARY"

@@ -12,7 +12,6 @@ import {
 } from 'maplibre-gl';
 import {
   ArrowRight,
-  ArrowRightLeft,
   Beer,
   CircleDollarSign,
   BookOpen,
@@ -35,7 +34,6 @@ import {
   Shield,
   Star,
   X,
-  Clock3,
   Droplets,
   Mountain,
   Navigation,
@@ -52,13 +50,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { createElement } from 'react';
-import { createPortal } from 'react-dom';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
-import type { TransitVehiclePose, TransitVehicleTripSelection } from './TransitStopsLayer';
+import type { TransitVehicleTripSelection } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
@@ -67,23 +64,32 @@ import { fetchValhallaRoute, type RouteMode, type RouteResult } from './Valhalla
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import {
   isWalkingTransitMode,
-  TransitRouteOptions,
 } from './TransitRouteOptions';
 const TransitJourneyDetails = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyDetails })));
 const TransitJourneyHeader = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyHeader })));
 import { MapContextMenu } from './MapContextMenu';
+import { MapCameraActions } from './MapCameraActions';
+import { RoutePlannerControls } from './RoutePlannerControls';
+import { PositionInformationPanel } from './PositionInformationPanel';
+import { LocationInformationPanel } from './LocationInformationPanel';
 import { InfoActionRow } from '../components/InfoActionRow';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
 import {
   fetchDigitransitRoute,
   journeyVehicleKey,
   resolveJourneyVehicleLegs,
-  searchTransitStops,
-  type TransitPositionStatus,
   type TransitProviderId,
 } from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
-import { defaultPositionName, elevationResult, formatCoordinates, formatElevation, formatNominatimAddress, hasDisplayableElevation, parseCoordinates, queryTerrainElevation, type AddressState, type ElevationState } from './PositionInformation';
+import { defaultPositionName, elevationResult, formatCoordinates, formatNominatimAddress, queryTerrainElevation } from './PositionInformation';
+import { useInfoPanelState, type PositionInformationState } from './useInfoPanelState';
+import { useTransitVehicleFollow } from './useTransitVehicleFollow';
+import { useRouteVehicleRestore } from './useRouteVehicleRestore';
+import { useMapSearch, type PhotonFeature } from './useMapSearch';
+import { useRouteExecution } from './useRouteExecution';
+import { useMapTools } from './useMapTools';
+import { usePanelCoordinator } from './usePanelCoordinator';
+import { useMapLayerVisibility } from './useMapLayerVisibility';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, isMeaningfullyBetterLocation, locationZoomForAccuracy, markerFeatureCollection, normalizedLocationAccuracy } from './LocationMarkers';
 import { installPersistedMapViewFlush, loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
@@ -93,7 +99,7 @@ import { installForegroundRecovery } from '../lib/ForegroundRecovery';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { useTheme } from '../theme';
-import { favoriteMapFeatures, findTransitFavorite, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
+import { favoriteMapFeatures, findTransitFavorite, loadFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -111,7 +117,6 @@ import {
   roadWidthExpression,
   applyMapTheme,
 } from './GlobalMapStyle';
-
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
@@ -218,33 +223,6 @@ function isValidCoordinate(coordinate: unknown): coordinate is [number, number] 
     && coordinate[1] >= -90
     && coordinate[1] <= 90;
 }
-
-type PhotonFeature = {
-  geometry: {
-    coordinates: [number, number];
-  };
-  properties: {
-    name?: string;
-    housenumber?: string;
-    street?: string;
-    city?: string;
-    state?: string;
-    country?: string;
-    transitStopId?: string;
-    transitMode?: string;
-    transitProvider?: TransitProviderId;
-    favoriteId?: string;
-    coordinateResult?: boolean;
-    [key: string]: unknown;
-  };
-};
-
-type PositionInformationState = {
-  coordinates: [number, number];
-  elevation: ElevationState;
-  address: AddressState;
-  favoriteId?: string;
-};
 
 type PendingFavorite = {
   editingFavoriteId?: string;
@@ -663,44 +641,41 @@ export function MapView() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [orientationChanged, setOrientationChanged] = useState(false);
-  const [selectedTransitStop, setSelectedTransitStop] = useState<(TransitStopSelection & { favoriteId?: string }) | null>(null);
+  const routePlanning = useRoutePlanning();
+  const {
+    selectedTransitStop,
+    setSelectedTransitStop,
+    selectedLocation,
+    setSelectedLocation,
+    positionInformation,
+    setPositionInformation,
+    closePositionInformation,
+    closeLocationInformation,
+  } = useInfoPanelState();
   const [transitDepartureDetailOpen, setTransitDepartureDetailOpen] = useState(false);
   const [transitNavigationBackSignal, setTransitNavigationBackSignal] = useState(0);
-  const vehicleFollowEnabledRef = useRef(false);
-  const latestVehiclePoseRef = useRef<TransitVehiclePose | null>(null);
-  const [vehicleFollowing, setVehicleFollowing] = useState(false);
-  const [vehicleFollowAvailable, setVehicleFollowAvailable] = useState(false);
-  const vehicleFollowingRef = useRef(vehicleFollowing);
-  vehicleFollowingRef.current = vehicleFollowing;
-  const routeVehicleRestoreRef = useRef<{ result: RouteResult; following: boolean } | null>(null);
-  const [vehiclePositionStatus, setVehiclePositionStatus] = useState<TransitPositionStatus>('unavailable');
-  const userLocationRef = useRef<[number, number] | null>(null);
-  const userLocationAccuracyRef = useRef(Number.POSITIVE_INFINITY);
-  const userLocationTimestampRef = useRef(0);
-  const userLocationWatchRef = useRef<number | null>(null);
-  const locateFocusRef = useRef<((coords: GeolocationCoordinates) => void) | null>(null);
-  const locateFocusTimerRef = useRef<number | undefined>(undefined);
+  const {
+    vehicleFollowEnabledRef,
+    latestVehiclePoseRef,
+    vehicleFollowing,
+    setVehicleFollowing,
+    vehicleFollowingRef,
+    vehicleFollowAvailable,
+    setVehicleFollowAvailable,
+    vehiclePositionStatus,
+    setVehiclePositionStatus,
+  } = useTransitVehicleFollow();
+  const { remember: rememberRouteVehicle, take: takeRouteVehicleRestore } = useRouteVehicleRestore();
   const [layersOpen, setLayersOpen] = useState(false);
   const [mapToolNotice, setMapToolNotice] = useState<string | null>(null);
   const mapToolNoticeTimerRef = useRef<number | undefined>(undefined);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<PhotonFeature[]>([]);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchResultsQuery, setSearchResultsQuery] = useState('');
   const [favorites, setFavorites] = useState<Favorite[]>(loadFavorites);
   const favoritesRef = useRef(favorites);
   const [pendingFavorite, setPendingFavorite] = useState<PendingFavorite | null>(null);
-  const [highlightedSearchResults, setHighlightedSearchResults] = useState<PhotonFeature[]>([]);
-  const pendingSearchSubmitRef = useRef<string | null>(null);
   const lastSearchFitRef = useRef('');
-  const selectedSearchQueryRef = useRef<string | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<LocationSelection | null>(null);
   const [locationDetailsLoading, setLocationDetailsLoading] = useState(false);
   const [contextMenuMarker, setContextMenuMarker] = useState<[number, number] | null>(null);
-  const [positionInformation, setPositionInformation] = useState<PositionInformationState | null>(null);
   const elevationRequestRef = useRef(0);
   const positionAddressRequestRef = useRef(0);
   const favoriteAddressAbortRef = useRef<AbortController | null>(null);
@@ -721,7 +696,7 @@ export function MapView() {
     routeSheet, routeSheetCollapsed, routeSheetSnapBeforeDetailsRef, journeyBackButtonRef,
     journeyDetailsToggleRef, routeOriginRef, routeDestinationRef, routePickingRef, routeAbortRef,
     routeCameraRequestRef, setRouteSheetCollapsed, openTransitDetails, closeTransitDetails,
-  } = useRoutePlanning();
+  } = routePlanning;
   const routeVehicleViewRef = useRef(Boolean(routeOpen && routeResult));
   routeVehicleViewRef.current = Boolean(routeOpen && routeResult);
   const routeResultRef = useRef(routeResult);
@@ -733,7 +708,6 @@ export function MapView() {
   const lastUserInteractionRef = useRef(0);
   const locationDetailsAbortRef = useRef<AbortController | null>(null);
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
-  const transitSearchCacheRef = useRef(new globalThis.Map<string, PhotonFeature[]>());
   const nominatimLastRequestRef = useRef(0);
   const routeSearchAnchorRefs = useRef<Record<'origin' | 'destination', HTMLDivElement | null>>({
     origin: null,
@@ -748,22 +722,6 @@ export function MapView() {
       type: 'FeatureCollection', features: [],
     });
   }, []);
-  const openPositionInformation = useCallback((information: PositionInformationState) => {
-    prepareInfoPanelOpen();
-    if (!routeVehicleViewRef.current) {
-      vehicleFollowEnabledRef.current = false;
-      setVehicleFollowing(false);
-      setVehicleFollowAvailable(false);
-    }
-    if (routeVehicleViewRef.current) {
-      transitStopsLayerRef.current?.clearStopSelection();
-    } else {
-      transitStopsLayerRef.current?.clearSelection();
-    }
-    setSelectedTransitStop(null);
-    clearLocationSelection();
-    setPositionInformation(information);
-  }, [clearLocationSelection]);
   useEffect(() => {
     if (!routeSearchTarget) return;
 
@@ -840,6 +798,35 @@ export function MapView() {
     && layerToggles.buildings
     && layerToggles.trees
     && layerToggles.transitModels;
+  useMapLayerVisibility({
+    mapRef,
+    mapLoaded,
+    layerToggles,
+    resolvedTheme,
+    treeLayerRef,
+    transitRouteOverlayRef,
+    transitVehicleLayerRef,
+    treeRefreshRef,
+    terrainSourceRef,
+    terrainEnabledRef,
+    building3dLayerIds: BUILDING_3D_LAYER_IDS,
+    buildingShadowLayerIds: BUILDING_SHADOW_LAYER_IDS,
+    buildingTransitionFootprintLayerId: GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
+    building2dLayerId: GLOBAL_BUILDING_2D_LAYER_ID,
+    cyclingLayerIds: GLOBAL_CYCLING_LAYER_IDS,
+    hikingLayerIds: GLOBAL_HIKING_LAYER_IDS,
+    waterEffectLayerIds: WATER_EFFECT_LAYER_IDS,
+    onTransitDisabled: () => {
+      transitStopsLayerRef.current?.clearSelection();
+      setSelectedTransitStop(null);
+    },
+  });
+  const {
+    searchQuery, setSearchQuery, searchResults, setSearchResults, searchOpen, setSearchOpen,
+    searchLoading, searchError, setSearchError, searchResultsQuery,
+    highlightedSearchResults, setHighlightedSearchResults, coordinateSearchFeature, favoriteFeatures, displayedSearchResults,
+    pendingSearchSubmitRef, selectedSearchQueryRef,
+  } = useMapSearch(mapRef, favorites, favoritesOpen, layerToggles.transit);
 
   const shareSelection = (link: MapDeepLink, title: string) => {
     const url = createMapDeepLink(window.location.href, link);
@@ -857,6 +844,38 @@ export function MapView() {
         setMapToolNotice((current) => current === message ? null : current);
         mapToolNoticeTimerRef.current = undefined;
       }, duration);
+  };
+
+  const {
+    userLocationRef, userLocationAccuracyRef, userLocationWatchRef, locateUser,
+    resetMapOrientation, zoomIn, zoomOut,
+  } = useMapTools({
+    mapRef,
+    showNotice: showMapToolNotice,
+    pauseRouteVehicle: () => {
+      vehicleFollowEnabledRef.current = false;
+      setVehicleFollowing(false);
+    },
+    resumeRouteVehicle: (map, coordinates) => {
+      vehicleFollowEnabledRef.current = true;
+      setVehicleFollowing(true);
+      map.setCenter(followCameraCenter(map, coordinates));
+      if (map.getZoom() < 14.6) map.setZoom(14.6);
+    },
+  });
+  const pauseVehicleFollow = () => {
+    vehicleFollowEnabledRef.current = false;
+    setVehicleFollowing(false);
+  };
+  const resumeVehicleFollow = () => {
+    const map = mapRef.current;
+    const pose = latestVehiclePoseRef.current;
+    if (!map || !pose) return;
+    vehicleFollowEnabledRef.current = true;
+    setVehicleFollowing(true);
+    const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
+    map.setCenter(followCameraCenter(map, vehicle.coordinates));
+    if (map.getZoom() < 14.6) map.setZoom(14.6);
   };
 
   useEffect(() => () => {
@@ -954,37 +973,6 @@ export function MapView() {
       controller.abort();
     };
   }, [positionInformation?.coordinates]);
-
-  const coordinateSearchFeature = useMemo<PhotonFeature | undefined>(() => {
-    const coordinates = parseCoordinates(searchQuery);
-    return coordinates ? {
-      geometry: { coordinates },
-      properties: { coordinateResult: true },
-    } : undefined;
-  }, [searchQuery]);
-
-  const favoriteFeatures = useMemo(() => orderedFavorites(favorites, favoritesOpen ? '' : searchQuery).map((favorite): PhotonFeature => ({
-    geometry: { coordinates: favorite.coordinates },
-    properties: {
-      name: favorite.name,
-      city: favorite.address,
-      class: favorite.category,
-      favoriteId: favorite.id,
-      transitStopId: favorite.transitStopId ?? (favorite.provider === 'transit' ? favorite.providerId?.split(':').slice(1).join(':') : undefined),
-      transitProvider: (favorite.transitProvider ?? (favorite.provider === 'transit'
-        ? favorite.providerId?.split(':')[0]
-        : undefined)) as TransitProviderId | undefined,
-      transitMode: favorite.transitMode,
-      favoriteEntityType: favorite.entityType,
-    },
-  })), [favorites, favoritesOpen, searchQuery]);
-  const displayedSearchResults = useMemo(() => [
-    ...favoriteFeatures,
-    ...(!favoritesOpen && coordinateSearchFeature ? [coordinateSearchFeature] : []),
-    ...(!favoritesOpen && searchQuery.trim().length >= 2 ? searchResults : []),
-  ].filter((feature, index, all) => all.findIndex((candidate) => (
-    candidate.geometry.coordinates.join(',') === feature.geometry.coordinates.join(',')
-  )) === index).slice(0, 8), [coordinateSearchFeature, favoriteFeatures, favoritesOpen, searchQuery, searchResults]);
 
   const saveSelection = (selection: LocationSelection, provider?: string, providerId?: string) => {
     favoriteAddressAbortRef.current?.abort();
@@ -1120,7 +1108,7 @@ export function MapView() {
     }
     if (routeOpen) { cancelRoute(); return; }
     if (selectedLocation) {
-      setSelectedLocation(null);
+      closeLocationInformation();
       if (parentView === 'search') setSearchOpen(true);
       (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
         type: 'FeatureCollection', features: [],
@@ -1263,88 +1251,12 @@ export function MapView() {
     }
   };
 
-  useEffect(() => {
-    if (!routeResult || routeMode !== 'transit') return;
-    const timer = window.setInterval(() => showTransitLegVehicle(routeResult), 30_000);
-    return () => window.clearInterval(timer);
-  }, [routeMode, routeResult]);
-
-  const requestRoute = async (origin: [number, number], destination: [number, number]) => {
-    routeAbortRef.current?.abort();
-    const controller = new AbortController();
-    routeAbortRef.current = controller;
-    setRouteLoading(true);
-    setRouteError(null);
-    setTransitRouteOptions([]);
-    setSelectedTransitRouteIndex(0);
-    setTransitDetailsOpen(false);
-    routeSheetSnapBeforeDetailsRef.current = null;
-    setRouteSheetCollapsed(false);
-    try {
-      let result: RouteResult;
-      if (routeMode === 'transit') {
-        const options = await fetchTransitRoutes(origin, destination, {
-          originStopId: routeOriginSelection?.transitStopId,
-          originStopProvider: routeOriginSelection?.transitStopProvider,
-          destinationStopId: routeDestinationSelection?.transitStopId,
-          destinationStopProvider: routeDestinationSelection?.transitStopProvider,
-          time: transitDateTime ? new Date(transitDateTime).toISOString() : undefined,
-          arriveBy: transitTimeMode === 'arrive',
-          signal: controller.signal,
-        });
-        if (!options[0]) throw new Error('No transit route options were returned');
-        setTransitRouteOptions(options);
-        result = options[0];
-      } else {
-        // Digitransit provides Finland-wide OpenTripPlanner routing for the
-        // direct WALK/BICYCLE/CAR modes and supports browser requests with the
-        // same subscription key already used for transit planning. Keep the
-        // road-router fallback for areas or deployments where it is unavailable.
-        try {
-          result = {
-            ...(await fetchDigitransitRoute(origin, destination, routeMode, controller.signal)),
-            provider: 'digitransit',
-          };
-        } catch (digitransitError) {
-          if (controller.signal.aborted) throw digitransitError;
-          try {
-            result = await fetchValhallaRoute(origin, destination, routeMode, controller.signal);
-          } catch (fallbackError) {
-            if (controller.signal.aborted) throw fallbackError;
-            const primary = digitransitError instanceof Error ? digitransitError.message : 'service unavailable';
-            const fallback = fallbackError instanceof Error ? fallbackError.message : 'service unavailable';
-            throw new Error(`Routing unavailable. Digitransit: ${primary}. Valhalla: ${fallback}`);
-          }
-        }
-      }
-      if (controller.signal.aborted) return;
-      setRouteResult(result);
-      showTransitLegVehicle(result);
-      setRouteGeometry(result);
-      scheduleRouteFit(result);
-    } catch (error) {
-      if ((error as Error).name !== 'AbortError') {
-        setRouteResult(null);
-        setRouteGeometry(null);
-        const message = error instanceof Error ? error.message : '';
-        setRouteError(message === 'Failed to fetch'
-          ? 'Routing services are temporarily unavailable. Check your connection and try again.'
-          : message || 'Could not calculate a route');
-      }
-    } finally {
-      if (!controller.signal.aborted) setRouteLoading(false);
-    }
-  };
-
-  const selectTransitRoute = (index: number) => {
-    const option = transitRouteOptions[index];
-    if (!option) return;
-    setSelectedTransitRouteIndex(index);
-    setRouteResult(option);
-    showTransitLegVehicle(option);
-    setRouteGeometry(option);
-    scheduleRouteFit(option);
-  };
+  const { requestRoute, selectTransitRoute } = useRouteExecution({
+    route: routePlanning,
+    showTransitLegVehicle,
+    setRouteGeometry,
+    scheduleRouteFit,
+  });
 
   const openRoute = () => {
     stopMeasurement();
@@ -1605,39 +1517,28 @@ export function MapView() {
     setRouteContextMenu(null);
   };
 
-  function prepareInfoPanelOpen() {
-    setPositionInformation(null);
-    setContextMenuMarker(null);
-    if (window.innerWidth <= 760) cancelRoute();
-  }
-
-  function preserveRouteVehicleForInfoPanel() {
-    return window.innerWidth > 760 && routeVehicleViewRef.current;
-  }
-
-  function selectTransitStopForInfoPanel(stop: TransitStopSelection) {
-    setPositionInformation(null);
-    setContextMenuMarker(null);
-    if (preserveRouteVehicleForInfoPanel()) {
-      if (routeResultRef.current) {
-        routeVehicleRestoreRef.current = {
-          result: routeResultRef.current,
-          following: vehicleFollowingRef.current,
-        };
-      }
-      transitStopsLayerRef.current?.selectSearchStopPreservingTrip(stop);
-    } else {
-      transitStopsLayerRef.current?.selectSearchStop(stop);
-    }
-  }
-
-  function clearTransitInfoSelection() {
-    if (preserveRouteVehicleForInfoPanel()) {
-      transitStopsLayerRef.current?.clearStopSelection();
-    } else {
-      transitStopsLayerRef.current?.clearSelection();
-    }
-  }
+  const {
+    prepareInfoPanelOpen,
+    preserveRouteVehicleForInfoPanel,
+    selectTransitStopForInfoPanel,
+    clearTransitInfoSelection,
+    openPositionInformation,
+  } = usePanelCoordinator({
+    routeVehicleViewRef,
+    routeResultRef,
+    vehicleFollowEnabledRef,
+    vehicleFollowingRef,
+    setVehicleFollowing,
+    setVehicleFollowAvailable,
+    transitStopsLayerRef,
+    setContextMenuMarker,
+    closePositionInformation,
+    setPositionInformation,
+    clearLocationSelection,
+    setSelectedTransitStop,
+    cancelRoute,
+    rememberRouteVehicle,
+  });
 
   function stopMeasurement() {
     measurementControllerRef.current?.dispose();
@@ -2206,10 +2107,7 @@ export function MapView() {
         setContextMenuMarker(null);
         clearLocationSelection();
         if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
-          routeVehicleRestoreRef.current = {
-            result: routeResultRef.current,
-            following: vehicleFollowingRef.current,
-          };
+          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
         }
         setSelectedTransitStop(stop);
       map.easeTo({
@@ -2372,175 +2270,7 @@ export function MapView() {
     };
   }, []);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
 
-    const setVisibility = (layerIds: string[], visible: boolean) => {
-      layerIds.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
-        }
-      });
-    };
-
-    setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
-    setVisibility(
-      (map.getStyle().layers ?? [])
-        .map((layer) => layer.id)
-        .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'),
-      layerToggles.transit,
-    );
-    setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
-    setVisibility(BUILDING_3D_LAYER_IDS, layerToggles.buildings);
-    setVisibility(
-      [GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID],
-      layerToggles.buildings,
-    );
-    setVisibility([GLOBAL_BUILDING_2D_LAYER_ID], !layerToggles.buildings);
-    setVisibility(
-      BUILDING_SHADOW_LAYER_IDS,
-      layerToggles.buildings,
-    );
-    treeLayerRef.current?.setShadowsEnabled(layerToggles.trees);
-    setVisibility(GLOBAL_CYCLING_LAYER_IDS, layerToggles.cycling);
-    setVisibility(GLOBAL_HIKING_LAYER_IDS, layerToggles.hiking);
-    transitRouteOverlayRef.current?.setVisibility(layerToggles.transitLines);
-    if (layerToggles.transitLines) {
-      void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
-    }
-    setVisibility(WATER_EFFECT_LAYER_IDS, true);
-    map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
-    terrainEnabledRef.current = layerToggles.terrain;
-    map.setTerrain(layerToggles.terrain
-      ? { source: terrainSourceRef.current, exaggeration: 1.0 }
-      : null);
-    map.triggerRepaint();
-    if (map.getLayer('terrain-hillshade')) {
-      map.setLayoutProperty(
-        'terrain-hillshade',
-        'visibility',
-        layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none',
-      );
-    }
-    treeRefreshRef.current?.();
-    if (!layerToggles.transit) {
-      transitStopsLayerRef.current?.clearSelection();
-      setSelectedTransitStop(null);
-    }
-  }, [layerToggles, mapLoaded]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-    treeLayerRef.current?.setTheme(resolvedTheme === 'dark');
-    transitVehicleLayerRef.current?.setTheme(resolvedTheme === 'dark');
-    applyMapTheme(map, resolvedTheme);
-    map.triggerRepaint();
-  }, [resolvedTheme, mapLoaded]);
-
-  useEffect(() => {
-    const query = searchQuery.trim();
-    if (query && selectedSearchQueryRef.current === query) {
-      selectedSearchQueryRef.current = null;
-      return;
-    }
-    if (query.length < 2) {
-      setSearchResults([]);
-      setSearchResultsQuery('');
-      setSearchLoading(false);
-      setSearchError(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setSearchLoading(true);
-      setSearchError(null);
-      try {
-        const params = new URLSearchParams({
-          q: query,
-          limit: '6',
-          location_bias_scale: '0.2',
-        });
-        const map = mapRef.current;
-        if (map) {
-          const center = map.getCenter();
-          params.set('lon', center.lng.toFixed(6));
-          params.set('lat', center.lat.toFixed(6));
-          params.set('zoom', String(Math.round(map.getZoom())));
-        }
-        const cacheKey = map
-          ? `${query.toLocaleLowerCase()}|${map.getCenter().lng.toFixed(1)},${map.getCenter().lat.toFixed(1)}|${Math.floor(map.getZoom())}`
-          : query.toLocaleLowerCase();
-        const cachedResults = transitSearchCacheRef.current.get(cacheKey);
-        if (cachedResults) {
-          setSearchResults(cachedResults);
-          setSearchResultsQuery(query);
-          return;
-        }
-        const response = await fetch(
-          `https://photon.komoot.io/api/?${params.toString()}`,
-          { signal: controller.signal },
-        );
-        if (!response.ok) throw new Error('Search service unavailable');
-        const data = await response.json() as { features?: PhotonFeature[] };
-        const photonResults = data.features ?? [];
-        const transitResults: PhotonFeature[] = [];
-        // Search the provider selected by the map center over an adaptive area
-        // instead of downloading a country's complete stop set.
-        if (map && layerToggles.transit) {
-          const center = map.getCenter();
-          const zoom = map.getZoom();
-          const radiusDegrees = zoom >= 12 ? 0.35 : zoom >= 9 ? 0.75 : 1.5;
-          try {
-            const stops = await searchTransitStops(query, {
-              south: Math.max(-85, center.lat - radiusDegrees),
-              west: center.lng - radiusDegrees,
-              north: Math.min(85, center.lat + radiusDegrees),
-              east: center.lng + radiusDegrees,
-            }, controller.signal);
-            stops.forEach((stop) => {
-              transitResults.push({
-                geometry: { coordinates: stop.coordinates },
-                properties: {
-                  name: stop.name,
-                  transitStopId: stop.stopId,
-                  transitMode: stop.mode,
-                  transitProvider: stop.provider,
-                },
-              });
-            });
-          } catch (transitError) {
-            if ((transitError as Error).name === 'AbortError') throw transitError;
-            console.warn('Transit stop search unavailable.', transitError);
-          }
-        }
-        // Keep the list and map representation in lockstep. Photon can return
-        // malformed points and transit results are prepended, so validate and
-        // cap only after combining both providers.
-        const results = [...transitResults, ...photonResults]
-          .filter((feature) => isValidCoordinate(feature.geometry.coordinates))
-          .slice(0, 6);
-        transitSearchCacheRef.current.set(cacheKey, results);
-        setSearchResults(results);
-        setSearchResultsQuery(query);
-      } catch (error) {
-        if ((error as Error).name !== 'AbortError') {
-          setSearchResults([]);
-          setSearchResultsQuery(query);
-          setSearchError('Could not search right now');
-        }
-      } finally {
-        if (!controller.signal.aborted) setSearchLoading(false);
-      }
-    }, 280);
-
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [searchQuery, layerToggles.transit]);
 
   useEffect(() => {
     const source = mapRef.current?.getSource('search-results') as { setData: (data: unknown) => void } | undefined;
@@ -2884,99 +2614,80 @@ export function MapView() {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, [positionInformation?.coordinates, selectedLocation, selectedTransitStop]);
+  useEffect(() => () => {
+    routeAddressAbortRef.current.origin?.abort();
+    routeAddressAbortRef.current.destination?.abort();
+  }, []);
 
-  const locateUser = () => {
-    if (!navigator.geolocation) {
-      showMapToolNotice('Location is not available in this browser.');
-      return;
-    }
-    showMapToolNotice('Finding your location...', null);
-    const updateUserLocation = ({ coords, timestamp }: GeolocationPosition) => {
-      if (timestamp < userLocationTimestampRef.current) return;
-      const map = mapRef.current;
-      const coordinates: [number, number] = [coords.longitude, coords.latitude];
-      userLocationRef.current = coordinates;
-      userLocationAccuracyRef.current = coords.accuracy;
-      userLocationTimestampRef.current = timestamp;
-      (map?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-        type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: {} }],
-      });
-      locateFocusRef.current?.(coords);
-    };
+  useEffect(() => {
+    try { window.localStorage.setItem(LAYER_STORAGE_KEY, JSON.stringify(layerToggles)); } catch { /* storage can be disabled */ }
+  }, [layerToggles]);
 
-    const focusState = {
-      centered: false,
-      bestAccuracy: Number.POSITIVE_INFINITY,
-    };
-    const focusCoordinates = (coordinates: [number, number], accuracy: number) => {
-      const map = mapRef.current;
-      if (!map) return;
-      const effectiveAccuracy = normalizedLocationAccuracy(accuracy);
-      if (focusState.centered && !isMeaningfullyBetterLocation(focusState.bestAccuracy, effectiveAccuracy)) return;
-      const refining = focusState.centered;
-      focusState.centered = true;
-      focusState.bestAccuracy = effectiveAccuracy;
-      map.flyTo({
-        center: coordinates,
-        zoom: Math.max(map.getZoom(), locationZoomForAccuracy(effectiveAccuracy)),
-        duration: refining ? 450 : 650,
-      });
-      showMapToolNotice(effectiveAccuracy <= 100 ? 'Location found' : 'Approximate location found');
-      if (effectiveAccuracy <= 50) locateFocusRef.current = null;
-    };
-    const focusFromCoordinates = (coords: GeolocationCoordinates) => {
-      focusCoordinates([coords.longitude, coords.latitude], coords.accuracy);
-    };
-    locateFocusRef.current = focusFromCoordinates;
-    if (locateFocusTimerRef.current !== undefined) window.clearTimeout(locateFocusTimerRef.current);
-    locateFocusTimerRef.current = window.setTimeout(() => {
-      if (locateFocusRef.current === focusFromCoordinates) locateFocusRef.current = null;
-      locateFocusTimerRef.current = undefined;
-    }, 12_000);
-
-    if (userLocationRef.current) {
-      focusCoordinates(userLocationRef.current, userLocationAccuracyRef.current);
-    }
-    if (userLocationWatchRef.current === null) {
-      userLocationWatchRef.current = navigator.geolocation.watchPosition(
-        (position) => updateUserLocation(position),
-        (error) => {
-          if (error.code === error.PERMISSION_DENIED && locateFocusRef.current) {
-            locateFocusRef.current = null;
-            showMapToolNotice('Unable to access your location.');
-          }
-        },
-        { enableHighAccuracy: true, maximumAge: 120_000, timeout: 15_000 },
-      );
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) => updateUserLocation(position),
-      (fastError) => {
-        if (fastError.code === fastError.PERMISSION_DENIED) {
-          locateFocusRef.current = null;
-          showMapToolNotice('Unable to access your location.');
-          return;
-        }
-        if (focusState.centered) return;
-        navigator.geolocation.getCurrentPosition(
-          (position) => updateUserLocation(position),
-          () => {
-            if (!focusState.centered) {
-              locateFocusRef.current = null;
-              showMapToolNotice('Unable to access your location.');
-            }
-          },
-          { enableHighAccuracy: true, maximumAge: 15_000, timeout: 10_000 },
-        );
-      },
-      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 1_500 },
-    );
-  };
+  useEffect(() => {
+    if (!routeOpen || !routeResult) return;
+    scheduleRouteFit(routeResult);
+  }, [mapLoaded, routeOpen, routeResult]);
 
   useEffect(() => () => {
-    if (userLocationWatchRef.current !== null) navigator.geolocation.clearWatch(userLocationWatchRef.current);
-    if (locateFocusTimerRef.current !== undefined) window.clearTimeout(locateFocusTimerRef.current);
+    routeCameraRequestRef.current += 1;
   }, []);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    let frame: number | undefined;
+    let recenterTimer: number | undefined;
+    let previousRouteLayout: string | undefined;
+    const updatePadding = () => {
+      frame = undefined;
+      if (routeOpen && routeResult) {
+        const padding = panelViewportPadding(map, 48, 24);
+        const layout = [
+          map.getContainer().clientWidth,
+          map.getContainer().clientHeight,
+          padding.top, padding.right, padding.bottom, padding.left,
+        ].join(':');
+        // ResizeObserver can emit repeatedly for a single React/layout pass.
+        // Only request another fit when the measured usable viewport changed.
+        const mobileSheetExpanded = window.innerWidth <= 760 && !routeSheetCollapsed;
+        if (!mobileSheetExpanded && previousRouteLayout !== undefined && previousRouteLayout !== layout) {
+          scheduleRouteFit(routeResult);
+        }
+        previousRouteLayout = layout;
+      } else {
+        // The panel ResizeObserver fires during its entrance transition. Do
+        // not let its delayed composition adjustment interrupt the street-level
+        // zoom that opened this selection.
+        if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
+        const coordinates = selectedTransitStop?.coordinates
+          ?? selectedLocation?.coordinates
+          ?? positionInformation?.coordinates;
+        if (coordinates) {
+          if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
+          recenterTimer = window.setTimeout(() => {
+            if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
+            map.easeTo({ center: coordinates, offset: selectionCameraOffset(map), duration: 250 });
+          }, 120);
+        }
+      }
+    };
+    const schedulePadding = () => {
+      if (frame === undefined) frame = window.requestAnimationFrame(updatePadding);
+    };
+    schedulePadding();
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(schedulePadding)
+      : undefined;
+    document.querySelectorAll<HTMLElement>(CONTENT_PANEL_SELECTOR)
+      .forEach((panel) => observer?.observe(panel));
+    window.addEventListener('resize', schedulePadding);
+    return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
+      observer?.disconnect();
+      window.removeEventListener('resize', schedulePadding);
+    };
+  }, [mapLoaded, routeOpen, routeResult, selectedTransitStop, selectedLocation, positionInformation, routeSheetCollapsed, transitDetailsOpen]);
+
 
   useEffect(() => () => {
     routeAddressAbortRef.current.origin?.abort();
@@ -2995,30 +2706,6 @@ export function MapView() {
   useEffect(() => () => {
     routeCameraRequestRef.current += 1;
   }, []);
-
-  const resetMapOrientation = () => {
-    vehicleFollowEnabledRef.current = false;
-    setVehicleFollowing(false);
-    mapRef.current?.easeTo({ bearing: 0, pitch: 0, duration: 600 });
-  };
-
-  const pauseVehicleFollow = () => {
-    vehicleFollowEnabledRef.current = false;
-    setVehicleFollowing(false);
-  };
-  const resumeVehicleFollow = () => {
-    const map = mapRef.current;
-    const pose = latestVehiclePoseRef.current;
-    if (!map || !pose) return;
-    vehicleFollowEnabledRef.current = true;
-    setVehicleFollowing(true);
-    const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
-    map.setCenter(followCameraCenter(map, vehicle.coordinates));
-    if (map.getZoom() < 14.6) map.setZoom(14.6);
-  };
-  const zoomIn = () => { pauseVehicleFollow(); mapRef.current?.zoomIn({ duration: 250 }); };
-  const zoomOut = () => { pauseVehicleFollow(); mapRef.current?.zoomOut({ duration: 250 }); };
-
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -3260,70 +2947,28 @@ export function MapView() {
             />
           )}
           {positionInformation && (
-            <aside className={`position-information mobile-bottom-sheet${positionSheet.dragging ? ' is-dragging' : ''}`} style={positionSheet.style} data-snap={positionSheet.snap} role="dialog" aria-modal="true" aria-labelledby="position-information-title">
-              <MobileSheetHandle {...positionSheet} closeLabel="Close position information" onClose={() => {
+            <PositionInformationPanel
+              information={positionInformation}
+              sheet={positionSheet}
+              favorite={positionFavorite}
+              is3dMode={is3dMode}
+              onClose={() => { setPositionInformation(null); setContextMenuMarker(null); }}
+              onEditFavorite={() => editFavorite(positionFavorite!)}
+              onSaveFavorite={() => saveSelection({
+                name: 'Map point', category: 'Pinned location', coordinates: positionInformation.coordinates,
+                source: 'map', address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
+              })}
+              onRemoveFavorite={() => setFavorites((items) => items.filter((item) => item.id !== positionFavorite?.id))}
+              onShare={() => shareSelection({
+                type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
+              }, 'Map position')}
+              onDirections={(selection) => {
+                openRoute();
+                setRouteEndpoint('destination', selection);
                 setPositionInformation(null);
                 setContextMenuMarker(null);
-              }} />
-              <button className="location-info-close" type="button" aria-label="Close position information" onClick={() => {
-                setPositionInformation(null);
-                setContextMenuMarker(null);
-              }}><X aria-hidden="true" /></button>
-              <div className="position-information-heading">
-                <span className="location-info-icon" aria-hidden="true"><Mountain size={20} /></span>
-                <div><span className="location-info-category">Map point</span><h2 id="position-information-title">Position information</h2></div>
-              </div>
-              <InfoActionRow actions={[
-                positionFavorite
-                  ? { label: 'Edit favourite', icon: Pencil, iconOnly: true, onClick: () => editFavorite(positionFavorite) }
-                  : { label: 'Save', icon: Star, disabled: positionInformation.address.status === 'loading', onClick: () => saveSelection({
-                      name: 'Map point',
-                      category: 'Pinned location',
-                      coordinates: positionInformation.coordinates,
-                      source: 'map',
-                      address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
-                    }) },
-                ...(positionFavorite ? [{ label: 'Remove favourite', icon: Trash2, iconOnly: true, onClick: () => setFavorites((items) => items.filter((item) => item.id !== positionFavorite.id)) }] : []),
-                { label: 'Share', icon: Share2, onClick: () => shareSelection({
-                  type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
-                }, 'Map position') },
-                { label: 'Directions', icon: Navigation, tone: 'primary', onClick: () => {
-                  const selection: LocationSelection = {
-                    name: defaultPositionName(
-                      positionInformation.coordinates,
-                      positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
-                    ),
-                    category: 'Pinned location',
-                    coordinates: positionInformation.coordinates,
-                    source: 'map',
-                    address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
-                  };
-                  openRoute();
-                  setRouteEndpoint('destination', selection);
-                  setPositionInformation(null);
-                  setContextMenuMarker(null);
-                }},
-              ]} />
-              <div className="position-information-content">
-                <div className="position-information-field">
-                  <strong>Address</strong>
-                  {positionInformation.address.status === 'loading' && <span className="position-information-muted" aria-live="polite">Finding street address...</span>}
-                  {positionInformation.address.status === 'available' && <span>{positionInformation.address.address}</span>}
-                  {positionInformation.address.status === 'unavailable' && <span className="position-information-muted">No street address found</span>}
-                </div>
-                <div className="position-information-field">
-                  <strong>Latitude, longitude</strong>
-                  <span>{formatCoordinates(positionInformation.coordinates)}</span>
-                </div>
-                {hasDisplayableElevation(positionInformation.elevation, is3dMode) && (<>
-                  <div className="position-information-field">
-                    <strong>Approximate terrain elevation</strong>
-                    <span>{formatElevation(positionInformation.elevation.metres)}</span>
-                  </div>
-                  <small>Ground surface from the configured terrain DEM.</small>
-                </>)}
-              </div>
-            </aside>
+              }}
+            />
           )}
           {measurement && (
             <aside className="measurement-panel" aria-label="Distance measurement">
@@ -3467,13 +3112,12 @@ export function MapView() {
                 setSelectedTransitStop((stop) => stop ? { ...stop, favoriteId: undefined } : stop);
               } : undefined}
               onClose={() => {
-                const routeVehicleRestore = routeVehicleRestoreRef.current;
+                const routeVehicleRestore = takeRouteVehicleRestore();
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);
                 setVehicleFollowAvailable(false);
                 transitStopsLayerRef.current?.clearSelection();
                 setSelectedTransitStop(null);
-                routeVehicleRestoreRef.current = null;
                 if (routeVehicleRestore && routeOpen && routeMode === 'transit' && routeResult === routeVehicleRestore.result) {
                   plannedVehicleTripRef.current = null;
                   showTransitLegVehicle(routeVehicleRestore.result);
@@ -3486,114 +3130,59 @@ export function MapView() {
             /></Suspense>
           )}
           {routeResult && routeOpen && (
-            <div className={`map-camera-actions${selectedLocation || selectedTransitStop || positionInformation ? ' info-panel-open' : ''}`} aria-label="Map camera controls">
-              {routeMode === 'transit' && vehicleFollowAvailable && (
-                <button
-                  className="map-floating-action"
-                  type="button"
-                  aria-pressed={vehicleFollowing}
-                  onClick={vehicleFollowing ? pauseVehicleFollow : resumeVehicleFollow}
-                >
-                  {vehicleFollowing
-                    ? `Following ${vehiclePositionStatus === 'live' ? 'live' : 'estimated'} vehicle`
-                    : `Follow ${vehiclePositionStatus === 'live' ? 'live' : 'estimated'} vehicle`}
-                </button>
-              )}
-              <button className="map-floating-action" type="button" onClick={() => {
-                pauseVehicleFollow();
-                fitRouteNow(routeResult);
-              }}>
-                Fit route
-              </button>
-            </div>
+            <MapCameraActions
+              routeMode={routeMode}
+              infoPanelOpen={Boolean(selectedLocation || selectedTransitStop || positionInformation)}
+              vehicleFollowAvailable={vehicleFollowAvailable}
+              vehicleFollowing={vehicleFollowing}
+              vehiclePositionStatus={vehiclePositionStatus}
+              onPauseVehicleFollow={pauseVehicleFollow}
+              onResumeVehicleFollow={resumeVehicleFollow}
+              onFitRoute={() => fitRouteNow(routeResult)}
+            />
           )}
           {selectedLocation && !selectedTransitStop && (
-            <aside className={`location-info-panel mobile-bottom-sheet${locationSheet.dragging ? ' is-dragging' : ''}`} style={locationSheet.style} data-snap={locationSheet.snap} aria-label="Location information">
-              <MobileSheetHandle
-                {...locationSheet}
-                closeLabel="Close location information"
-                onClose={() => {
-                  locationDetailsAbortRef.current?.abort();
-                  setLocationDetailsLoading(false);
-                  setSelectedLocation(null);
-                  (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-                    type: 'FeatureCollection', features: [],
-                  });
-                }}
-              />
-              <div className="location-info-header">
-                <div
-                  className="location-info-icon"
-                  aria-hidden="true"
-                  style={{ backgroundColor: LOCATION_ICON_COLORS[selectedIconKey] ?? '#64748b' }}
-                >
-                  <SelectedLocationIcon size={20} strokeWidth={2.4} />
-                </div>
-                <div>
-                  <span className="location-info-category">{selectedLocation.category}</span>
-                  <h2>{selectedLocation.name}</h2>
-                  {selectedLocation.address && <p>{selectedLocation.address}</p>}
-                </div>
-              </div>
-              <div className="location-info-content" tabIndex={0}>
-                {locationDetailsLoading && <p className="location-info-loading">Loading OpenStreetMap details…</p>}
-                {(selectedLocation.openingHours || selectedLocation.phone || selectedLocation.email || selectedLocation.website) && (
-                  <div className="location-info-details">
-                    {selectedLocation.openingHours && <div><strong>Hours</strong><span>{selectedLocation.openingHours}</span></div>}
-                    {selectedLocation.phone && <div><strong>Phone</strong><a href={`tel:${selectedLocation.phone}`}>{selectedLocation.phone}</a></div>}
-                    {selectedLocation.email && <div><strong>Email</strong><a href={`mailto:${selectedLocation.email}`}>{selectedLocation.email}</a></div>}
-                    {selectedLocation.website && <div><strong>Web</strong><a href={selectedLocation.website} target="_blank" rel="noreferrer">Visit website</a></div>}
-                  </div>
-                )}
-                {!locationDetailsLoading && !selectedLocation.openingHours && !selectedLocation.phone && !selectedLocation.email && !selectedLocation.website && (
-                  <p className="location-info-empty">No opening hours or contact details are available in the current map data.</p>
-                )}
-                <span className="location-info-source">
-                  {selectedLocation.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
-                </span>
-                <InfoActionRow actions={[
-                ...(() => {
-                  const favorite = favorites.find((item) => item.id === selectedLocation.favoriteId
-                    || item.id === selectedLocation.osmId
-                    || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
-                  return favorite
-                    ? [{ label: 'Edit favourite', icon: Pencil, onClick: () => editFavorite(favorite), iconOnly: true }, { label: 'Remove favourite', icon: Trash2, onClick: () => setFavorites((items) => items.filter((item) => item.id !== favorite.id)), iconOnly: true }]
-                    : [{ label: 'Save', icon: Star, onClick: () => saveSelection(selectedLocation, selectedLocation.osmId ? 'osm' : undefined, selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined) }];
-                })(), { label: 'Share', icon: Share2, onClick: () => shareSelection({
-                  type: selectedLocation.osmId ? 'poi' : 'position', coordinates: selectedLocation.coordinates,
-                  zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
-                  id: selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
-                  provider: selectedLocation.osmId ? 'osm' : undefined, name: selectedLocation.name,
-                }, selectedLocation.name) }, { label: 'Directions', icon: Navigation, tone: 'primary', onClick: () => {
-                  openRoute();
-                  setRouteEndpoint('destination', selectedLocation);
-                }}
-                ]} />
-                <a
-                  className="location-info-attribution"
-                  href="https://nominatim.openstreetmap.org/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  © OpenStreetMap contributors · Nominatim
-                </a>
-              </div>
-              <button
-                className="location-info-close"
-                type="button"
-                aria-label="Close location information"
-                onClick={() => {
-                  locationDetailsAbortRef.current?.abort();
-                  setLocationDetailsLoading(false);
-                  setSelectedLocation(null);
-                  (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-                    type: 'FeatureCollection', features: [],
-                  });
-                }}
-              >
-                <X aria-hidden="true" />
-              </button>
-            </aside>
+            <LocationInformationPanel
+              selection={selectedLocation}
+              sheet={locationSheet}
+              detailsLoading={locationDetailsLoading}
+              icon={SelectedLocationIcon}
+              iconColor={LOCATION_ICON_COLORS[selectedIconKey] ?? '#64748b'}
+              favorite={favorites.find((item) => item.id === selectedLocation.favoriteId
+                || item.id === selectedLocation.osmId
+                || item.coordinates.join(',') === selectedLocation.coordinates.join(','))}
+              onClose={() => {
+                locationDetailsAbortRef.current?.abort();
+                setLocationDetailsLoading(false);
+                closeLocationInformation();
+                (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+                  type: 'FeatureCollection', features: [],
+                });
+              }}
+              onSaveFavorite={() => saveSelection(selectedLocation, selectedLocation.osmId ? 'osm' : undefined, selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined)}
+              onEditFavorite={() => {
+                const favorite = favorites.find((item) => item.id === selectedLocation.favoriteId
+                  || item.id === selectedLocation.osmId
+                  || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
+                if (favorite) editFavorite(favorite);
+              }}
+              onRemoveFavorite={() => {
+                const favorite = favorites.find((item) => item.id === selectedLocation.favoriteId
+                  || item.id === selectedLocation.osmId
+                  || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
+                if (favorite) setFavorites((items) => items.filter((item) => item.id !== favorite.id));
+              }}
+              onShare={() => shareSelection({
+                type: selectedLocation.osmId ? 'poi' : 'position', coordinates: selectedLocation.coordinates,
+                zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
+                id: selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
+                provider: selectedLocation.osmId ? 'osm' : undefined, name: selectedLocation.name,
+              }, selectedLocation.name)}
+              onDirections={() => {
+                openRoute();
+                setRouteEndpoint('destination', selectedLocation);
+              }}
+            />
           )}
           {routePicking && (
             <div className="route-selection-banner" role="status">
@@ -3619,157 +3208,39 @@ export function MapView() {
                 <button className="route-panel-close" type="button" aria-label="Close route planner" onClick={cancelRoute}><X aria-hidden="true" /></button>
               </div>
               <div className="route-panel-body">
-              <div className="route-planner-controls">
-              <div className="route-endpoints">
-                {(['origin', 'destination'] as const).map((kind) => {
-                  const selection = kind === 'origin' ? routeOriginSelection : routeDestinationSelection;
-                  const label = kind === 'origin' ? 'Starting point' : 'Destination';
-                  return (
-                    <div className="route-endpoint-group" key={kind}>
-                      <div
-                        className={`route-search-field${routeSearchTarget === kind ? ' active' : ''}`}
-                        ref={(element) => { routeSearchAnchorRefs.current[kind] = element; }}
-                      >
-                        <MapPin aria-hidden="true" />
-                        <input
-                          aria-label={`Search ${label.toLowerCase()}`}
-                          aria-controls={`route-${kind}-search-results`}
-                          aria-expanded={routeSearchTarget === kind}
-                          placeholder={`Search ${label.toLowerCase()}`}
-                          value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
-                          onFocus={() => beginRouteSearch(kind)}
-                          onChange={(event) => {
-                            setRouteSearchTarget(kind);
-                            setSearchQuery(event.target.value);
-                            setSearchOpen(false);
-                          }}
-                        />
-                        {(routeSearchTarget === kind ? searchQuery : selection?.name) && (
-                          <button
-                            type="button"
-                            className="route-field-clear"
-                            aria-label={`Clear ${label.toLowerCase()}`}
-                            title={`Clear ${label.toLowerCase()}`}
-                            onClick={() => {
-                              if (kind === 'origin') {
-                                routeOriginRef.current = null;
-                                setRouteOriginSelection(null);
-                              } else {
-                                routeDestinationRef.current = null;
-                                setRouteDestinationSelection(null);
-                              }
-                              routeAbortRef.current?.abort();
-                              setRouteLoading(false);
-                              setRouteResult(null);
-                              setTransitRouteOptions([]);
-                              setRouteError(null);
-                              setRouteGeometry(null);
-                              setSearchQuery('');
-                              setSearchResults([]);
-                              setSearchError(null);
-                              setRouteSearchTarget(kind);
-                            }}
-                          >
-                            <X aria-hidden="true" />
-                          </button>
-                        )}
-                        <button type="button" className="route-map-button" onClick={() => pickRouteEndpoint(kind)}>
-                          Map
-                        </button>
-                      </div>
-                      {routeSearchTarget === kind && createPortal(
-                        <div
-                          className="route-search-results route-search-results-floating"
-                          id={`route-${kind}-search-results`}
-                          ref={routeSearchResultsRef}
-                          role="listbox"
-                          aria-label={`Search ${label.toLowerCase()} results`}
-                        >
-                          <button
-                            className="route-search-result route-search-current-location"
-                            type="button"
-                            onClick={() => selectYourLocation(kind)}
-                          >
-                            <strong>Your location</strong>
-                            <span>{userLocationRef.current ? 'Use current GPS position' : 'Request location access'}</span>
-                          </button>
-                          {searchLoading && <div className="route-search-message">Searching…</div>}
-                          {!searchLoading && searchError && <div className="route-search-message">{searchError}</div>}
-                          {!searchLoading && !searchError && searchQuery.trim().length >= 2 && displayedSearchResults.length === 0 && <div className="route-search-message">No places found</div>}
-                          {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
-                            const { primary, secondary } = photonResultLabel(feature);
-                            return (
-                              <button
-                                className="route-search-result"
-                                key={`${feature.geometry.coordinates.join(':')}-${index}`}
-                                type="button"
-                                onClick={() => selectSearchResult(feature)}
-                              >
-                                <strong>{primary}</strong>
-                                {secondary && <span>{secondary}</span>}
-                              </button>
-                            );
-                          })}
-                        </div>,
-                        document.body,
-                      )}
-                    </div>
-                  );
-                })}
-                <button
-                  type="button"
-                  className="route-endpoint-swap"
-                  aria-label="Swap starting point and destination"
-                  title="Swap start and destination"
-                  onClick={swapRouteEndpoints}
-                  disabled={!routeOriginSelection && !routeDestinationSelection}
-                >
-                  <ArrowRightLeft aria-hidden="true" />
-                </button>
-              </div>
-              <div className="route-mode-row">
-                <div className="route-mode-tabs" role="tablist" aria-label="Travel mode">
-                  {([['pedestrian', 'Walk'], ['bicycle', 'Cycle'], ['transit', 'Transit'], ['auto', 'Drive']] as const).map(([mode, label]) => (
-                  <button key={mode} role="tab" aria-selected={routeMode === mode} type="button" className={routeMode === mode ? 'active' : ''} onClick={() => setRouteMode(mode)}>{label}</button>
-                  ))}
-                </div>
-                {routeMode === 'transit' && (
-                  <button
-                    className={`transit-time-toggle${transitTimeControlsOpen ? ' active' : ''}`}
-                    type="button"
-                    aria-label="Show transit time options"
-                    aria-pressed={transitTimeControlsOpen}
-                    onClick={() => setTransitTimeControlsOpen((open) => !open)}
-                  >
-                    <Clock3 aria-hidden="true" />
-                  </button>
-                )}
-              </div>
-              {routeMode === 'transit' && transitTimeControlsOpen && (
-                <div className="transit-time-controls">
-                  <div className="transit-time-tabs" role="tablist" aria-label="Transit time preference">
-                    {([['depart', 'Depart at'], ['arrive', 'Arrive by']] as const).map(([mode, label]) => (
-                      <button key={mode} role="tab" aria-selected={transitTimeMode === mode} type="button" className={transitTimeMode === mode ? 'active' : ''} onClick={() => setTransitTimeMode(mode)}>{label}</button>
-                    ))}
-                  </div>
-                  <input
-                    aria-label={transitTimeMode === 'depart' ? 'Depart at date and time' : 'Arrive by date and time'}
-                    type="datetime-local"
-                    value={transitDateTime}
-                    onChange={(event) => setTransitDateTime(event.target.value)}
-                  />
-                </div>
-              )}
-              {routeLoading && <p className="route-panel-message">Calculating route…</p>}
-              {routeError && <p className="route-panel-error">{routeError}</p>}
-              {routeMode === 'transit' && !routeLoading && transitRouteOptions.length > 0 && (
-                <TransitRouteOptions
-                  options={transitRouteOptions}
-                  selectedIndex={selectedTransitRouteIndex}
-                  onSelect={selectTransitRoute}
-                />
-              )}
-              </div>
+              <RoutePlannerControls
+                route={{
+                  routeMode, setRouteMode, routeOpen, setRouteOpen, routePicking, setRoutePicking,
+                  routeSearchTarget, setRouteSearchTarget, routeContextMenu, setRouteContextMenu,
+                  routeOriginSelection, setRouteOriginSelection, routeDestinationSelection, setRouteDestinationSelection,
+                  routeLoading, setRouteLoading, routeError, setRouteError, routeResult, setRouteResult,
+                  transitRouteOptions, setTransitRouteOptions, selectedTransitRouteIndex, setSelectedTransitRouteIndex,
+                  transitDetailsOpen, setTransitDetailsOpen, transitTimeMode, setTransitTimeMode,
+                  transitDateTime, setTransitDateTime, transitTimeControlsOpen, setTransitTimeControlsOpen,
+                  routeSheet, routeSheetCollapsed, routeSheetSnapBeforeDetailsRef, journeyBackButtonRef,
+                  journeyDetailsToggleRef, routeOriginRef, routeDestinationRef, routePickingRef, routeAbortRef,
+                  routeCameraRequestRef, setRouteSheetCollapsed, openTransitDetails, closeTransitDetails,
+                }}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                searchLoading={searchLoading}
+                searchError={searchError}
+                displayedSearchResults={displayedSearchResults}
+                favoriteFeatures={favoriteFeatures}
+                userLocationRef={userLocationRef}
+                routeSearchAnchorRefs={routeSearchAnchorRefs}
+                routeSearchResultsRef={routeSearchResultsRef}
+                setSearchOpen={setSearchOpen}
+                setSearchResults={setSearchResults}
+                setSearchError={setSearchError}
+                beginRouteSearch={beginRouteSearch}
+                pickRouteEndpoint={pickRouteEndpoint}
+                selectYourLocation={selectYourLocation}
+                selectSearchResult={selectSearchResult}
+                selectTransitRoute={selectTransitRoute}
+                swapRouteEndpoints={swapRouteEndpoints}
+                photonResultLabel={photonResultLabel}
+              />
               {routeResult && !routeLoading && (
                 <>
                   {routeResult.provider && (
