@@ -293,7 +293,8 @@ export const GLOBAL_TRANSIT_LINE_LAYER_IDS = [
   'global-transit-line-labels',
 ];
 
-const NASINNEULA_BUILDING_OUTLINE_ID = 680725378;
+// Planetiler encodes OSM way feature IDs as `osm_id * 10 + 2`.
+const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
 
 // OpenMapTiles only marks an overall building outline as hide_3d when it is
 // assigned the outline role in a type=building relation. Näsinneula's broad

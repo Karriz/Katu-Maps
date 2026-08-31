@@ -46,7 +46,7 @@ describe('global map overlay styles', () => {
 
     affectedLayerIds.forEach((layerId) => {
       const filter = (layersById.get(layerId) as { filter?: unknown } | undefined)?.filter;
-      expect(JSON.stringify(filter), layerId).toContain('680725378');
+      expect(JSON.stringify(filter), layerId).toContain('6807253782');
     });
 
     const flatFootprint = layersById.get('global-building-footprints-2d') as { filter?: unknown } | undefined;
