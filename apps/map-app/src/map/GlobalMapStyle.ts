@@ -293,6 +293,18 @@ export const GLOBAL_TRANSIT_LINE_LAYER_IDS = [
   'global-transit-line-labels',
 ];
 
+const NASINNEULA_BUILDING_OUTLINE_ID = 680725378;
+
+// OpenMapTiles only marks an overall building outline as hide_3d when it is
+// assigned the outline role in a type=building relation. Näsinneula's broad
+// outline is not related to its detailed 3D parts, so suppress that one outline
+// while retaining its flat footprint and the separately mapped tower parts.
+const GLOBAL_BUILDING_3D_FILTER: ExpressionSpecification = [
+  'all',
+  ['!', ['has', 'hide_3d']],
+  ['!=', ['id'], NASINNEULA_BUILDING_OUTLINE_ID],
+] as ExpressionSpecification;
+
 const GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES = 5.5;
 const GLOBAL_MAP_SUN_COLOR = MAP_COLORS.sun;
 
@@ -1587,7 +1599,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'building',
       minzoom: 13,
-      filter: ['!', ['==', ['get', 'hide_3d'], true]],
+      filter: GLOBAL_BUILDING_3D_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': CARTOON_SHADOW_COLOR,
@@ -1622,7 +1634,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 13,
       filter: [
         'all',
-        ['!', ['==', ['get', 'hide_3d'], true]],
+        GLOBAL_BUILDING_3D_FILTER,
         ['<=', GLOBAL_BUILDING_BASE, 0.5],
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -1655,7 +1667,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 13,
       filter: [
         'all',
-        ['!', ['==', ['get', 'hide_3d'], true]],
+        GLOBAL_BUILDING_3D_FILTER,
         ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
       ],
       paint: {
@@ -1680,7 +1692,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'building',
       minzoom: 13,
-      filter: ['!', ['==', ['get', 'hide_3d'], true]],
+      filter: GLOBAL_BUILDING_3D_FILTER,
       paint: {
         'fill-extrusion-color': GLOBAL_BUILDING_COLOR,
         'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,

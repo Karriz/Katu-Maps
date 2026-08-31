@@ -35,6 +35,24 @@ describe('global map overlay styles', () => {
     });
   });
 
+  it('keeps the unsupported Näsinneula outline out of every 3D building layer', () => {
+    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
+    const affectedLayerIds = [
+      'global-building-shadow',
+      'global-building-contact-shadow',
+      'global-building-ground-storeys',
+      'global-buildings',
+    ];
+
+    affectedLayerIds.forEach((layerId) => {
+      const filter = (layersById.get(layerId) as { filter?: unknown } | undefined)?.filter;
+      expect(JSON.stringify(filter), layerId).toContain('680725378');
+    });
+
+    const flatFootprint = layersById.get('global-building-footprints-2d') as { filter?: unknown } | undefined;
+    expect(JSON.stringify(flatFootprint?.filter)).not.toContain('680725378');
+  });
+
   it('uses the polygon water color for line waterways', () => {
     const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
     const waterwayPaint = layersById.get('global-waterway')?.paint as Record<string, unknown> | undefined;
