@@ -80,7 +80,7 @@ import { availableGpsEndpoint, isMeaningfullyBetterLocation, locationZoomForAccu
 import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
-import { installBackgroundReload } from '../lib/BackgroundReload';
+import { installForegroundRecovery } from '../lib/ForegroundRecovery';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
@@ -2048,7 +2048,7 @@ export function MapView() {
         }
       }
     });
-    const handleMoveEnd = () => {
+    const persistCamera = () => {
       try {
         const center = map.getCenter();
         savePersistedMapView({
@@ -2058,6 +2058,9 @@ export function MapView() {
           pitch: map.getPitch(),
         });
       } catch { /* local storage can be disabled */ }
+    };
+    const handleMoveEnd = () => {
+      persistCamera();
       updateGlobalRoadWidths();
       scheduleTreeUpdate();
       // Vehicle follow recenters the map several times per second. Those
@@ -2065,7 +2068,14 @@ export function MapView() {
       if (!vehicleFollowEnabledRef.current) scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
     };
-    const removeBackgroundReload = installBackgroundReload(document, () => window.location.reload());
+    const removeForegroundRecovery = installForegroundRecovery({
+      document,
+      window,
+      canvas: map.getCanvas(),
+      map,
+      beforeReload: persistCamera,
+      reload: () => window.location.reload(),
+    });
     const handleCameraMove = () => {
       const zoom = map.getZoom();
       const pitch = map.getPitch();
@@ -2113,7 +2123,7 @@ export function MapView() {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       map.off('move', handleCameraMove);
-      removeBackgroundReload();
+      removeForegroundRecovery();
       map.off('moveend', handleMoveEnd);
       map.off('zoomstart', handleMapGestureStart);
       map.off('dragstart', handleMapGestureStart);
