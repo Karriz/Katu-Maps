@@ -36,7 +36,6 @@ import {
   Star,
   X,
   Clock3,
-  Copy,
   Droplets,
   Mountain,
   Navigation,
@@ -73,6 +72,7 @@ import {
 const TransitJourneyDetails = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyDetails })));
 const TransitJourneyHeader = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyHeader })));
 import { MapContextMenu } from './MapContextMenu';
+import { InfoActionRow } from '../components/InfoActionRow';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
 import {
   fetchDigitransitRoute,
@@ -93,7 +93,7 @@ import { installForegroundRecovery } from '../lib/ForegroundRecovery';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { useTheme } from '../theme';
-import { favoriteMapFeatures, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
+import { favoriteMapFeatures, findTransitFavorite, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
@@ -247,6 +247,7 @@ type PositionInformationState = {
 };
 
 type PendingFavorite = {
+  editingFavoriteId?: string;
   selection: LocationSelection;
   provider?: string;
   providerId?: string;
@@ -669,6 +670,9 @@ export function MapView() {
   const latestVehiclePoseRef = useRef<TransitVehiclePose | null>(null);
   const [vehicleFollowing, setVehicleFollowing] = useState(false);
   const [vehicleFollowAvailable, setVehicleFollowAvailable] = useState(false);
+  const vehicleFollowingRef = useRef(vehicleFollowing);
+  vehicleFollowingRef.current = vehicleFollowing;
+  const routeVehicleRestoreRef = useRef<{ result: RouteResult; following: boolean } | null>(null);
   const [vehiclePositionStatus, setVehiclePositionStatus] = useState<TransitPositionStatus>('unavailable');
   const userLocationRef = useRef<[number, number] | null>(null);
   const userLocationAccuracyRef = useRef(Number.POSITIVE_INFINITY);
@@ -718,6 +722,10 @@ export function MapView() {
     journeyDetailsToggleRef, routeOriginRef, routeDestinationRef, routePickingRef, routeAbortRef,
     routeCameraRequestRef, setRouteSheetCollapsed, openTransitDetails, closeTransitDetails,
   } = useRoutePlanning();
+  const routeVehicleViewRef = useRef(Boolean(routeOpen && routeResult));
+  routeVehicleViewRef.current = Boolean(routeOpen && routeResult);
+  const routeResultRef = useRef(routeResult);
+  routeResultRef.current = routeResult;
   const locationSheet = useMobileBottomSheet('half');
   const positionSheet = useMobileBottomSheet('half');
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
@@ -740,6 +748,22 @@ export function MapView() {
       type: 'FeatureCollection', features: [],
     });
   }, []);
+  const openPositionInformation = useCallback((information: PositionInformationState) => {
+    prepareInfoPanelOpen();
+    if (!routeVehicleViewRef.current) {
+      vehicleFollowEnabledRef.current = false;
+      setVehicleFollowing(false);
+      setVehicleFollowAvailable(false);
+    }
+    if (routeVehicleViewRef.current) {
+      transitStopsLayerRef.current?.clearStopSelection();
+    } else {
+      transitStopsLayerRef.current?.clearSelection();
+    }
+    setSelectedTransitStop(null);
+    clearLocationSelection();
+    setPositionInformation(information);
+  }, [clearLocationSelection]);
   useEffect(() => {
     if (!routeSearchTarget) return;
 
@@ -1000,8 +1024,8 @@ export function MapView() {
     const { selection, provider, providerId, kind } = pendingFavorite;
     const name = pendingFavorite.name.trim();
     if (!name) return;
-    setFavorites((current) => upsertFavorite(current, {
-      id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+    const updatedFavorite: Favorite = {
+      id: pendingFavorite.editingFavoriteId ?? globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
       name,
       coordinates: selection.coordinates,
       category: selection.category,
@@ -1021,16 +1045,45 @@ export function MapView() {
       website: selection.website,
       kind,
       createdAt: Date.now(),
-    }));
+    };
+    setFavorites((current) => pendingFavorite.editingFavoriteId
+      ? current.map((item) => item.id === pendingFavorite.editingFavoriteId ? { ...item, name } : item)
+      : upsertFavorite(current, updatedFavorite));
     favoriteAddressAbortRef.current?.abort();
     setPendingFavorite(null);
     setContextMenuMarker(null);
   };
 
   const editFavorite = (favorite: Favorite) => {
-    const name = window.prompt('Rename favourite', favorite.name)?.trim();
-    if (name) setFavorites((current) => current.map((item) => item.id === favorite.id ? { ...item, name } : item));
+    setPendingFavorite({
+      editingFavoriteId: favorite.id,
+      selection: {
+        name: favorite.name,
+        category: favorite.category,
+        address: favorite.address,
+        coordinates: favorite.coordinates,
+        source: 'map',
+        transitStopId: favorite.transitStopId,
+        transitStopProvider: favorite.transitProvider === 'digitransit' || favorite.transitProvider === 'transitous'
+          ? favorite.transitProvider
+          : undefined,
+        transitMode: favorite.transitMode,
+        osmType: favorite.osmType,
+        osmId: favorite.osmId,
+        iconId: favorite.iconId,
+      },
+      provider: favorite.provider,
+      providerId: favorite.providerId,
+      kind: favorite.kind,
+      name: favorite.name,
+      nameWasEdited: true,
+      addressLoading: false,
+    });
   };
+
+  const selectedTransitFavorite = selectedTransitStop
+    ? findTransitFavorite(favorites, selectedTransitStop.stopId, selectedTransitStop.provider)
+    : undefined;
 
   const navigationView = measurement ? 'measurement'
     : transitDepartureDetailOpen ? 'transit-trip'
@@ -1482,7 +1535,6 @@ export function MapView() {
   };
 
   const beginRouteSearch = (kind: 'origin' | 'destination') => {
-    routePickingRef.current = kind;
     setRoutePicking(null);
     setRouteSearchTarget(kind);
     setSearchQuery('');
@@ -1490,6 +1542,35 @@ export function MapView() {
     setSearchError(null);
     setSearchOpen(false);
   };
+
+  useEffect(() => {
+    const closeAutocomplete = () => {
+      setRouteSearchTarget(null);
+      setSearchQuery('');
+      setSearchResults([]);
+      routePickingRef.current = null;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (routeSearchTarget) closeAutocomplete();
+      if (searchOpen) setSearchOpen(false);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (routeSearchTarget && !target?.closest('.route-search-field, .route-search-results-floating')) {
+        closeAutocomplete();
+      }
+      if (searchOpen && !target?.closest('.location-search-form, .location-search-results')) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [routeSearchTarget, searchOpen]);
 
   const cancelRoute = () => {
     routeAbortRef.current?.abort();
@@ -1523,6 +1604,40 @@ export function MapView() {
     setSearchOpen(false);
     setRouteContextMenu(null);
   };
+
+  function prepareInfoPanelOpen() {
+    setPositionInformation(null);
+    setContextMenuMarker(null);
+    if (window.innerWidth <= 760) cancelRoute();
+  }
+
+  function preserveRouteVehicleForInfoPanel() {
+    return window.innerWidth > 760 && routeVehicleViewRef.current;
+  }
+
+  function selectTransitStopForInfoPanel(stop: TransitStopSelection) {
+    setPositionInformation(null);
+    setContextMenuMarker(null);
+    if (preserveRouteVehicleForInfoPanel()) {
+      if (routeResultRef.current) {
+        routeVehicleRestoreRef.current = {
+          result: routeResultRef.current,
+          following: vehicleFollowingRef.current,
+        };
+      }
+      transitStopsLayerRef.current?.selectSearchStopPreservingTrip(stop);
+    } else {
+      transitStopsLayerRef.current?.selectSearchStop(stop);
+    }
+  }
+
+  function clearTransitInfoSelection() {
+    if (preserveRouteVehicleForInfoPanel()) {
+      transitStopsLayerRef.current?.clearStopSelection();
+    } else {
+      transitStopsLayerRef.current?.clearSelection();
+    }
+  }
 
   function stopMeasurement() {
     measurementControllerRef.current?.dispose();
@@ -1740,7 +1855,7 @@ export function MapView() {
       const favorite = favoriteId ? favoritesRef.current.find((item) => item.id === favoriteId) : undefined;
       const favoriteEntityType = favorite ? resolvedFavoriteEntityType(favorite) : undefined;
       if (favorite && favoriteEntityType === 'position') {
-        setPositionInformation(positionInformationState(favorite.coordinates, favorite.address, favorite.id));
+        openPositionInformation(positionInformationState(favorite.coordinates, favorite.address, favorite.id));
         return;
       }
       const selection = locationSelectionFromFeature(feature);
@@ -1761,12 +1876,14 @@ export function MapView() {
           provider: selection.transitStopProvider ?? 'transitous',
           favoriteId: favorite?.id,
         };
-        transitStopsLayerRef.current?.selectSearchStop(stop);
+        prepareInfoPanelOpen();
+        selectTransitStopForInfoPanel(stop);
         setSelectedTransitStop(stop);
         clearLocationSelection();
         return;
       }
-      transitStopsLayerRef.current?.clearSelection();
+      prepareInfoPanelOpen();
+      clearTransitInfoSelection();
       setSelectedTransitStop(null);
       setSelectedLocation(selection);
       void enrichLocationDetails(selection);
@@ -1793,8 +1910,8 @@ export function MapView() {
       const container = map.getContainer();
       setContextMenuMarker(coordinates);
       setRouteContextMenu({
-        x: Math.min(Math.max(point.x, 12), container.clientWidth - 220),
-        y: Math.min(Math.max(point.y, 12), container.clientHeight - 130),
+        x: Math.min(Math.max(point.x, 12), container.clientWidth - 12),
+        y: Math.min(Math.max(point.y, 12), container.clientHeight - 12),
         coordinates,
       });
     };
@@ -2084,8 +2201,16 @@ export function MapView() {
       map.on('mouseenter', 'global-hiking-pois', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'global-hiking-pois', () => { map.getCanvas().style.cursor = ''; });
       void transitStopsLayer.install(map, (stop) => {
-        setVehicleFollowAvailable(false);
+        if (!preserveRouteVehicleForInfoPanel()) setVehicleFollowAvailable(false);
+        setPositionInformation(null);
+        setContextMenuMarker(null);
         clearLocationSelection();
+        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
+          routeVehicleRestoreRef.current = {
+            result: routeResultRef.current,
+            following: vehicleFollowingRef.current,
+          };
+        }
         setSelectedTransitStop(stop);
       map.easeTo({
         center: stop.coordinates,
@@ -2093,7 +2218,7 @@ export function MapView() {
         offset: closeRangeCameraOffset(),
         duration: 900,
         });
-      }, () => measurementControllerRef.current !== null).then(() => {
+      }, () => measurementControllerRef.current !== null, preserveRouteVehicleForInfoPanel).then(() => {
         if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
         map.moveLayer(transitVehicleLayer.id, 'transit-estimated-vehicle-label');
         updateTransitStops();
@@ -2113,7 +2238,7 @@ export function MapView() {
         initialDeepLinkRef.current = null;
         const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
         const showPositionFallback = () => {
-          setPositionInformation(positionInformationState(deepLink.coordinates));
+          openPositionInformation(positionInformationState(deepLink.coordinates));
           setContextMenuMarker(deepLink.coordinates);
         };
         if (deepLink.type === 'stop' && deepLink.id && (deepLink.provider === 'digitransit' || deepLink.provider === 'transitous')) {
@@ -2570,7 +2695,7 @@ export function MapView() {
     (document.activeElement as HTMLElement | null)?.blur();
     if (feature.properties.coordinateResult) {
       const coordinates = feature.geometry.coordinates;
-      const routeTarget = routePickingRef.current;
+      const routeTarget = routeSearchTarget;
       if (routeTarget) {
         setRouteEndpoint(routeTarget, {
           name: formatCoordinates(coordinates),
@@ -2591,7 +2716,7 @@ export function MapView() {
       (map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
         type: 'FeatureCollection', features: [],
       });
-      setPositionInformation(positionInformationState(coordinates));
+      openPositionInformation(positionInformationState(coordinates));
       setContextMenuMarker(coordinates);
       setSearchOpen(false);
       setHighlightedSearchResults([]);
@@ -2602,7 +2727,7 @@ export function MapView() {
       : undefined;
     const favoriteEntityType = favorite ? resolvedFavoriteEntityType(favorite) : undefined;
     if (favorite && favoriteEntityType === 'position') {
-      const routeTarget = routePickingRef.current;
+      const routeTarget = routeSearchTarget;
       if (routeTarget) {
         setRouteEndpoint(routeTarget, {
           name: favorite.name,
@@ -2624,7 +2749,7 @@ export function MapView() {
       (map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
         type: 'FeatureCollection', features: [],
       });
-      setPositionInformation(positionInformationState(favorite.coordinates, favorite.address, favorite.id));
+      openPositionInformation(positionInformationState(favorite.coordinates, favorite.address, favorite.id));
       setSearchOpen(false);
       setHighlightedSearchResults([]);
       return;
@@ -2639,7 +2764,7 @@ export function MapView() {
         provider: feature.properties.transitProvider ?? 'transitous',
         favoriteId: favorite?.id,
       };
-      const routeTarget = routePickingRef.current;
+      const routeTarget = routeSearchTarget;
       if (routeTarget) {
         setRouteEndpoint(routeTarget, {
           name: stop.name,
@@ -2654,9 +2779,10 @@ export function MapView() {
         return;
       }
       pendingSearchCameraRef.current = coordinates;
+      prepareInfoPanelOpen();
       setPositionInformation(null);
       setContextMenuMarker(null);
-      transitStopsLayerRef.current?.selectSearchStop(stop);
+      selectTransitStopForInfoPanel(stop);
       setSelectedTransitStop(stop);
       clearLocationSelection();
       setSearchOpen(false);
@@ -2664,7 +2790,7 @@ export function MapView() {
     }
     setPositionInformation(null);
     setContextMenuMarker(null);
-    transitStopsLayerRef.current?.clearSelection();
+      clearTransitInfoSelection();
     setSelectedTransitStop(null);
     const { primary } = photonResultLabel(feature);
     const properties = feature.properties as Record<string, unknown>;
@@ -2694,17 +2820,20 @@ export function MapView() {
       email: favorite.email,
       website: favorite.website,
     });
-    const routeTarget = routePickingRef.current;
+    const routeTarget = routeSearchTarget;
     if (routeTarget) {
-      locationDetailsAbortRef.current?.abort();
-      setLocationDetailsLoading(false);
-      setSelectedLocation(null);
-      (map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-        type: 'FeatureCollection', features: [],
-      });
+      if (window.innerWidth <= 760) {
+        locationDetailsAbortRef.current?.abort();
+        setLocationDetailsLoading(false);
+        setSelectedLocation(null);
+        (map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+          type: 'FeatureCollection', features: [],
+        });
+      }
       setRouteEndpoint(routeTarget, selection);
     } else {
       pendingSearchCameraRef.current = selection.coordinates;
+      prepareInfoPanelOpen();
       setSelectedLocation(selection);
       void enrichLocationDetails(selection);
       const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
@@ -3104,7 +3233,7 @@ export function MapView() {
               position={{ x: routeContextMenu.x, y: routeContextMenu.y }}
               onPositionInformation={() => {
                 const coordinates: [number, number] = [...routeContextMenu.coordinates];
-                setPositionInformation(positionInformationState(coordinates));
+                openPositionInformation(positionInformationState(coordinates));
                 setRouteContextMenu(null);
               }}
               onMeasureDistance={() => startMeasurement([...routeContextMenu.coordinates])}
@@ -3144,8 +3273,21 @@ export function MapView() {
                 <span className="location-info-icon" aria-hidden="true"><Mountain size={20} /></span>
                 <div><span className="location-info-category">Map point</span><h2 id="position-information-title">Position information</h2></div>
               </div>
-              <div className="position-information-primary-actions">
-                <button className="route-start-button" type="button" title="Use this position as the route destination" onClick={() => {
+              <InfoActionRow actions={[
+                positionFavorite
+                  ? { label: 'Edit favourite', icon: Pencil, iconOnly: true, onClick: () => editFavorite(positionFavorite) }
+                  : { label: 'Save', icon: Star, disabled: positionInformation.address.status === 'loading', onClick: () => saveSelection({
+                      name: 'Map point',
+                      category: 'Pinned location',
+                      coordinates: positionInformation.coordinates,
+                      source: 'map',
+                      address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
+                    }) },
+                ...(positionFavorite ? [{ label: 'Remove favourite', icon: Trash2, iconOnly: true, onClick: () => setFavorites((items) => items.filter((item) => item.id !== positionFavorite.id)) }] : []),
+                { label: 'Share', icon: Share2, onClick: () => shareSelection({
+                  type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
+                }, 'Map position') },
+                { label: 'Directions', icon: Navigation, tone: 'primary', onClick: () => {
                   const selection: LocationSelection = {
                     name: defaultPositionName(
                       positionInformation.coordinates,
@@ -3160,26 +3302,8 @@ export function MapView() {
                   setRouteEndpoint('destination', selection);
                   setPositionInformation(null);
                   setContextMenuMarker(null);
-                }}><Navigation size={16} aria-hidden="true" /> Directions</button>
-                {positionFavorite ? (
-                  <button className="route-start-button route-secondary-button" type="button" onClick={() => editFavorite(positionFavorite)}>
-                    <Star size={16} aria-hidden="true" /> Edit favourite
-                  </button>
-                ) : (
-                  <button
-                    className="route-start-button route-secondary-button"
-                    type="button"
-                    disabled={positionInformation.address.status === 'loading'}
-                    onClick={() => saveSelection({
-                      name: 'Map point',
-                      category: 'Pinned location',
-                      coordinates: positionInformation.coordinates,
-                      source: 'map',
-                      address: positionInformation.address.status === 'available' ? positionInformation.address.address : undefined,
-                    })}
-                  ><Star size={16} aria-hidden="true" /> Favourite</button>
-                )}
-              </div>
+                }},
+              ]} />
               <div className="position-information-content">
                 <div className="position-information-field">
                   <strong>Address</strong>
@@ -3191,17 +3315,6 @@ export function MapView() {
                   <strong>Latitude, longitude</strong>
                   <span>{formatCoordinates(positionInformation.coordinates)}</span>
                 </div>
-                <div className="position-information-actions">
-                  <button className="position-copy" type="button" onClick={() => {
-                    void navigator.clipboard.writeText(formatCoordinates(positionInformation.coordinates)).then(
-                      () => showMapToolNotice('Coordinates copied'),
-                      () => showMapToolNotice('Could not copy coordinates'),
-                    );
-                  }}><Copy size={16} aria-hidden="true" /> Copy</button>
-                  <button className="position-copy" type="button" onClick={() => shareSelection({
-                    type: 'position', coordinates: positionInformation.coordinates, zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
-                  }, 'Map position')}><Share2 size={16} aria-hidden="true" /> Share</button>
-                </div>
                 {hasDisplayableElevation(positionInformation.elevation, is3dMode) && (<>
                   <div className="position-information-field">
                     <strong>Approximate terrain elevation</strong>
@@ -3209,12 +3322,6 @@ export function MapView() {
                   </div>
                   <small>Ground surface from the configured terrain DEM.</small>
                 </>)}
-                {positionFavorite && <div className="favorite-actions">
-                  <button type="button" onClick={() => {
-                    setFavorites((items) => items.filter((item) => item.id !== positionFavorite.id));
-                    setPositionInformation(null);
-                  }}>Remove favourite</button>
-                </div>}
               </div>
             </aside>
           )}
@@ -3253,9 +3360,9 @@ export function MapView() {
                 <button className="favorite-menu-close" type="button" aria-label="Close" onClick={closeFavoriteDialog}>
                   <X size={18} aria-hidden="true" />
                 </button>
-                <span className="favorite-menu-eyebrow">Save place</span>
-                <h2 id="favorite-menu-title">Save as favourite</h2>
-                <p>Give this place a useful name and choose how it should appear on the map.</p>
+                <span className="favorite-menu-eyebrow">{pendingFavorite.editingFavoriteId ? 'Edit favourite' : 'Save place'}</span>
+                <h2 id="favorite-menu-title">{pendingFavorite.editingFavoriteId ? 'Edit favourite' : 'Save as favourite'}</h2>
+                <p>{pendingFavorite.editingFavoriteId ? 'Update the name of this saved place.' : 'Give this place a useful name and choose how it should appear on the map.'}</p>
                 <label className="favorite-name-field">
                   <span>Name</span>
                   <input
@@ -3269,7 +3376,7 @@ export function MapView() {
                   />
                   {pendingFavorite.addressLoading && <small aria-live="polite">Looking up the street address...</small>}
                 </label>
-                <fieldset className="favorite-kind-group">
+                {!pendingFavorite.editingFavoriteId && <fieldset className="favorite-kind-group">
                   <legend className="favorite-kind-label">Type</legend>
                   <div className="favorite-kind-options">
                   <button className={pendingFavorite.kind === 'home' ? 'selected' : ''} type="button" aria-pressed={pendingFavorite.kind === 'home'} onClick={() => selectFavoriteKind('home')}>
@@ -3282,11 +3389,11 @@ export function MapView() {
                     <Star aria-hidden="true" /><span><strong>Favourite</strong><small>Standard saved place</small></span>
                   </button>
                   </div>
-                </fieldset>
+                </fieldset>}
                 <div className="favorite-menu-actions">
                   <button type="button" onClick={closeFavoriteDialog}>Cancel</button>
                   <button type="submit" disabled={!pendingFavorite.name.trim() || pendingFavorite.addressLoading}>
-                    {pendingFavorite.addressLoading ? 'Finding address...' : 'Save favourite'}
+                    {pendingFavorite.addressLoading ? 'Finding address...' : pendingFavorite.editingFavoriteId ? 'Save changes' : 'Save favourite'}
                   </button>
                 </div>
               </form>
@@ -3352,27 +3459,34 @@ export function MapView() {
                 transitStopProvider: selectedTransitStop.provider,
                 transitMode: selectedTransitStop.mode,
               }, 'transit', `${selectedTransitStop.provider}:${selectedTransitStop.stopId}`)}
-              onEditFavorite={selectedTransitStop.favoriteId ? () => {
-                const favorite = favorites.find((item) => item.id === selectedTransitStop.favoriteId);
-                if (favorite) editFavorite(favorite);
+              onEditFavorite={selectedTransitFavorite ? () => {
+                editFavorite(selectedTransitFavorite);
               } : undefined}
-              onRemoveFavorite={selectedTransitStop.favoriteId ? () => {
-                setFavorites((items) => items.filter((item) => item.id !== selectedTransitStop.favoriteId));
+              onRemoveFavorite={selectedTransitFavorite ? () => {
+                setFavorites((items) => items.filter((item) => item.id !== selectedTransitFavorite.id));
                 setSelectedTransitStop((stop) => stop ? { ...stop, favoriteId: undefined } : stop);
               } : undefined}
               onClose={() => {
+                const routeVehicleRestore = routeVehicleRestoreRef.current;
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);
                 setVehicleFollowAvailable(false);
                 transitStopsLayerRef.current?.clearSelection();
                 setSelectedTransitStop(null);
+                routeVehicleRestoreRef.current = null;
+                if (routeVehicleRestore && routeOpen && routeMode === 'transit' && routeResult === routeVehicleRestore.result) {
+                  plannedVehicleTripRef.current = null;
+                  showTransitLegVehicle(routeVehicleRestore.result);
+                  vehicleFollowEnabledRef.current = routeVehicleRestore.following;
+                  setVehicleFollowing(routeVehicleRestore.following);
+                }
               }}
               isFollowing={vehicleFollowing}
               positionStatus={vehiclePositionStatus}
             /></Suspense>
           )}
           {routeResult && routeOpen && (
-            <div className="map-camera-actions" aria-label="Map camera controls">
+            <div className={`map-camera-actions${selectedLocation || selectedTransitStop || positionInformation ? ' info-panel-open' : ''}`} aria-label="Map camera controls">
               {routeMode === 'transit' && vehicleFollowAvailable && (
                 <button
                   className="map-floating-action"
@@ -3437,38 +3551,24 @@ export function MapView() {
                 <span className="location-info-source">
                   {selectedLocation.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
                 </span>
-                <div className="panel-primary-actions">
-                {(() => {
+                <InfoActionRow actions={[
+                ...(() => {
                   const favorite = favorites.find((item) => item.id === selectedLocation.favoriteId
                     || item.id === selectedLocation.osmId
                     || item.coordinates.join(',') === selectedLocation.coordinates.join(','));
-                  return favorite ? (
-                    <>
-                      <button className="panel-icon-action" type="button" aria-label="Edit favourite" title="Edit favourite" onClick={() => editFavorite(favorite)}><Pencil aria-hidden="true" /></button>
-                      <button className="panel-icon-action" type="button" aria-label="Remove favourite" title="Remove favourite" onClick={() => setFavorites((items) => items.filter((item) => item.id !== favorite.id))}><Trash2 aria-hidden="true" /></button>
-                    </>
-                  ) : (
-                    <button className="route-start-button route-secondary-button favorite-save-button" type="button" onClick={() => saveSelection(
-                      selectedLocation,
-                      selectedLocation.osmId ? 'osm' : undefined,
-                      selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
-                    )}><Star size={15} aria-hidden="true" /> Save</button>
-                  );
-                })()}
-                <button className="route-start-button route-secondary-button share-button" type="button" onClick={() => shareSelection({
+                  return favorite
+                    ? [{ label: 'Edit favourite', icon: Pencil, onClick: () => editFavorite(favorite), iconOnly: true }, { label: 'Remove favourite', icon: Trash2, onClick: () => setFavorites((items) => items.filter((item) => item.id !== favorite.id)), iconOnly: true }]
+                    : [{ label: 'Save', icon: Star, onClick: () => saveSelection(selectedLocation, selectedLocation.osmId ? 'osm' : undefined, selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined) }];
+                })(), { label: 'Share', icon: Share2, onClick: () => shareSelection({
                   type: selectedLocation.osmId ? 'poi' : 'position', coordinates: selectedLocation.coordinates,
                   zoom: Math.max(mapRef.current?.getZoom() ?? 16, 15),
                   id: selectedLocation.osmId ? `${selectedLocation.osmType ?? ''}${selectedLocation.osmId}` : undefined,
                   provider: selectedLocation.osmId ? 'osm' : undefined, name: selectedLocation.name,
-                }, selectedLocation.name)}><Share2 size={16} aria-hidden="true" /> Share</button>
-                <button className="route-start-button" type="button" onClick={() => {
+                }, selectedLocation.name) }, { label: 'Directions', icon: Navigation, tone: 'primary', onClick: () => {
                   openRoute();
                   setRouteEndpoint('destination', selectedLocation);
-                }}>Directions</button>
-                {routeOpen && <button className="route-start-button route-secondary-button" type="button" onClick={() => setRouteEndpoint('origin', selectedLocation)}>
-                  Start here
-                </button>}
-                </div>
+                }}
+                ]} />
                 <a
                   className="location-info-attribution"
                   href="https://nominatim.openstreetmap.org/"
@@ -3539,7 +3639,6 @@ export function MapView() {
                           value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
                           onFocus={() => beginRouteSearch(kind)}
                           onChange={(event) => {
-                            routePickingRef.current = kind;
                             setRouteSearchTarget(kind);
                             setSearchQuery(event.target.value);
                             setSearchOpen(false);
@@ -3569,7 +3668,6 @@ export function MapView() {
                               setSearchResults([]);
                               setSearchError(null);
                               setRouteSearchTarget(kind);
-                              routePickingRef.current = kind;
                             }}
                           >
                             <X aria-hidden="true" />

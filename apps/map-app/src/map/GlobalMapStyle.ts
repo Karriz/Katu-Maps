@@ -2444,7 +2444,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     if (map.getLayer('global-aerodrome-labels')) map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon');
     if (map.getLayer('location-poi-icons')) map.setPaintProperty('location-poi-icons', 'icon-opacity', 1);
     if (map.getLayer('location-poi-labels')) map.setPaintProperty('location-poi-labels', 'icon-opacity', 1);
-    map.triggerRepaint();
+    refreshMapAfterTheme(map);
     return;
   }
   const dark = true;
@@ -2493,7 +2493,21 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon-dark');
   }
   ['location-poi-icons', 'location-poi-labels'].forEach((id) => set(id, 'icon-opacity', 0.78));
-  map.triggerRepaint();
+  refreshMapAfterTheme(map);
 }
 
 const mapThemePaints = new WeakMap<MapLibreMap, Map<string, Record<string, unknown>>>();
+
+function refreshMapAfterTheme(map: MapLibreMap) {
+  // A camera event also marks MapLibre's source/render state dirty. Re-apply
+  // the current camera values to get that update path without changing what
+  // the user is looking at; this is needed for retained close-zoom buckets.
+  map.jumpTo({
+    center: map.getCenter(),
+    zoom: map.getZoom(),
+    bearing: map.getBearing(),
+    pitch: map.getPitch(),
+    padding: map.getPadding(),
+  });
+  map.redraw();
+}

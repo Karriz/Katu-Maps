@@ -51,6 +51,13 @@ export function favoriteIdentity(favorite: Pick<Favorite, 'coordinates' | 'provi
   return `coordinate:${favorite.coordinates[0].toFixed(5)},${favorite.coordinates[1].toFixed(5)}`;
 }
 
+export function findTransitFavorite(favorites: Favorite[], stopId: string, provider: string) {
+  return favorites.find((favorite) => (
+    (favorite.transitStopId === stopId && favorite.transitProvider === provider)
+    || (favorite.provider === 'transit' && favorite.providerId === `${provider}:${stopId}`)
+  ));
+}
+
 export function upsertFavorite(favorites: Favorite[], favorite: Favorite) {
   const identity = favoriteIdentity(favorite);
   const existing = favorites.find((item) => favoriteIdentity(item) === identity)

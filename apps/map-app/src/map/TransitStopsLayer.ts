@@ -514,6 +514,7 @@ export class TransitStopsLayer {
     map: Map,
     onStopClick: (stop: TransitStopSelection) => void,
     interactionBlocked: () => boolean = () => false,
+    preserveSelectedTrip: () => boolean = () => false,
   ) {
     this.map = map;
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
@@ -760,7 +761,7 @@ export class TransitStopsLayer {
         coordinates,
         provider: properties.provider === 'digitransit' ? 'digitransit' : 'transitous',
       };
-      this.selectStop(selection);
+      this.selectStop(selection, preserveSelectedTrip());
       onStopClick(selection);
     };
     map.on('click', (event) => {
@@ -775,7 +776,7 @@ export class TransitStopsLayer {
     map.on('mouseleave', selectedStopIcon.id, () => { map.getCanvas().style.cursor = ''; });
   }
 
-  private selectStop(stop: TransitStopSelection) {
+  private selectStop(stop: TransitStopSelection, preserveTrip = false) {
     if (!this.map) return;
     const selectedSource = this.map.getSource(SELECTED_STOP_SOURCE_ID) as GeoJSONSource | undefined;
     selectedSource?.setData({
@@ -792,11 +793,15 @@ export class TransitStopsLayer {
         },
       }],
     });
-    this.clearSelectedTrip();
+    if (!preserveTrip) this.clearSelectedTrip();
   }
 
   selectSearchStop(stop: TransitStopSelection) {
     this.selectStop(stop);
+  }
+
+  selectSearchStopPreservingTrip(stop: TransitStopSelection) {
+    this.selectStop(stop, true);
   }
 
   selectTrip(
@@ -1066,6 +1071,10 @@ export class TransitStopsLayer {
 
   clearSelection() {
     this.clearSelectedTrip();
+    this.clearStopSelection();
+  }
+
+  clearStopSelection() {
     const selectedSource = this.map?.getSource(SELECTED_STOP_SOURCE_ID) as GeoJSONSource | undefined;
     selectedSource?.setData(emptyCollection());
   }

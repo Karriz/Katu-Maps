@@ -56,7 +56,10 @@ async function openPoi(page: Page) {
 }
 
 async function openPositionInformation(page: Page) {
-  await page.locator('.map-canvas').click({ button: 'right', position: { x: 520, y: 420 } });
+  const viewport = page.viewportSize();
+  const x = Math.min(520, Math.max(24, (viewport?.width ?? 520) - 30));
+  const y = Math.min(420, Math.max(24, (viewport?.height ?? 420) - 30));
+  await page.locator('.map-canvas').click({ button: 'right', position: { x, y } });
   await page.getByRole('menuitem', { name: 'Position information' }).click();
   await expect(page.locator('.position-information')).toBeVisible();
   await expect(page.locator('.position-information')).toContainText('Latitude, longitude');
@@ -64,7 +67,9 @@ async function openPositionInformation(page: Page) {
 
 async function openTransitStop(page: Page) {
   await openSearch(page, 'Keskustori');
-  await page.getByRole('option', { name: /Keskustori.*Transit stop/i }).click();
+  const result = page.getByRole('option', { name: /Keskustori.*Transit stop/i });
+  await expect(result).toBeVisible({ timeout: 15_000 });
+  await result.click();
   const panel = page.locator('.transit-departures-panel');
   await expect(panel).toBeVisible();
   await expect(panel).toContainText('Next departures');
@@ -80,6 +85,28 @@ async function openSelectedTrip(page: Page) {
   await expect(panel).toContainText('Board here');
   await expect(panel.locator('.transit-route-stop')).toHaveCount(7);
   await expectScrollablePanelBody(page, '.transit-trip-panel', '.transit-panel-header', '.transit-route-stop-scroll');
+}
+
+async function saveFavoriteFromPanel(page: Page, panelSelector: string, name: string) {
+  const panel = page.locator(panelSelector);
+  await panel.getByRole('button', { name: 'Save' }).click();
+  const dialog = page.getByRole('dialog', { name: /Save as favourite/i });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Name').fill(name);
+  await dialog.getByRole('button', { name: 'Save favourite' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(panel.getByRole('button', { name: 'Edit favourite' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Remove favourite' })).toBeVisible();
+}
+
+async function editFavoriteFromPanel(page: Page, panelSelector: string, name: string) {
+  const panel = page.locator(panelSelector);
+  await panel.getByRole('button', { name: 'Edit favourite' }).click();
+  const dialog = page.getByRole('dialog', { name: /Edit favourite/i });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Name').fill(name);
+  await dialog.getByRole('button', { name: 'Save changes' }).click();
+  await expect(dialog).toBeHidden();
 }
 
 async function expectScrollablePanelBody(page: Page, panelSelector: string, headerSelector: string, bodySelector: string, requireOverflow = false) {
@@ -228,6 +255,26 @@ async function openDesktopItinerary(page: Page) {
   await expect(page.locator('.transit-journey-header')).toBeVisible();
 }
 
+async function openDesktopTransitRouteResult(page: Page) {
+  await setRouteEndpoints(page, 'transit');
+  await page.locator('.transit-route-option').nth(1).click();
+  await expect(page.locator('.route-panel')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fit route' })).toBeVisible();
+}
+
+async function expectRightInfoPanelDoesNotCoverRouteControls(page: Page, panelSelector: string) {
+  await expect(page.locator(panelSelector)).toBeVisible({ timeout: 10_000 });
+  const panel = await page.locator(panelSelector).boundingBox();
+  const controls = await page.locator('.map-camera-actions').boundingBox();
+  expect(panel).not.toBeNull();
+  expect(controls).not.toBeNull();
+  const overlaps = controls!.x < panel!.x + panel!.width
+    && controls!.x + controls!.width > panel!.x
+    && controls!.y < panel!.y + panel!.height
+    && controls!.y + controls!.height > panel!.y;
+  expect(overlaps).toBe(false);
+}
+
 const favoriteCameraFixtures: StoredFavorite[] = [
   {
     id: 'saved-position', name: 'Saved map position', coordinates: [23.7609, 61.4981],
@@ -346,6 +393,234 @@ const scenarios: Scenario[] = [
     viewport: 'desktop',
     setup: openPositionInformation,
     state: 'position information open',
+  },
+  {
+    name: 'desktop-position-closes-poi-information',
+    description: 'Opening position information replaces an open POI panel',
+    viewport: 'desktop',
+    setup: async page => {
+      await openPoi(page);
+      await openPositionInformation(page);
+      await expect(page.locator('.location-info-panel')).toBeHidden();
+      await expect(page.locator('.position-information')).toBeVisible();
+    },
+    state: 'position information replaced POI information',
+  },
+  {
+    name: 'desktop-position-closes-transit-information',
+    description: 'Opening position information replaces an open transit-stop panel',
+    viewport: 'desktop',
+    setup: async page => {
+      await openTransitStop(page);
+      await openPositionInformation(page);
+      await expect(page.locator('.transit-departures-panel')).toBeHidden();
+      await expect(page.locator('.position-information')).toBeVisible();
+    },
+    state: 'position information replaced transit information',
+  },
+  {
+    name: 'desktop-poi-closes-position-information',
+    description: 'Opening POI information replaces an open position panel',
+    viewport: 'desktop',
+    setup: async page => {
+      await openPositionInformation(page);
+      await openPoi(page);
+      await expect(page.locator('.position-information')).toBeHidden();
+      await expect(page.locator('.location-info-panel')).toBeVisible();
+    },
+    state: 'POI information replaced position information',
+  },
+  {
+    name: 'desktop-transit-closes-position-information',
+    description: 'Opening transit-stop information replaces an open position panel',
+    viewport: 'desktop',
+    setup: async page => {
+      await openPositionInformation(page);
+      await openTransitStop(page);
+      await expect(page.locator('.position-information')).toBeHidden();
+      await expect(page.locator('.transit-departures-panel')).toBeVisible();
+    },
+    state: 'Transit information replaced position information',
+  },
+  {
+    name: 'desktop-route-with-position-information',
+    description: 'Route controls remain visible beside position information on desktop',
+    viewport: 'desktop',
+    setup: async page => {
+      await openDesktopTransitRouteResult(page);
+      await openPositionInformation(page);
+      await expect(page.locator('.route-panel')).toBeVisible();
+      await expectRightInfoPanelDoesNotCoverRouteControls(page, '.position-information');
+    },
+    state: 'desktop route and position information open',
+  },
+  {
+    name: 'desktop-close-position-restores-route-controls',
+    description: 'Closing position information restores Fit route and Follow vehicle controls',
+    viewport: 'desktop',
+    setup: async page => {
+      await openDesktopTransitRouteResult(page);
+      await expect(page.getByRole('button', { name: 'Follow estimated vehicle' })).toBeVisible();
+      await openPositionInformation(page);
+      await expect(page.locator('.position-information')).toBeVisible();
+      await page.locator('.position-information > .location-info-close').click();
+      await expect(page.locator('.position-information')).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Fit route' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Follow estimated vehicle' })).toBeVisible();
+    },
+    state: 'desktop route controls restored after closing position information',
+  },
+  {
+    name: 'desktop-route-with-poi-information',
+    description: 'Route controls remain visible beside POI information on desktop',
+    viewport: 'desktop',
+    setup: async page => {
+      await openPoi(page);
+      await openDesktopTransitRouteResult(page);
+      await expect(page.locator('.route-panel')).toBeVisible();
+      await expectRightInfoPanelDoesNotCoverRouteControls(page, '.location-info-panel');
+    },
+    state: 'desktop route and POI information open',
+  },
+  {
+    name: 'desktop-transit-panel-coexists-with-routing',
+    description: 'Transit stop information can coexist with the desktop route panel',
+    viewport: 'desktop',
+    setup: async page => {
+      await openTransitStop(page);
+      await openRoute(page);
+      await page.getByRole('button', { name: 'Close departures' }).click();
+      await expect(page.locator('.transit-departures-panel')).toBeHidden();
+      await expect(page.locator('.route-panel')).toBeVisible();
+    },
+    state: 'desktop route and transit information coexist',
+  },
+  {
+    name: 'phone-route-clears-on-position-information',
+    description: 'Opening position information on mobile exits routing',
+    viewport: 'phone',
+    setup: async page => {
+      await setRouteEndpoints(page, 'pedestrian');
+      await openPositionInformation(page);
+      await expect(page.locator('.position-information')).toBeVisible();
+      await expect(page.locator('.route-panel')).toBeHidden();
+    },
+    state: 'mobile POI information with routing cleared',
+  },
+  {
+    name: 'phone-position-closes-poi-information',
+    description: 'Opening POI information replaces position information on mobile',
+    viewport: 'phone',
+    setup: async page => {
+      await openPositionInformation(page);
+      await openPoi(page);
+      await expect(page.locator('.position-information')).toBeHidden();
+      await expect(page.locator('.location-info-panel')).toBeVisible();
+    },
+    state: 'mobile POI information replaced position information',
+  },
+  {
+    name: 'phone-position-closes-transit-information',
+    description: 'Opening transit-stop information replaces position information on mobile',
+    viewport: 'phone',
+    setup: async page => {
+      await openPositionInformation(page);
+      await openTransitStop(page);
+      await expect(page.locator('.position-information')).toBeHidden();
+      await expect(page.locator('.transit-departures-panel')).toBeVisible();
+    },
+    state: 'mobile transit information replaced position information',
+  },
+  {
+    name: 'phone-position-favorite-lifecycle',
+    description: 'Position information updates from Save to Edit and Remove after saving',
+    viewport: 'phone',
+    setup: async page => {
+      await openPositionInformation(page);
+      await saveFavoriteFromPanel(page, '.position-information', 'Saved mobile position');
+      await page.locator('.position-information').getByRole('button', { name: 'Remove favourite' }).click();
+      await expect(page.locator('.position-information').getByRole('button', { name: 'Save' })).toBeVisible();
+    },
+    state: 'mobile position favourite saved and removed',
+  },
+  {
+    name: 'desktop-position-favorite-lifecycle',
+    description: 'Position information updates from Save to Edit and Remove after saving',
+    viewport: 'desktop',
+    setup: async page => {
+      await openPositionInformation(page);
+      await saveFavoriteFromPanel(page, '.position-information', 'Saved desktop position');
+      await page.locator('.position-information').getByRole('button', { name: 'Remove favourite' }).click();
+      await expect(page.locator('.position-information').getByRole('button', { name: 'Save' })).toBeVisible();
+    },
+    state: 'desktop position favourite saved and removed',
+  },
+  {
+    name: 'phone-poi-favorite-lifecycle',
+    description: 'POI information updates from Save to Edit and Remove after saving',
+    viewport: 'phone',
+    setup: async page => {
+      await openPoi(page);
+      await saveFavoriteFromPanel(page, '.location-info-panel', 'Saved mobile POI');
+      await page.locator('.location-info-panel').getByRole('button', { name: 'Remove favourite' }).click();
+      await expect(page.locator('.location-info-panel').getByRole('button', { name: 'Save' })).toBeVisible();
+    },
+    state: 'mobile POI favourite saved and removed',
+  },
+  {
+    name: 'phone-transit-favorite-lifecycle',
+    description: 'Transit-stop information updates from Save to Edit and Remove after saving',
+    viewport: 'phone',
+    setup: async page => {
+      await openTransitStop(page);
+      await saveFavoriteFromPanel(page, '.transit-departures-panel', 'Saved mobile transit stop');
+      await page.locator('.transit-departures-panel').getByRole('button', { name: 'Remove favourite' }).click();
+      await expect(page.locator('.transit-departures-panel').getByRole('button', { name: 'Save' })).toBeVisible();
+    },
+    state: 'mobile transit favourite saved and removed',
+  },
+  {
+    name: 'desktop-poi-favorite-lifecycle',
+    description: 'POI information updates from Save to Edit and Remove after saving',
+    viewport: 'desktop',
+    setup: async page => {
+      await openPoi(page);
+      await saveFavoriteFromPanel(page, '.location-info-panel', 'Saved POI');
+      await page.locator('.location-info-panel').getByRole('button', { name: 'Remove favourite' }).click();
+      await expect(page.locator('.location-info-panel').getByRole('button', { name: 'Save' })).toBeVisible();
+    },
+    state: 'desktop POI favourite saved and removed',
+  },
+  {
+    name: 'desktop-transit-favorite-lifecycle',
+    description: 'Transit-stop information updates from Save to Edit and Remove after saving',
+    viewport: 'desktop',
+    setup: async page => {
+      await openTransitStop(page);
+      await saveFavoriteFromPanel(page, '.transit-departures-panel', 'Saved transit stop');
+      await page.locator('.transit-departures-panel').getByRole('button', { name: 'Remove favourite' }).click();
+      await expect(page.locator('.transit-departures-panel').getByRole('button', { name: 'Save' })).toBeVisible();
+    },
+    state: 'desktop transit favourite saved and removed',
+  },
+  {
+    name: 'desktop-edit-poi-favorite',
+    description: 'Editing a saved POI updates its favorite name without changing its entity metadata',
+    viewport: 'desktop',
+    favorites: [favoriteCameraFixtures[1]],
+    setup: async page => {
+      await page.getByRole('button', { name: 'Show favourites' }).click();
+      await page.getByRole('listbox', { name: 'Favourite places' })
+        .getByRole('option', { name: /^Saved Helsinki place/ }).click();
+      const panel = page.locator('.location-info-panel');
+      await expect(panel).toBeVisible();
+      await editFavoriteFromPanel(page, '.location-info-panel', 'Renamed Helsinki place');
+      await expect.poll(async () => page.evaluate(() => {
+        const values = JSON.parse(localStorage.getItem('maps-favorites-v1') ?? '[]') as StoredFavorite[];
+        return values.find((favorite) => favorite.id === 'saved-place')?.name;
+      })).toBe('Renamed Helsinki place');
+    },
+    state: 'desktop POI favourite renamed',
   },
   {
     name: 'phone-stop-departures',

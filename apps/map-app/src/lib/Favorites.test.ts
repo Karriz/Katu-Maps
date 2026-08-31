@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, isValidFavoriteCoordinates, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
+import { FAVORITES_STORAGE_KEY, favoriteMapFeatures, findTransitFavorite, isValidFavoriteCoordinates, loadFavorites, orderedFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite } from './Favorites';
 
 const favorite = (overrides: Partial<Favorite> = {}): Favorite => ({
   id: 'one', name: 'Museum', coordinates: [23.7, 61.5], category: 'Museum',
@@ -65,6 +65,19 @@ describe('favorite matching and ordering', () => {
     const home = favorite({ id: 'home', name: 'Home', kind: 'home' });
     const movedHome = favorite({ id: 'moved', name: 'Home', kind: 'home', coordinates: [24, 62] });
     expect(upsertFavorite([home], movedHome)).toEqual([{ ...movedHome, id: 'home', createdAt: home.createdAt }]);
+  });
+
+  it('finds transit favorites saved with current or legacy identity fields', () => {
+    const current = favorite({
+      id: 'current', entityType: 'transit-stop', transitStopId: 'stop-1', transitProvider: 'digitransit',
+    });
+    const legacy = favorite({
+      id: 'legacy', provider: 'transit', providerId: 'transitous:stop-2',
+    });
+
+    expect(findTransitFavorite([current], 'stop-1', 'digitransit')?.id).toBe('current');
+    expect(findTransitFavorite([legacy], 'stop-2', 'transitous')?.id).toBe('legacy');
+    expect(findTransitFavorite([current], 'stop-2', 'digitransit')).toBeUndefined();
   });
 });
 

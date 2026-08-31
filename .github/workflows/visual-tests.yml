@@ -3,6 +3,8 @@ name: Visual UI review
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
 
 permissions:
   contents: read
@@ -22,6 +24,8 @@ jobs:
           cache: npm
           cache-dependency-path: apps/map-app/package-lock.json
       - run: npm ci
+      - name: Run unit tests
+        run: npm test
       - name: Cache Playwright browser
         uses: actions/cache@v5
         with:

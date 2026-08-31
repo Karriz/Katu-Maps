@@ -3,10 +3,65 @@ import {
   buildEstimatedTripLeg,
   estimatedDistance,
   estimatedVehiclePose,
+  TransitStopsLayer,
+  type TransitVehiclePose,
 } from './TransitStopsLayer';
 
 const minute = 60_000;
 const baseTime = Date.UTC(2026, 7, 28, 12);
+
+const stop = {
+  stopId: 'stop-1',
+  name: 'Central stop',
+  mode: 'TRAM',
+  coordinates: [23.76, 61.5] as [number, number],
+  provider: 'transitous' as const,
+};
+
+function layerForSelectionTests(onPose: (pose: TransitVehiclePose | null) => void) {
+  const source = { setData: () => undefined };
+  const layer = new TransitStopsLayer(onPose);
+  const internals = layer as unknown as {
+    map: { getSource: () => typeof source };
+    trackedTrips: { current?: { controller?: AbortController } };
+  };
+  internals.map = { getSource: () => source };
+  internals.trackedTrips = { current: {} };
+  return { layer, internals };
+}
+
+describe('transit panel and route vehicle selection', () => {
+  it('keeps the routed vehicle trip when selecting a stop for the desktop info panel', () => {
+    const poses: (TransitVehiclePose | null)[] = [];
+    const { layer, internals } = layerForSelectionTests((pose) => poses.push(pose));
+
+    layer.selectSearchStopPreservingTrip(stop);
+
+    expect(internals.trackedTrips.current).toBeDefined();
+    expect(poses).toHaveLength(0);
+  });
+
+  it('clears the tracked trip for a standalone stop selection', () => {
+    const poses: (TransitVehiclePose | null)[] = [];
+    const { layer, internals } = layerForSelectionTests((pose) => poses.push(pose));
+
+    layer.selectSearchStop(stop);
+
+    expect(internals.trackedTrips.current).toBeUndefined();
+    expect(poses).toHaveLength(1);
+    expect(poses[0]).toBeNull();
+  });
+
+  it('clears only the selected stop without clearing the routed vehicle trip', () => {
+    const poses: (TransitVehiclePose | null)[] = [];
+    const { layer, internals } = layerForSelectionTests((pose) => poses.push(pose));
+
+    layer.clearStopSelection();
+
+    expect(internals.trackedTrips.current).toBeDefined();
+    expect(poses).toHaveLength(0);
+  });
+});
 
 describe('transit vehicle estimation', () => {
   it('orients reversed geometry in stop-call order', () => {

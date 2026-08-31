@@ -1,4 +1,5 @@
 import { Info, MapPin, Navigation, Ruler, Star } from 'lucide-react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 export type MapContextMenuProps = {
   position: { x: number; y: number };
@@ -17,12 +18,33 @@ export function MapContextMenu({
   onRouteToHere,
   onRouteFromHere,
 }: MapContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState(position);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const container = menu?.parentElement;
+    if (!menu || !container) return;
+
+    const padding = 12;
+    const maxLeft = Math.max(padding, container.clientWidth - menu.offsetWidth - padding);
+    const maxTop = Math.max(padding, container.clientHeight - menu.offsetHeight - padding);
+    const nextPosition = {
+      x: Math.min(Math.max(position.x, padding), maxLeft),
+      y: Math.min(Math.max(position.y, padding), maxTop),
+    };
+    setMenuPosition((current) => (
+      current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition
+    ));
+  }, [position.x, position.y]);
+
   return (
     <div
+      ref={menuRef}
       className="map-context-menu"
       role="menu"
       aria-label="Route options"
-      style={{ left: position.x, top: position.y }}
+      style={{ left: menuPosition.x, top: menuPosition.y }}
     >
       <strong><MapPin aria-hidden="true" /> Map point</strong>
       <button type="button" role="menuitem" onClick={onPositionInformation}><Info aria-hidden="true" /> Position information</button>
