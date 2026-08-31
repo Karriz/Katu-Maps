@@ -69,7 +69,20 @@ export type TransitTripLeg = {
 
 export type TransitTrip = {
   legs: TransitTripLeg[];
+  vehicleObservations?: TransitVehicleObservation[];
 };
+
+export type TransitVehicleObservation = {
+  provider: TransitProviderId;
+  tripId: string;
+  serviceDate: string;
+  coordinates: [number, number];
+  recordedAt: number;
+  heading?: number;
+  vehicleId?: string;
+};
+
+export type TransitPositionStatus = 'live' | 'estimated' | 'unavailable';
 
 export type TransitRoutePlace = {
   name?: string;
@@ -102,6 +115,8 @@ export type TransitRouteResult = {
     to?: TransitRoutePlace;
     startTime?: string;
     endTime?: string;
+    scheduledStartTime?: string;
+    scheduledEndTime?: string;
     serviceDate?: string;
     provider: TransitProviderId;
   }>;

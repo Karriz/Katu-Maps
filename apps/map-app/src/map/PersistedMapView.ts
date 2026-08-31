@@ -11,18 +11,28 @@ const finiteInRange = (value: unknown, minimum: number, maximum: number): value 
   typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
 );
 
+const normalizeLongitude = (longitude: number) => {
+  if (longitude >= -180 && longitude <= 180) return longitude;
+  return Number((
+    ((longitude + 180) % 360 + 360) % 360 - 180
+  ).toFixed(12));
+};
+
 export function parsePersistedMapView(value: string | null): PersistedMapView | null {
   if (!value) return null;
   try {
     const candidate = JSON.parse(value) as Partial<PersistedMapView>;
     if (!Array.isArray(candidate.center)
-      || !finiteInRange(candidate.center[0], -180, 180)
+      || typeof candidate.center[0] !== 'number'
+      || !Number.isFinite(candidate.center[0])
       || !finiteInRange(candidate.center[1], -90, 90)
       || !finiteInRange(candidate.zoom, 0, 18)
       || !finiteInRange(candidate.bearing, -360, 360)
       || !finiteInRange(candidate.pitch, 0, 55)) return null;
     return {
-      center: [candidate.center[0], candidate.center[1]],
+      // MapLibre permits horizontal world wrapping, so an otherwise valid
+      // camera can report an equivalent longitude outside [-180, 180].
+      center: [normalizeLongitude(candidate.center[0]), candidate.center[1]],
       zoom: candidate.zoom,
       bearing: candidate.bearing,
       pitch: candidate.pitch,
@@ -44,5 +54,30 @@ export function savePersistedMapView(
   view: PersistedMapView,
   storage: Pick<Storage, 'setItem'> = window.localStorage,
 ) {
-  storage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(view));
+  storage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify({
+    ...view,
+    center: [normalizeLongitude(view.center[0]), view.center[1]],
+  }));
+}
+
+type LifecycleEventSource = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
+type VisibilitySource = LifecycleEventSource & Pick<Document, 'hidden'>;
+
+/** Flush the current camera before a page is suspended, closed, or reloaded. */
+export function installPersistedMapViewFlush(
+  document: VisibilitySource,
+  window: LifecycleEventSource,
+  persist: () => void,
+) {
+  const persistWhenHidden = () => {
+    if (document.hidden) persist();
+  };
+
+  document.addEventListener('visibilitychange', persistWhenHidden);
+  window.addEventListener('pagehide', persist);
+
+  return () => {
+    document.removeEventListener('visibilitychange', persistWhenHidden);
+    window.removeEventListener('pagehide', persist);
+  };
 }

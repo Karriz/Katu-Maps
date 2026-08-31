@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEstimatedTripLeg,
   estimatedDistance,
+  estimatedVehiclePose,
 } from './TransitStopsLayer';
 
 const minute = 60_000;
@@ -51,5 +52,64 @@ describe('transit vehicle estimation', () => {
 
     expect(constrained).toBe(leg!.anchors[1].distance);
     expect(unconstrained).toBeGreaterThan(constrained!);
+  });
+
+  it('uses scheduled Transitous stop times when realtime values are absent', () => {
+    const leg = buildEstimatedTripLeg({
+      provider: 'transitous',
+      tripId: 'berlin:scheduled-trip',
+      realTime: false,
+      from: { stopId: 'a', lon: 13.37, lat: 52.52, scheduledDeparture: baseTime },
+      intermediateStops: [{
+        stopId: 'b', lon: 13.38, lat: 52.52,
+        scheduledArrival: baseTime + 5 * minute,
+        scheduledDeparture: baseTime + 6 * minute,
+      }],
+      to: { stopId: 'c', lon: 13.39, lat: 52.52, scheduledArrival: baseTime + 10 * minute },
+      coordinates: [],
+    }, [[13.37, 52.52], [13.38, 52.52], [13.39, 52.52]]);
+
+    expect(leg?.anchors.map((anchor) => anchor.time)).toEqual([
+      baseTime,
+      baseTime + 5 * minute,
+      baseTime + 6 * minute,
+      baseTime + 10 * minute,
+    ]);
+    expect(estimatedVehiclePose(leg!, baseTime + 3 * minute, 'BUS', '#123456')?.status)
+      .toBe('estimated');
+  });
+
+  it('keeps Digitransit realtime stop-time interpolation estimated without coordinates', () => {
+    const leg = buildEstimatedTripLeg({
+      provider: 'digitransit',
+      tripId: 'tampere:no-position',
+      realTime: true,
+      from: { stopId: 'a', lon: 23.75, lat: 61.49, departure: baseTime },
+      to: { stopId: 'b', lon: 23.76, lat: 61.5, arrival: baseTime + 5 * minute },
+      coordinates: [],
+    }, [[23.75, 61.49], [23.76, 61.5]])!;
+
+    const pose = estimatedVehiclePose(leg, baseTime + 2 * minute, 'TRAM', '#8554c7');
+    expect(pose?.status).toBe('estimated');
+    expect(pose?.realTime).toBe(false);
+  });
+
+  it('approaches conservatively and dwells between arrival and departure', () => {
+    const leg = buildEstimatedTripLeg({
+      from: { stopId: 'a', lon: 24, lat: 60, departure: baseTime },
+      intermediateStops: [{
+        stopId: 'b', lon: 24.01, lat: 60,
+        arrival: baseTime + 5 * minute,
+        departure: baseTime + 6 * minute,
+      }],
+      to: { stopId: 'c', lon: 24.02, lat: 60, arrival: baseTime + 10 * minute },
+      coordinates: [],
+    }, [[24, 60], [24.01, 60], [24.02, 60]])!;
+    const stopDistance = leg.anchors[1].distance;
+
+    expect(estimatedDistance(leg, baseTime + 4 * minute + 45_000)).toBeLessThan(stopDistance);
+    expect(estimatedDistance(leg, baseTime + 5 * minute)).toBe(stopDistance);
+    expect(estimatedDistance(leg, baseTime + 5 * minute + 30_000)).toBe(stopDistance);
+    expect(estimatedDistance(leg, baseTime + 6 * minute)).toBe(stopDistance);
   });
 });

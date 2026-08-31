@@ -15,12 +15,22 @@ import {
   fetchTransitStops,
   fetchTransitTrip,
   type TransitProviderId,
+  type TransitPositionStatus,
   type TransitStop,
   type TransitStopSelection,
   type TransitTripLeg,
   type TransitTripPlace,
 } from './transit';
 import { resolveSelectedTripResult, tripIsDisplayableAt } from './transit/tripTimeline';
+import {
+  beginObservedPositionTransition,
+  LIVE_OBSERVATION_FUTURE_TOLERANCE_MS,
+  LIVE_OBSERVATION_MAX_AGE_MS,
+  matchLiveObservation,
+  observedPositionAt,
+  vehicleResponseIsCurrent,
+  type ObservedPositionTransition,
+} from './transit/vehiclePosition';
 
 const TRANSIT_SOURCE_ID = 'transit-stops';
 const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
@@ -49,7 +59,7 @@ type EstimatedTripLeg = {
   realTime: boolean;
 };
 
-type SelectedTrip = {
+export type TransitVehicleTripSelection = {
   tripId: string;
   mode: string;
   color: string;
@@ -59,9 +69,23 @@ type SelectedTrip = {
   boardingStop?: { stopId: string; coordinates: [number, number]; departureTime: number; scheduledDeparture?: string };
 };
 
+type SelectedTrip = TransitVehicleTripSelection;
+
+type TrackedTrip = {
+  selection: SelectedTrip;
+  estimatedLegs: EstimatedTripLeg[];
+  routeCoordinates?: [number, number][];
+  boardingContextUsable: boolean;
+  observedTransition?: ObservedPositionTransition;
+  controller?: AbortController;
+  lastFetchAt: number;
+};
+
 export type TransitVehiclePose = {
   mode: string;
   color: string;
+  status: TransitPositionStatus;
+  /** Compatibility flag: true only for observed coordinates, never stop-time interpolation. */
   realTime: boolean;
   parts: Array<{
     coordinates: [number, number];
@@ -311,8 +335,8 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
     const point = placeCoordinates(place);
     if (!point) return;
     pathIndex = nearestPathIndex(coordinates, point, pathIndex);
-    const arrival = timestamp(place?.arrival);
-    const departure = timestamp(place?.departure);
+    const arrival = timestamp(place?.arrival) ?? timestamp(place?.scheduledArrival);
+    const departure = timestamp(place?.departure) ?? timestamp(place?.scheduledDeparture);
     const fallback = placeIndex === 0 ? timestamp(leg.startTime) : timestamp(leg.endTime);
     const times = placeIndex === 0
       ? [departure ?? arrival ?? fallback]
@@ -347,7 +371,7 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
 export function estimatedDistance(
   leg: EstimatedTripLeg,
   time: number,
-  boardingStop?: SelectedTrip['boardingStop'],
+  boardingStop?: TransitVehicleTripSelection['boardingStop'],
 ) {
   const { anchors } = leg;
   if (!anchors.length) return undefined;
@@ -360,12 +384,21 @@ export function estimatedDistance(
   const progress = duration > 0 ? (clampedTime - previousAnchor.time) / duration : 1;
   const interpolated = previousAnchor.distance
     + (nextAnchor.distance - previousAnchor.distance) * Math.max(0, Math.min(1, progress));
-  if (!boardingStop || time >= boardingStop.departureTime) return interpolated;
+  // Coarse feed geometry can snap a stop to a point tens of metres away. Keep
+  // a small approach reserve until the final seconds so the marker does not
+  // appear to have reached the stop substantially before its arrival clock.
+  const remaining = nextAnchor.time - clampedTime;
+  const segmentDistance = nextAnchor.distance - previousAnchor.distance;
+  const approachReserve = remaining > 0 && segmentDistance > 0
+    ? Math.min(40, segmentDistance * 0.15) * Math.min(1, remaining / 15_000)
+    : 0;
+  const conservative = Math.min(interpolated, nextAnchor.distance - approachReserve);
+  if (!boardingStop || time >= boardingStop.departureTime) return conservative;
   const stopAnchor = anchors.find((anchor) => anchor.stopId === boardingStop.stopId);
   const boardingDistance = stopAnchor?.distance ?? leg.cumulativeDistances[
     nearestPathIndex(leg.coordinates, boardingStop.coordinates, 0)
   ];
-  return Math.min(interpolated, boardingDistance);
+  return Math.min(conservative, boardingDistance);
 }
 
 function pathPoseAtDistance(leg: EstimatedTripLeg, targetDistance: number) {
@@ -405,7 +438,7 @@ function vehiclePartLayout(mode: string) {
   return { count: 1, length: 12, gap: 0 };
 }
 
-function estimatedVehiclePose(
+export function estimatedVehiclePose(
   leg: EstimatedTripLeg,
   time: number,
   mode: string,
@@ -424,25 +457,56 @@ function estimatedVehiclePose(
   return {
     mode,
     color,
-    realTime: leg.realTime,
+    status: 'estimated',
+    realTime: false,
     parts: Array.from({ length: layout.count }, (_, index) => (
       pathPoseAtDistance(leg, centerDistance + (index - (layout.count - 1) / 2) * spacing)
     )),
   };
 }
 
+function observedVehiclePose(
+  leg: EstimatedTripLeg,
+  coordinates: [number, number],
+  mode: string,
+  color: string,
+  headingDegrees?: number,
+): TransitVehiclePose {
+  const pathIndex = nearestPathIndex(leg.coordinates, coordinates, 0);
+  const centerDistance = leg.cumulativeDistances[pathIndex];
+  const layout = vehiclePartLayout(mode);
+  const spacing = layout.length + layout.gap;
+  const centerIndex = Math.floor(layout.count / 2);
+  const parts = Array.from({ length: layout.count }, (_, index) => (
+    index === centerIndex
+      ? {
+        coordinates,
+        heading: isNumber(headingDegrees)
+          ? headingDegrees * Math.PI / 180
+          : pathPoseAtDistance(leg, centerDistance).heading,
+      }
+      : pathPoseAtDistance(leg, centerDistance + (index - centerIndex) * spacing)
+  ));
+  return { mode, color, status: 'live', realTime: true, parts };
+}
+
 export class TransitStopsLayer {
   private map: Map | null = null;
   private requestController: AbortController | null = null;
-  private tripController: AbortController | null = null;
   private requestGeneration = 0;
-  private selectedTrip: SelectedTrip | null = null;
-  private estimatedTripLegs: EstimatedTripLeg[] = [];
-  private boardingContextUsable = false;
+  private trackedTrips: { current?: TrackedTrip; next?: TrackedTrip } = {};
+  private journeyMode = false;
   private vehicleTimer: number | undefined;
   private tripRefreshTimer: number | undefined;
-  private lastTripFetchKey: string | undefined;
-  private lastTripFetchAt = 0;
+  private tripGeneration = 0;
+  private readonly handleVisibilityChange = () => {
+    if (document.hidden) {
+      Object.values(this.trackedTrips).forEach((tracked) => tracked?.controller?.abort());
+      this.stopTripPolling();
+      return;
+    }
+    if (this.trackedTrips.current || this.trackedTrips.next) this.startTripPolling();
+  };
 
   constructor(private readonly onVehiclePose?: (pose: TransitVehiclePose | null) => void) {}
 
@@ -452,6 +516,7 @@ export class TransitStopsLayer {
     interactionBlocked: () => boolean = () => false,
   ) {
     this.map = map;
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
     map.addSource(TRANSIT_SOURCE_ID, {
       type: 'geojson',
       data: emptyCollection(),
@@ -632,7 +697,7 @@ export class TransitStopsLayer {
         'circle-color': ['get', 'color'],
         'circle-stroke-color': '#ffffff',
         'circle-stroke-width': 3,
-        'circle-opacity': 0.96,
+        'circle-opacity': ['case', ['get', 'subdued'], 0.42, 0.96],
       },
     };
     const estimatedVehicleIcon: SymbolLayerSpecification = {
@@ -645,6 +710,9 @@ export class TransitStopsLayer {
         'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 0.85, 14, 1, 18, 1.15],
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
+      },
+      paint: {
+        'icon-opacity': ['case', ['get', 'subdued'], 0.48, 1],
       },
     };
     const estimatedVehicleLabel: SymbolLayerSpecification = {
@@ -665,6 +733,7 @@ export class TransitStopsLayer {
         'text-color': '#334155',
         'text-halo-color': '#ffffff',
         'text-halo-width': 2,
+        'text-opacity': ['case', ['get', 'subdued'], 0.62, 1],
       },
     };
     map.addLayer(routeCasing, beforeLayerId);
@@ -743,10 +812,11 @@ export class TransitStopsLayer {
     const selectionKey = `${provider}:${tripId}:${serviceDate ?? ''}`;
     // Repeated callbacks (for example while React state is settling) should
     // not tear down and restart the same network request.
-    if (this.selectedTrip
-      && `${this.selectedTrip.provider}:${this.selectedTrip.tripId}:${this.selectedTrip.serviceDate ?? ''}` === selectionKey) return;
+    const selected = this.trackedTrips.current?.selection;
+    if (!this.journeyMode && selected
+      && `${selected.provider}:${selected.tripId}:${selected.serviceDate ?? ''}` === selectionKey) return;
     this.clearSelectedTrip();
-    this.selectedTrip = {
+    const selection: SelectedTrip = {
       tripId,
       mode,
       color: mode === 'SUBWAY' ? METRO_COLOR : routeColor(color, stopColor(mode)),
@@ -760,22 +830,96 @@ export class TransitStopsLayer {
         scheduledDeparture: boardingStop.scheduledDeparture,
       } : undefined,
     };
-    void this.loadSelectedTrip();
-    this.vehicleTimer = window.setInterval(() => this.updateEstimatedVehicle(), 250);
-    this.tripRefreshTimer = window.setInterval(() => void this.loadSelectedTrip(), 60_000);
+    this.trackedTrips.current = {
+      selection, estimatedLegs: [], boardingContextUsable: false, lastFetchAt: 0,
+    };
+    this.startTripPolling();
   }
 
-  private async loadSelectedTrip() {
-    const selection = this.selectedTrip;
-    if (!this.map || !selection) return;
-    const fetchKey = `${selection.provider}:${selection.tripId}:${selection.serviceDate ?? ''}`;
-    const elapsed = Date.now() - this.lastTripFetchAt;
-    if (this.lastTripFetchKey === fetchKey && elapsed < 30_000) return;
-    this.lastTripFetchKey = fetchKey;
-    this.lastTripFetchAt = Date.now();
-    this.tripController?.abort();
+  selectJourneyTrips(current?: TransitVehicleTripSelection, next?: TransitVehicleTripSelection) {
+    if (!this.map) return;
+    const key = (selection?: TransitVehicleTripSelection) => selection
+      ? `${selection.provider}:${selection.tripId}:${selection.serviceDate ?? ''}:${selection.boardingStop?.stopId ?? ''}:${selection.boardingStop?.scheduledDeparture ?? ''}`
+      : '';
+    if (this.journeyMode
+      && key(this.trackedTrips.current?.selection) === key(current)
+      && key(this.trackedTrips.next?.selection) === key(next)) return;
+    const tracked = (selection: TransitVehicleTripSelection): TrackedTrip => ({
+      selection: {
+        ...selection,
+        color: selection.mode === 'SUBWAY'
+          ? METRO_COLOR : routeColor(selection.color, stopColor(selection.mode)),
+        showRoute: false,
+      },
+      estimatedLegs: [],
+      boardingContextUsable: false,
+      lastFetchAt: 0,
+    });
+    const previous = this.journeyMode ? this.trackedTrips : {};
+    if (!this.journeyMode) this.clearSelectedTrip();
+    const retainOrCreate = (role: 'current' | 'next', selection?: TransitVehicleTripSelection) => {
+      const existing = previous[role];
+      if (!selection) {
+        existing?.controller?.abort();
+        return undefined;
+      }
+      if (existing && key(existing.selection) === key(selection)) {
+        existing.selection = {
+          ...selection,
+          color: selection.mode === 'SUBWAY'
+            ? METRO_COLOR : routeColor(selection.color, stopColor(selection.mode)),
+          showRoute: false,
+        };
+        return existing;
+      }
+      existing?.controller?.abort();
+      return tracked(selection);
+    };
+    this.trackedTrips = {
+      current: retainOrCreate('current', current),
+      next: retainOrCreate('next', next),
+    };
+    this.journeyMode = true;
+    this.updateEstimatedVehicle();
+    this.startTripPolling(!previous.current && !previous.next);
+  }
+
+  private startTripPolling(force = true) {
+    this.stopTripPolling();
+    if (typeof document !== 'undefined' && document.hidden) return;
+    void this.loadSelectedTrips(force);
+    this.vehicleTimer = window.setInterval(() => this.updateEstimatedVehicle(), 250);
+    this.tripRefreshTimer = window.setInterval(() => void this.loadSelectedTrips(), 15_000);
+  }
+
+  private stopTripPolling() {
+    if (this.vehicleTimer !== undefined) window.clearInterval(this.vehicleTimer);
+    if (this.tripRefreshTimer !== undefined) window.clearInterval(this.tripRefreshTimer);
+    this.vehicleTimer = undefined;
+    this.tripRefreshTimer = undefined;
+  }
+
+  private async loadSelectedTrips(force = false) {
+    const entries = (['current', 'next'] as const).flatMap((role) => {
+      const tracked = this.trackedTrips[role];
+      return tracked ? [[role, tracked] as const] : [];
+    });
+    await Promise.all(entries.map(([role, tracked]) => this.loadTrackedTrip(role, tracked, force)));
+  }
+
+  private async loadTrackedTrip(role: 'current' | 'next', tracked: TrackedTrip, force: boolean) {
+    const { selection } = tracked;
+    if (!this.map || this.trackedTrips[role] !== tracked) return;
+    if (!force && Date.now() - tracked.lastFetchAt < 10_000) return;
+    tracked.lastFetchAt = Date.now();
+    tracked.controller?.abort();
     const controller = new AbortController();
-    this.tripController = controller;
+    tracked.controller = controller;
+    const generation = this.tripGeneration;
+    const requestIdentity = {
+      generation,
+      key: `${role}:${selection.provider}:${selection.tripId}:${selection.serviceDate ?? ''}:${selection.boardingStop?.stopId ?? ''}:${selection.boardingStop?.scheduledDeparture ?? ''}`,
+    };
 
     try {
       const payload = await fetchTransitTrip(
@@ -787,9 +931,11 @@ export class TransitStopsLayer {
       if (
         controller.signal.aborted
         || !this.map
-        || this.selectedTrip?.tripId !== selection.tripId
-        || this.selectedTrip.provider !== selection.provider
-        || this.selectedTrip.serviceDate !== selection.serviceDate
+        || !vehicleResponseIsCurrent(requestIdentity, {
+          generation: this.tripGeneration,
+          key: `${role}:${this.trackedTrips[role]?.selection.provider ?? ''}:${this.trackedTrips[role]?.selection.tripId ?? ''}:${this.trackedTrips[role]?.selection.serviceDate ?? ''}:${this.trackedTrips[role]?.selection.boardingStop?.stopId ?? ''}:${this.trackedTrips[role]?.selection.boardingStop?.scheduledDeparture ?? ''}`,
+        })
+        || this.trackedTrips[role] !== tracked
       ) return;
 
       const validatesBoardingStop = selection.boardingStop && !selection.boardingStop.stopId.startsWith('route-origin:');
@@ -805,20 +951,24 @@ export class TransitStopsLayer {
       });
       const resolved = resolution.ok ? resolution.trip : undefined;
       const estimatedLegs: EstimatedTripLeg[] = [];
-      const features: RouteLineFeature[] = resolved && resolved.leg.coordinates.length >= 2
-        ? [{
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates: resolved.leg.coordinates },
-          properties: { color: selection.color },
-        }] : [];
       if (resolved) {
         const estimatedLeg = buildEstimatedTripLeg(resolved.leg, resolved.leg.coordinates);
         if (estimatedLeg && resolved.vehicleTimelineUsable) estimatedLegs.push(estimatedLeg);
       }
-      this.boardingContextUsable = resolved?.boardingContextUsable ?? false;
-      this.estimatedTripLegs = estimatedLegs;
-      const source = this.map.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
-      source?.setData(selection.showRoute ? { type: 'FeatureCollection', features } : emptyRouteCollection());
+      tracked.routeCoordinates = resolved?.leg.coordinates.length
+        ? resolved.leg.coordinates : undefined;
+      tracked.boardingContextUsable = resolved?.boardingContextUsable ?? false;
+      tracked.estimatedLegs = estimatedLegs;
+      const observation = resolved?.boardingContextUsable
+        ? matchLiveObservation(payload.vehicleObservations ?? [], selection, Date.now())
+        : undefined;
+      if (observation && observation.recordedAt > (tracked.observedTransition?.observation.recordedAt ?? 0)) {
+        const currentCoordinates = tracked.observedTransition
+          ? observedPositionAt(tracked.observedTransition, Date.now())
+          : undefined;
+        tracked.observedTransition = beginObservedPositionTransition(currentCoordinates, observation, Date.now());
+      }
+      this.updateSelectedRoutes();
       this.updateEstimatedVehicle();
     } catch (error) {
       if ((error as { name?: string }).name !== 'AbortError') {
@@ -827,55 +977,86 @@ export class TransitStopsLayer {
     }
   }
 
-  private updateEstimatedVehicle() {
-    const source = this.map?.getSource(ESTIMATED_VEHICLE_SOURCE_ID) as GeoJSONSource | undefined;
-    if (!source || !this.selectedTrip) return;
-    const now = Date.now();
-    const activeLeg = this.estimatedTripLegs.find((leg) => (
+  private updateSelectedRoutes() {
+    const features = Object.values(this.trackedTrips).flatMap((tracked): RouteLineFeature[] => (
+      tracked?.selection.showRoute && tracked.routeCoordinates && tracked.routeCoordinates.length >= 2
+        ? [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: tracked.routeCoordinates },
+          properties: { color: tracked.selection.color },
+        }]
+        : []
+    ));
+    const source = this.map?.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
+    source?.setData(features.length ? { type: 'FeatureCollection', features } : emptyRouteCollection());
+  }
+
+  private poseForTrackedTrip(tracked: TrackedTrip, now: number) {
+    const activeLeg = tracked.estimatedLegs.find((leg) => (
       now >= leg.anchors[0].time && now <= leg.anchors[leg.anchors.length - 1].time
-    )) ?? this.estimatedTripLegs.find((leg) => now < leg.anchors[0].time);
+    )) ?? tracked.estimatedLegs.find((leg) => now < leg.anchors[0].time);
     const displayableLeg = activeLeg && tripIsDisplayableAt(activeLeg.anchors.map((anchor) => anchor.time), now)
       ? activeLeg : undefined;
-    const pose = displayableLeg
-      ? estimatedVehiclePose(
+    if (!displayableLeg) return undefined;
+    const liveUsable = tracked.observedTransition
+      && tracked.observedTransition.observation.recordedAt >= now - LIVE_OBSERVATION_MAX_AGE_MS
+      && tracked.observedTransition.observation.recordedAt <= now + LIVE_OBSERVATION_FUTURE_TOLERANCE_MS;
+    const pose = liveUsable
+      ? observedVehiclePose(
+        displayableLeg,
+        observedPositionAt(tracked.observedTransition!, now),
+        tracked.selection.mode,
+        tracked.selection.color,
+        tracked.observedTransition!.observation.heading,
+      )
+      : estimatedVehiclePose(
         displayableLeg,
         now,
-        this.selectedTrip.mode,
-        this.selectedTrip.color,
-        this.boardingContextUsable ? this.selectedTrip.boardingStop : undefined,
-      )
-      : undefined;
-    if (!displayableLeg || !pose) {
-      source.setData(emptyCollection());
-      this.onVehiclePose?.(null);
-      return;
-    }
-    const coordinates = pose.parts[Math.floor(pose.parts.length / 2)].coordinates;
+        tracked.selection.mode,
+        tracked.selection.color,
+        tracked.boardingContextUsable ? tracked.selection.boardingStop : undefined,
+      );
+    return pose ? { pose, leg: displayableLeg } : undefined;
+  }
+
+  private updateEstimatedVehicle() {
+    const source = this.map?.getSource(ESTIMATED_VEHICLE_SOURCE_ID) as GeoJSONSource | undefined;
+    if (!source) return;
+    const now = Date.now();
+    const current = this.trackedTrips.current
+      ? this.poseForTrackedTrip(this.trackedTrips.current, now) : undefined;
+    const next = this.trackedTrips.next?.boardingContextUsable
+      ? this.poseForTrackedTrip(this.trackedTrips.next, now) : undefined;
+    const features = ([['current', current], ['next', next]] as const).flatMap(([role, positioned]) => {
+      if (!positioned) return [];
+      const tracked = this.trackedTrips[role];
+      if (!tracked) return [];
+      const coordinates = positioned.pose.parts[Math.floor(positioned.pose.parts.length / 2)].coordinates;
+      return [{
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates },
+        properties: {
+          color: tracked.selection.color,
+          subdued: role === 'next',
+          label: `${role === 'next' ? 'Next · ' : ''}${positioned.pose.status === 'live'
+            ? 'Live'
+            : positioned.leg.realTime ? 'Estimated · realtime times' : 'Estimated · schedule'}`,
+        },
+      }];
+    });
     source.setData({
       type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates },
-        properties: {
-          color: this.selectedTrip.color,
-          label: displayableLeg.realTime ? 'Estimated · realtime' : 'Estimated · schedule',
-        },
-      }],
+      features,
     });
-    this.onVehiclePose?.(pose);
+    this.onVehiclePose?.(current?.pose ?? null);
   }
 
   private clearSelectedTrip() {
-    this.tripController?.abort();
-    if (this.vehicleTimer !== undefined) window.clearInterval(this.vehicleTimer);
-    if (this.tripRefreshTimer !== undefined) window.clearInterval(this.tripRefreshTimer);
-    this.vehicleTimer = undefined;
-    this.tripRefreshTimer = undefined;
-    this.selectedTrip = null;
-    this.lastTripFetchKey = undefined;
-    this.lastTripFetchAt = 0;
-    this.estimatedTripLegs = [];
-    this.boardingContextUsable = false;
+    Object.values(this.trackedTrips).forEach((tracked) => tracked?.controller?.abort());
+    this.stopTripPolling();
+    this.trackedTrips = {};
+    this.journeyMode = false;
+    this.tripGeneration += 1;
     const routeSource = this.map?.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
     const vehicleSource = this.map?.getSource(ESTIMATED_VEHICLE_SOURCE_ID) as GeoJSONSource | undefined;
     routeSource?.setData(emptyRouteCollection());
@@ -936,6 +1117,7 @@ export class TransitStopsLayer {
 
   dispose() {
     this.requestController?.abort();
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     this.clearSelectedTrip();
     this.requestGeneration += 1;
     this.map = null;

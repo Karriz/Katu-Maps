@@ -11,6 +11,7 @@ import {
   type Point,
 } from 'maplibre-gl';
 import {
+  ArrowRight,
   ArrowRightLeft,
   Beer,
   CircleDollarSign,
@@ -52,12 +53,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { createElement } from 'react';
+import { createPortal } from 'react-dom';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
-import type { TransitVehiclePose } from './TransitStopsLayer';
+import type { TransitVehiclePose, TransitVehicleTripSelection } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
@@ -72,12 +74,19 @@ const TransitJourneyDetails = lazy(() => import('./TransitJourneyDetails').then(
 const TransitJourneyHeader = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyHeader })));
 import { MapContextMenu } from './MapContextMenu';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
-import { fetchDigitransitRoute, searchTransitStops, type TransitProviderId } from './transit';
+import {
+  fetchDigitransitRoute,
+  journeyVehicleKey,
+  resolveJourneyVehicleLegs,
+  searchTransitStops,
+  type TransitPositionStatus,
+  type TransitProviderId,
+} from './transit';
 import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
 import { defaultPositionName, elevationResult, formatCoordinates, formatElevation, formatNominatimAddress, hasDisplayableElevation, parseCoordinates, queryTerrainElevation, type AddressState, type ElevationState } from './PositionInformation';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, isMeaningfullyBetterLocation, locationZoomForAccuracy, markerFeatureCollection, normalizedLocationAccuracy } from './LocationMarkers';
-import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
+import { installPersistedMapViewFlush, loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { installForegroundRecovery } from '../lib/ForegroundRecovery';
@@ -641,6 +650,7 @@ export function MapView() {
   const latestVehiclePoseRef = useRef<TransitVehiclePose | null>(null);
   const [vehicleFollowing, setVehicleFollowing] = useState(false);
   const [vehicleFollowAvailable, setVehicleFollowAvailable] = useState(false);
+  const [vehiclePositionStatus, setVehiclePositionStatus] = useState<TransitPositionStatus>('unavailable');
   const userLocationRef = useRef<[number, number] | null>(null);
   const userLocationAccuracyRef = useRef(Number.POSITIVE_INFINITY);
   const userLocationTimestampRef = useRef(0);
@@ -698,6 +708,73 @@ export function MapView() {
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
   const transitSearchCacheRef = useRef(new globalThis.Map<string, PhotonFeature[]>());
   const nominatimLastRequestRef = useRef(0);
+  const routeSearchAnchorRefs = useRef<Record<'origin' | 'destination', HTMLDivElement | null>>({
+    origin: null,
+    destination: null,
+  });
+  const routeSearchResultsRef = useRef<HTMLDivElement | null>(null);
+  const clearLocationSelection = useCallback(() => {
+    locationDetailsAbortRef.current?.abort();
+    setLocationDetailsLoading(false);
+    setSelectedLocation(null);
+    (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+      type: 'FeatureCollection', features: [],
+    });
+  }, []);
+  useEffect(() => {
+    if (!routeSearchTarget) return;
+
+    const updatePosition = () => {
+      const anchor = routeSearchAnchorRefs.current[routeSearchTarget];
+      const results = routeSearchResultsRef.current;
+      if (!anchor || !results) return;
+
+      const rect = anchor.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+      const margin = 12;
+      const gap = 6;
+      const spaceBelow = viewportBottom - rect.bottom - gap - margin;
+      const spaceAbove = rect.top - viewportTop - gap - margin;
+      const openAbove = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const availableHeight = Math.max(96, openAbove ? spaceAbove : spaceBelow);
+      const maxHeight = Math.min(360, availableHeight);
+      const left = Math.max(
+        viewportLeft + margin,
+        Math.min(rect.left, viewportLeft + viewportWidth - margin - rect.width),
+      );
+
+      results.style.left = `${left}px`;
+      results.style.width = `${rect.width}px`;
+      results.style.maxHeight = `${maxHeight}px`;
+      results.style.top = openAbove
+        ? `${Math.max(viewportTop + margin, rect.top - gap - results.getBoundingClientRect().height)}px`
+        : `${rect.bottom + gap}px`;
+      results.dataset.placement = openAbove ? 'top' : 'bottom';
+    };
+
+    const frame = window.requestAnimationFrame(updatePosition);
+    const observer = new ResizeObserver(updatePosition);
+    const anchor = routeSearchAnchorRefs.current[routeSearchTarget];
+    if (anchor) observer.observe(anchor);
+    if (routeSearchResultsRef.current) observer.observe(routeSearchResultsRef.current);
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    window.visualViewport?.addEventListener('resize', updatePosition);
+    window.visualViewport?.addEventListener('scroll', updatePosition);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+      window.visualViewport?.removeEventListener('resize', updatePosition);
+      window.visualViewport?.removeEventListener('scroll', updatePosition);
+    };
+  }, [routeSearchTarget, routeSheet.style]);
   const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
     const mobileDefault2d = typeof window !== 'undefined' && window.innerWidth <= 760;
     const defaults: MapLayerState = {
@@ -1074,45 +1151,41 @@ export function MapView() {
       transitStopsLayerRef.current?.clearTrip();
       return;
     }
-    const now = Date.now();
-    const vehicleLegs = result.transitLegs?.filter((candidate) => (
-      candidate.tripId && !isWalkingTransitMode(candidate.mode)
-    )) ?? [];
-    const leg = vehicleLegs.find((candidate) => {
-      const start = candidate.startTime ? Date.parse(candidate.startTime) : NaN;
-      const end = candidate.endTime ? Date.parse(candidate.endTime) : NaN;
-      return Number.isFinite(start) && Number.isFinite(end) && now >= start && now <= end;
-    }) ?? vehicleLegs.find((candidate) => {
-      const start = candidate.startTime ? Date.parse(candidate.startTime) : NaN;
-      return Number.isFinite(start) && now < start;
-    });
-    const nextTripKey = leg?.tripId
-      ? `${leg.provider}:${leg.tripId}:${leg.serviceDate ?? ''}:${leg.startTime ?? ''}`
-      : null;
+    const { current, next } = resolveJourneyVehicleLegs(result.transitLegs ?? [], Date.now());
+    const nextTripKey = `${journeyVehicleKey(current) ?? ''}|${journeyVehicleKey(next) ?? ''}`;
     if (plannedVehicleTripRef.current === nextTripKey) return;
+    const currentVehicleChanged = (plannedVehicleTripRef.current?.split('|')[0] ?? '')
+      !== (journeyVehicleKey(current) ?? '');
     plannedVehicleTripRef.current = nextTripKey;
-    vehicleFollowEnabledRef.current = false;
-    setVehicleFollowing(false);
-    setVehicleFollowAvailable(false);
-    if (leg?.tripId) {
+    if (currentVehicleChanged) {
+      vehicleFollowEnabledRef.current = false;
+      setVehicleFollowing(false);
+      setVehicleFollowAvailable(false);
+    }
+    const selection = (leg: typeof current): TransitVehicleTripSelection | undefined => {
+      if (!leg?.tripId) return undefined;
       const originCoordinates = leg.from?.coordinates
         ?? (leg.geometry?.coordinates[0] as [number, number] | undefined);
-      void transitStopsLayerRef.current?.selectTrip(
-        leg.tripId,
-        leg.mode,
-        // The selected-trip overlay is drawn by TransitStopsLayer and can
-        // otherwise mask the route geometry with its generic transit blue.
-        // Reuse the same provider color as the route line when available.
-        mapRouteColor(leg.routeColor) ?? MAP_COLORS.transitBlue,
-        false,
-        leg.provider ?? 'transitous',
-        leg.serviceDate,
-        leg.startTime && originCoordinates ? {
-          stopId: leg.from?.stopId ?? `route-origin:${leg.tripId}`,
+      const scheduledDeparture = leg.scheduledStartTime ?? leg.startTime;
+      return {
+        tripId: leg.tripId,
+        mode: leg.mode,
+        color: mapRouteColor(leg.routeColor) ?? MAP_COLORS.transitBlue,
+        showRoute: false,
+        provider: leg.provider ?? 'transitous',
+        serviceDate: leg.serviceDate,
+        boardingStop: scheduledDeparture && leg.startTime && originCoordinates && leg.from?.stopId ? {
+          stopId: leg.from.stopId,
           coordinates: originCoordinates,
-          departure: leg.startTime,
+          departureTime: Date.parse(leg.startTime),
+          scheduledDeparture,
         } : undefined,
-      );
+      };
+    };
+    const currentSelection = selection(current);
+    const nextSelection = selection(next);
+    if (currentSelection || nextSelection) {
+      transitStopsLayerRef.current?.selectJourneyTrips(currentSelection, nextSelection);
     } else {
       transitStopsLayerRef.current?.clearTrip();
     }
@@ -1491,6 +1564,7 @@ export function MapView() {
       // 3D vehicles toggle from ever having anything to display.
       transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
+      setVehiclePositionStatus(pose?.status ?? 'unavailable');
       if (!pose || !vehicleFollowEnabledRef.current) return;
       if (Date.now() - lastUserInteractionRef.current < 400) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
@@ -1669,7 +1743,7 @@ export function MapView() {
         };
         transitStopsLayerRef.current?.selectSearchStop(stop);
         setSelectedTransitStop(stop);
-        setSelectedLocation(null);
+        clearLocationSelection();
         return;
       }
       transitStopsLayerRef.current?.clearSelection();
@@ -1991,9 +2065,7 @@ export function MapView() {
       map.on('mouseleave', 'global-hiking-pois', () => { map.getCanvas().style.cursor = ''; });
       void transitStopsLayer.install(map, (stop) => {
         setVehicleFollowAvailable(false);
-        locationDetailsAbortRef.current?.abort();
-        setLocationDetailsLoading(false);
-        setSelectedLocation(null);
+        clearLocationSelection();
         setSelectedTransitStop(stop);
       map.easeTo({
         center: stop.coordinates,
@@ -2068,6 +2140,7 @@ export function MapView() {
       if (!vehicleFollowEnabledRef.current) scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
     };
+    const removePersistedMapViewFlush = installPersistedMapViewFlush(document, window, persistCamera);
     const removeForegroundRecovery = installForegroundRecovery({
       document,
       window,
@@ -2123,6 +2196,7 @@ export function MapView() {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       map.off('move', handleCameraMove);
+      removePersistedMapViewFlush();
       removeForegroundRecovery();
       map.off('moveend', handleMoveEnd);
       map.off('zoomstart', handleMapGestureStart);
@@ -2554,7 +2628,7 @@ export function MapView() {
       setContextMenuMarker(null);
       transitStopsLayerRef.current?.selectSearchStop(stop);
       setSelectedTransitStop(stop);
-      setSelectedLocation(null);
+      clearLocationSelection();
       setSearchOpen(false);
       return;
     }
@@ -2850,7 +2924,7 @@ export function MapView() {
 
   const setJourneyBackButton = useCallback((button: HTMLButtonElement | null) => {
     journeyBackButtonRef.current = button;
-    if (button && window.innerWidth <= 760) button.focus();
+    button?.focus();
   }, []);
 
   const positionFavorite = positionInformation && favorites.find((favorite) => (
@@ -3262,6 +3336,7 @@ export function MapView() {
                 setSelectedTransitStop(null);
               }}
               isFollowing={vehicleFollowing}
+              positionStatus={vehiclePositionStatus}
             /></Suspense>
           )}
           {routeResult && routeOpen && (
@@ -3273,7 +3348,9 @@ export function MapView() {
                   aria-pressed={vehicleFollowing}
                   onClick={vehicleFollowing ? pauseVehicleFollow : resumeVehicleFollow}
                 >
-                  {vehicleFollowing ? 'Following vehicle' : 'Follow vehicle'}
+                  {vehicleFollowing
+                    ? `Following ${vehiclePositionStatus === 'live' ? 'live' : 'estimated'} vehicle`
+                    : `Follow ${vehiclePositionStatus === 'live' ? 'live' : 'estimated'} vehicle`}
                 </button>
               )}
               <button className="map-floating-action" type="button" onClick={() => {
@@ -3417,10 +3494,15 @@ export function MapView() {
                   const label = kind === 'origin' ? 'Starting point' : 'Destination';
                   return (
                     <div className="route-endpoint-group" key={kind}>
-                      <div className={`route-search-field${routeSearchTarget === kind ? ' active' : ''}`}>
+                      <div
+                        className={`route-search-field${routeSearchTarget === kind ? ' active' : ''}`}
+                        ref={(element) => { routeSearchAnchorRefs.current[kind] = element; }}
+                      >
                         <MapPin aria-hidden="true" />
                         <input
                           aria-label={`Search ${label.toLowerCase()}`}
+                          aria-controls={`route-${kind}-search-results`}
+                          aria-expanded={routeSearchTarget === kind}
                           placeholder={`Search ${label.toLowerCase()}`}
                           value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
                           onFocus={() => beginRouteSearch(kind)}
@@ -3465,8 +3547,14 @@ export function MapView() {
                           Map
                         </button>
                       </div>
-                      {routeSearchTarget === kind && (
-                        <div className="route-search-results" role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
+                      {routeSearchTarget === kind && createPortal(
+                        <div
+                          className="route-search-results route-search-results-floating"
+                          id={`route-${kind}-search-results`}
+                          ref={routeSearchResultsRef}
+                          role="listbox"
+                          aria-label={`Search ${label.toLowerCase()} results`}
+                        >
                           <button
                             className="route-search-result route-search-current-location"
                             type="button"
@@ -3492,7 +3580,8 @@ export function MapView() {
                               </button>
                             );
                           })}
-                        </div>
+                        </div>,
+                        document.body,
                       )}
                     </div>
                   );
@@ -3573,7 +3662,7 @@ export function MapView() {
                       onClick={transitDetailsOpen ? closeTransitDetails : openTransitDetails}
                     >
                       {transitDetailsOpen ? 'Hide journey details' : 'View journey details'}
-                      <span aria-hidden="true">{transitDetailsOpen ? '−' : '+'}</span>
+                      <ArrowRight aria-hidden="true" />
                     </button>
                   )}
                   {routeMode === 'transit' && transitDetailsOpen && routeResult.transitLegs && (

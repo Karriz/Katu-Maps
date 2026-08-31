@@ -1,0 +1,20 @@
+{
+  "selection": {
+    "provider": "digitransit",
+    "tripId": "tampere:exact-trip",
+    "serviceDate": "2026-08-31"
+  },
+  "positions": [
+    {
+      "vehicleId": "tampere:vehicle-12",
+      "lat": 61.4991,
+      "lon": 23.7712,
+      "heading": 92,
+      "lastUpdate": "2026-08-31T15:00:00Z",
+      "trip": {
+        "gtfsId": "tampere:exact-trip",
+        "onServiceDate": { "serviceDate": "2026-08-31" }
+      }
+    }
+  ]
+}

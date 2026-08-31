@@ -39,6 +39,8 @@ type RawLeg = {
   headsign?: unknown;
   startTime?: unknown;
   endTime?: unknown;
+  scheduledStartTime?: unknown;
+  scheduledEndTime?: unknown;
   duration?: unknown;
   distance?: unknown;
   from?: RawPlace;
@@ -146,6 +148,8 @@ export function normalizeTransitousRouteResults(itineraries: TransitousItinerary
         to: routePlace(leg.to),
         startTime: absoluteTime(leg.startTime),
         endTime: absoluteTime(leg.endTime),
+        scheduledStartTime: absoluteTime(leg.scheduledStartTime),
+        scheduledEndTime: absoluteTime(leg.scheduledEndTime),
         provider: 'transitous',
       })),
     }];

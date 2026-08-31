@@ -219,7 +219,14 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-panel-heading div { display: flex; flex-direction: column; gap: 2px; }
 .route-panel-heading strong { font-size: 1.05rem; }
 .route-panel-heading span { color: #94a3b8; font-size: 0.72rem; }
-.transit-journey-header { display: none; }
+.transit-journey-header { align-items: center; background: rgb(255 255 255 / 98%); border-bottom: 1px solid var(--color-line); display: flex; flex: 0 0 auto; gap: 11px; min-height: 64px; padding: 0 0 14px; }
+.transit-journey-back { align-items: center; background: var(--color-accent-soft); border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; flex: 0 0 auto; height: 36px; justify-content: center; padding: 0; width: 36px; }
+.transit-journey-back:hover, .transit-journey-back:focus-visible { outline: 3px solid rgb(80 145 235 / 24%); outline-offset: 1px; }
+.transit-journey-back svg { height: 18px; width: 18px; }
+.transit-journey-heading { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+.transit-journey-heading strong { color: #1e293b; font-size: 0.95rem; }
+.transit-journey-heading span { color: #526277; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transit-journey-heading small { color: #1769e8; font-size: 0.66rem; font-variant-numeric: tabular-nums; font-weight: 750; }
 .route-panel-close { align-items: center; background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: #64748b; cursor: pointer; display: flex; flex: 0 0 auto; height: 34px; justify-content: center; padding: 0; width: 34px; }
 .route-panel-close:hover { background: #fff; color: var(--color-accent); }
 .route-panel-close:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
@@ -242,6 +249,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-map-button:hover { background: #dceaff; }
 .route-endpoint-current { color: #64748b; font-size: 0.68rem; overflow: hidden; padding: 4px 12px 0 39px; text-overflow: ellipsis; white-space: nowrap; }
 .route-search-results { background: #fff; border: 1px solid #dbe4ee; border-radius: 11px; box-shadow: 0 12px 28px rgb(37 55 79 / 18%); left: 0; max-height: 210px; overflow-y: auto; position: absolute; right: 0; top: calc(100% + 6px); z-index: 120; }
+.route-search-results-floating { overscroll-behavior: contain; position: fixed; right: auto; z-index: 220; }
 .route-search-result { background: transparent; border: 0; border-bottom: 1px solid #edf0f3; color: inherit; cursor: pointer; display: flex; flex-direction: column; font: inherit; gap: 3px; padding: 10px 12px; text-align: left; width: 100%; }
 .route-search-result:last-child { border-bottom: 0; }
 .route-search-result:hover, .route-search-result:focus-visible { background: var(--surface-hover); outline: 0; }
@@ -301,7 +309,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-transfer-marker { align-items: center; color: #64748b; display: flex; font-size: 0.66rem; font-weight: 750; gap: 6px; margin: 4px 0 5px 1px; }
 .transit-transfer-marker svg { background: #fff7df; border: 1px solid #e8c66d; border-radius: 50%; color: #a56a00; height: 18px; padding: 3px; width: 18px; }
 .transit-route-details-toggle { align-items: center; background: transparent; border: 0; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.72rem; font-weight: 750; justify-content: space-between; margin-top: 9px; padding: 7px 0; width: 100%; }
-.transit-route-details-toggle span { font-size: 1rem; line-height: 1; }
+.transit-route-details-toggle svg { flex: 0 0 auto; height: 16px; width: 16px; }
 .transit-route-leg { align-items: flex-start; display: flex; gap: 9px; min-height: 68px; position: relative; }
 .transit-route-leg:not(:last-child)::after { background: #cbd5e1; content: ''; left: 8px; position: absolute; top: 23px; bottom: -8px; width: 2px; }
 .transit-route-leg-marker { align-items: center; background: var(--color-accent); border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--color-accent); color: #fff; display: flex; flex: 0 0 auto; font-size: 0.57rem; font-weight: 800; height: 18px; justify-content: center; margin-top: 1px; position: relative; width: 18px; z-index: 1; }
@@ -327,8 +335,12 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 /* Keep the journey chrome and route choices anchored while the detailed leg
    timeline gets its own scroll container. */
 .route-panel.transit-journey-detail { display: flex; flex-direction: column; overflow: hidden; }
+.route-panel.transit-journey-detail > .route-panel-heading { display: none; }
 .route-panel.transit-journey-detail .route-panel-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.transit-journey-detail .route-planner-controls,
+.transit-journey-detail .transit-route-details-toggle { display: none; }
 .route-panel.transit-journey-detail .transit-route-legs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.transit-journey-detail .transit-route-legs { border-top: 0; margin-top: 0; padding-top: 16px; }
 
 @media (min-width: 761px) {
   /* Keep map chrome together on the left; the active information surface lives
@@ -670,25 +682,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .route-panel.transit-journey-detail > .mobile-sheet-handle,
   .route-panel.transit-journey-detail > .route-panel-heading { display: none; }
   .transit-journey-detail .transit-journey-header {
-    align-items: center;
-    background: rgb(255 255 255 / 98%);
-    border-bottom: 1px solid var(--color-line);
-    display: flex;
-    flex: 0 0 auto;
-    gap: 11px;
     min-height: 82px;
     padding: 12px calc(12px + env(safe-area-inset-right, 0px)) 12px calc(12px + env(safe-area-inset-left, 0px));
   }
-  .transit-journey-back { align-items: center; background: var(--color-accent-soft); border: 1px solid #b9d4fb; border-radius: 9px; color: var(--color-accent); cursor: pointer; display: flex; flex: 0 0 auto; height: 36px; justify-content: center; padding: 0; width: 36px; }
-  .transit-journey-back:hover, .transit-journey-back:focus-visible { outline: 3px solid rgb(80 145 235 / 24%); outline-offset: 1px; }
-  .transit-journey-back svg { height: 18px; width: 18px; }
-  .transit-journey-heading { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
-  .transit-journey-heading strong { color: #1e293b; font-size: 0.95rem; }
-  .transit-journey-heading span { color: #526277; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .transit-journey-heading small { color: #1769e8; font-size: 0.66rem; font-variant-numeric: tabular-nums; font-weight: 750; }
   .transit-journey-detail .route-panel-body { padding: 0 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
-  .transit-journey-detail .route-planner-controls,
-  .transit-journey-detail .transit-route-details-toggle { display: none; }
   .transit-journey-detail .transit-route-legs { border-top: 0; margin-top: 0; padding-top: 18px; }
   .transit-journey-detail .transit-route-leg { min-height: 82px; }
   .transit-journey-detail .transit-transfer-marker { margin: 6px 0 8px 1px; }

@@ -7,6 +7,7 @@ import type {
   TransitStop,
   TransitTrip,
   TransitTripPlace,
+  TransitVehicleObservation,
 } from './types';
 import { decodePolyline, finiteNumber, isoDurationSeconds } from './utils';
 
@@ -155,6 +156,20 @@ const TRIP_QUERY = `
     trip(id: $id) {
       gtfsId
       tripGeometry { points length }
+      pattern {
+        vehiclePositions {
+          vehicleId
+          lat
+          lon
+          heading
+          lastUpdate
+          lastUpdated
+          trip {
+            gtfsId
+            onServiceDate(date: $serviceDate) { serviceDate }
+          }
+        }
+      }
       onServiceDate(date: $serviceDate) {
         stopCalls {
           stopLocation { ... on Stop { gtfsId name lat lon parentStation { gtfsId } } }
@@ -168,6 +183,52 @@ const TRIP_QUERY = `
     }
   }
 `;
+
+type DigitransitVehiclePosition = {
+  vehicleId?: unknown;
+  lat?: unknown;
+  lon?: unknown;
+  heading?: unknown;
+  lastUpdate?: unknown;
+  lastUpdated?: unknown;
+  trip?: {
+    gtfsId?: unknown;
+    onServiceDate?: { serviceDate?: unknown } | null;
+  } | null;
+};
+
+function observationTime(raw: DigitransitVehiclePosition) {
+  if (typeof raw.lastUpdate === 'string') {
+    const parsed = Date.parse(raw.lastUpdate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return finiteNumber(raw.lastUpdated) ? raw.lastUpdated * 1000 : undefined;
+}
+
+export function normalizeDigitransitVehicleObservations(
+  positions: DigitransitVehiclePosition[],
+): TransitVehicleObservation[] {
+  return positions.flatMap((raw) => {
+    const recordedAt = observationTime(raw);
+    const serviceDate = raw.trip?.onServiceDate?.serviceDate;
+    if (
+      typeof raw.trip?.gtfsId !== 'string'
+      || typeof serviceDate !== 'string'
+      || !finiteNumber(raw.lon)
+      || !finiteNumber(raw.lat)
+      || recordedAt === undefined
+    ) return [];
+    return [{
+      provider: 'digitransit' as const,
+      tripId: raw.trip.gtfsId,
+      serviceDate,
+      coordinates: [raw.lon, raw.lat] as [number, number],
+      recordedAt,
+      heading: finiteNumber(raw.heading) ? raw.heading : undefined,
+      vehicleId: typeof raw.vehicleId === 'string' ? raw.vehicleId : undefined,
+    }];
+  });
+}
 
 type TripCall = {
   stopLocation?: {
@@ -348,6 +409,8 @@ export function normalizeDigitransitRouteResults(itineraries: PlanItinerary[]): 
         to: planRoutePlace(leg.to),
         startTime: legTime(leg.start),
         endTime: legTime(leg.end),
+        scheduledStartTime: typeof leg.start?.scheduledTime === 'string' ? leg.start.scheduledTime : undefined,
+        scheduledEndTime: typeof leg.end?.scheduledTime === 'string' ? leg.end.scheduledTime : undefined,
         serviceDate: typeof leg.serviceDate === 'string' ? leg.serviceDate : undefined,
         provider: 'digitransit',
       })),
@@ -418,6 +481,7 @@ export const digitransitProvider: TransitProvider = {
     const data = await graphQl<{
       trip?: {
         tripGeometry?: { points?: unknown } | null;
+        pattern?: { vehiclePositions?: DigitransitVehiclePosition[] | null } | null;
         onServiceDate?: { stopCalls?: TripCall[] } | null;
       } | null;
     }>(TRIP_QUERY, { id: tripId, serviceDate: resolvedServiceDate }, signal);
@@ -434,7 +498,10 @@ export const digitransitProvider: TransitProvider = {
           ? [[place.lon, place.lat] as [number, number]]
           : []
       ));
-    if (places.length < 2 || geometry.length < 2) return { legs: [] };
+    const vehicleObservations = normalizeDigitransitVehicleObservations(
+      trip?.pattern?.vehiclePositions ?? [],
+    );
+    if (places.length < 2 || geometry.length < 2) return { legs: [], vehicleObservations };
     const first = places[0];
     const last = places[places.length - 1];
     return {
@@ -452,6 +519,7 @@ export const digitransitProvider: TransitProvider = {
         intermediateStops: places.slice(1, -1),
         coordinates: geometry,
       }],
+      vehicleObservations,
     } satisfies TransitTrip;
   },
 

@@ -76,8 +76,8 @@ export function useRoutePlanning() {
     routeSheetSnapBeforeDetailsRef.current = null;
     if (window.innerWidth <= 760) {
       routeSheet.setSnap(previousSnap ?? 'half');
-      window.requestAnimationFrame(() => journeyDetailsToggleRef.current?.focus());
     }
+    window.requestAnimationFrame(() => journeyDetailsToggleRef.current?.focus());
   };
 
   return {

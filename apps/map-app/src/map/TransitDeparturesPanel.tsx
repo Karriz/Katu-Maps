@@ -5,6 +5,7 @@ import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { MAP_COLORS } from './MapPalette';
 import type { TransitStopSelection } from './TransitStopsLayer';
+import type { TransitPositionStatus } from './transit';
 import {
   fetchTransitDepartures,
   fetchTransitTrip,
@@ -120,6 +121,7 @@ export function TransitDeparturesPanel({
   onEditFavorite,
   onRemoveFavorite,
   isFollowing,
+  positionStatus = 'unavailable',
   onDetailOpenChange,
   navigationBackSignal = 0,
 }: {
@@ -142,6 +144,7 @@ export function TransitDeparturesPanel({
   onEditFavorite?: () => void;
   onRemoveFavorite?: () => void;
   isFollowing?: boolean;
+  positionStatus?: TransitPositionStatus;
   onDetailOpenChange?: (open: boolean) => void;
   navigationBackSignal?: number;
 }) {
@@ -229,7 +232,7 @@ export function TransitDeparturesPanel({
         if (!resolution.ok) {
           console.warn('Selected trip could not be resolved.', { provider: selectedDeparture.provider, reason: resolution.reason });
           setRouteStops([]);
-          setRouteStopsError('Live trip details are temporarily unavailable.');
+          setRouteStopsError('Trip details are temporarily unavailable.');
           return;
         }
         const resolved = resolution.trip;
@@ -316,13 +319,21 @@ export function TransitDeparturesPanel({
             <div>
               <div className="transit-panel-eyebrow" style={{ color: modeColor(detailMode) }}>
                 <DetailIcon aria-hidden="true" />
-                <span>{modeLabel(detailMode)} · {vehicleTimelineUsable ? 'Live trip' : 'Trip timetable'}</span>
+                <span>{modeLabel(detailMode)} · {positionStatus === 'live'
+                  ? 'Live' : positionStatus === 'estimated' ? 'Estimated' : 'Trip timetable'}</span>
               </div>
               <h2>{detailDestination || 'Route stops'}</h2>
-              <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsLoading ? 'Loading trip details' : routeStopsError ? 'Trip details unavailable' : !vehicleTimelineUsable ? 'Timetable · live vehicle unavailable' : isFollowing ? 'Following estimated vehicle' : 'Estimated position · follow paused'}</div>
-              <button className="transit-follow-button" disabled={Boolean(routeStopsError) || !vehicleTimelineUsable} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
+              <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsLoading
+                ? 'Loading trip details'
+                : routeStopsError ? 'Position unavailable'
+                : !vehicleTimelineUsable || positionStatus === 'unavailable' ? 'Position unavailable · timetable shown'
+                : positionStatus === 'live' ? (isFollowing ? 'Live · following vehicle' : 'Live position · follow paused')
+                : (isFollowing ? 'Estimated · following vehicle' : 'Estimated position · follow paused')}</div>
+              <button className="transit-follow-button" disabled={Boolean(routeStopsError) || !vehicleTimelineUsable || positionStatus === 'unavailable'} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
                 <LocateFixed aria-hidden="true" />
-                {!vehicleTimelineUsable ? 'Vehicle unavailable' : isFollowing ? 'Following vehicle' : 'Follow vehicle'}
+                {!vehicleTimelineUsable || positionStatus === 'unavailable'
+                  ? 'Position unavailable'
+                  : isFollowing ? `Following ${positionStatus}` : `Follow ${positionStatus} vehicle`}
               </button>
             </div>
           </div>

@@ -11,6 +11,7 @@ import type {
 
 export type * from './types';
 export { isInFinland, providerForBounds, providerForPoint, providerForRoute } from './geography';
+export { resolveJourneyVehicleLegs, journeyVehicleKey } from './journeyVehicles';
 
 const PROVIDERS: Record<TransitProviderId, TransitProvider> = {
   digitransit: digitransitProvider,

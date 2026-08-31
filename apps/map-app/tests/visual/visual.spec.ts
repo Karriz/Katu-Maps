@@ -79,6 +79,23 @@ async function openRoute(page: Page) {
   await expect(page.getByRole('button', { name: 'Close route planner' })).toBeVisible();
 }
 
+async function openRouteAutocomplete(page: Page) {
+  await openRoute(page);
+  await page.getByLabel('Search starting point').fill('Tampere');
+  const results = page.getByRole('listbox', { name: 'Search starting point results' });
+  await expect(results).toBeVisible();
+  await expect(results.getByRole('button')).toHaveCount(3);
+  expect(await results.evaluate((element) => element.closest('.route-panel'))).toBeNull();
+
+  const bounds = await results.boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(bounds!.height).toBeGreaterThan(120);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
+}
+
 async function chooseRouteResult(page: Page, listName: string, resultText: string, useLast = false) {
   const list = page.getByRole('listbox', { name: listName });
   await expect(list).toBeVisible();
@@ -143,12 +160,23 @@ async function openExpandedItinerary(page: Page) {
 
 async function openDesktopItinerary(page: Page) {
   await openTransitAlternatives(page);
-  await page.locator('.transit-route-option').nth(1).click();
-  await page.getByRole('button', { name: 'View journey details' }).click();
+  const options = page.locator('.transit-route-option');
+  await options.nth(1).click();
+  const detailsButton = page.getByRole('button', { name: 'View journey details' });
+  await detailsButton.click();
   await expect(page.locator('.transit-route-legs')).toBeVisible();
-  await expect(page.locator('.route-planner-controls')).toBeVisible();
+  await expect(page.locator('.route-planner-controls')).toBeHidden();
+  await expect(page.locator('.transit-route-options')).toBeHidden();
+  await expect(page.locator('.transit-journey-header')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back to route options' })).toBeFocused();
+
+  await page.getByRole('button', { name: 'Back to route options' }).click();
   await expect(page.locator('.transit-route-options')).toBeVisible();
-  await expect(page.locator('.transit-journey-header')).toBeHidden();
+  await expect(options.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(detailsButton).toBeFocused();
+
+  await detailsButton.click();
+  await expect(page.locator('.transit-journey-header')).toBeVisible();
 }
 
 const favoriteCameraFixtures: StoredFavorite[] = [
@@ -292,6 +320,20 @@ const scenarios: Scenario[] = [
     state: 'walking route fitted',
   },
   {
+    name: 'desktop-route-autocomplete',
+    description: 'Route autocomplete escapes the panel and uses the available desktop viewport',
+    viewport: 'desktop',
+    setup: openRouteAutocomplete,
+    state: 'routing autocomplete open',
+  },
+  {
+    name: 'phone-route-autocomplete',
+    description: 'Route autocomplete remains fully visible above the mobile sheet and keyboard viewport',
+    viewport: 'phone',
+    setup: openRouteAutocomplete,
+    state: 'routing autocomplete open',
+  },
+  {
     name: 'tablet-transit-alternatives',
     description: 'Three transit alternatives parsed from Digitransit fixtures',
     viewport: 'tablet',
@@ -307,10 +349,17 @@ const scenarios: Scenario[] = [
   },
   {
     name: 'desktop-transit-itinerary',
-    description: 'Transit itinerary remains inline with route planning context on desktop',
+    description: 'Desktop transit itinerary opens as a dedicated panel page with back navigation',
     viewport: 'desktop',
     setup: openDesktopItinerary,
-    state: 'desktop inline journey detail open',
+    state: 'desktop journey page open',
+  },
+  {
+    name: 'tablet-transit-itinerary',
+    description: 'Tablet transit itinerary opens as a dedicated panel page with back navigation',
+    viewport: 'tablet',
+    setup: openDesktopItinerary,
+    state: 'tablet journey page open',
   },
   {
     name: 'phone-bottom-sheet-midpoint',
