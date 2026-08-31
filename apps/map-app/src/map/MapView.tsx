@@ -734,14 +734,19 @@ export function MapView() {
       const viewport = window.visualViewport;
       const viewportTop = viewport?.offsetTop ?? 0;
       const viewportLeft = viewport?.offsetLeft ?? 0;
-      const viewportWidth = viewport?.width ?? window.innerWidth;
-      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+      // visualViewport can report the visual CSS viewport independently from
+      // the layout viewport (notably in headless Chromium and while a mobile
+      // keyboard is transitioning). Fixed portals are still measured against
+      // the layout viewport, so never position outside the smaller one.
+      const viewportWidth = Math.min(window.innerWidth, viewport?.width ?? window.innerWidth);
+      const viewportHeight = Math.min(window.innerHeight, viewport?.height ?? window.innerHeight);
+      const viewportBottom = Math.min(window.innerHeight, viewportTop + viewportHeight);
       const margin = 12;
       const gap = 6;
       const spaceBelow = viewportBottom - rect.bottom - gap - margin;
       const spaceAbove = rect.top - viewportTop - gap - margin;
       const openAbove = spaceBelow < 180 && spaceAbove > spaceBelow;
-      const availableHeight = Math.max(96, openAbove ? spaceAbove : spaceBelow);
+      const availableHeight = Math.max(0, openAbove ? spaceAbove : spaceBelow);
       const maxHeight = Math.min(360, availableHeight);
       const left = Math.max(
         viewportLeft + margin,
