@@ -50,7 +50,7 @@ describe('global map overlay styles', () => {
     });
 
     const flatFootprint = layersById.get('global-building-footprints-2d') as { filter?: unknown } | undefined;
-    expect(JSON.stringify(flatFootprint?.filter)).not.toContain('680725378');
+    expect(flatFootprint?.filter).toBeUndefined();
   });
 
   it('uses the polygon water color for line waterways', () => {
