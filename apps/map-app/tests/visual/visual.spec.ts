@@ -55,6 +55,13 @@ async function openPoi(page: Page) {
   await expect(page.locator('.location-info-panel')).toContainText('Yliopistonkatu');
 }
 
+async function openPositionInformation(page: Page) {
+  await page.locator('.map-canvas').click({ button: 'right', position: { x: 520, y: 420 } });
+  await page.getByRole('menuitem', { name: 'Position information' }).click();
+  await expect(page.locator('.position-information')).toBeVisible();
+  await expect(page.locator('.position-information')).toContainText('Latitude, longitude');
+}
+
 async function openTransitStop(page: Page) {
   await openSearch(page, 'Keskustori');
   await page.getByRole('option', { name: /Keskustori.*Transit stop/i }).click();
@@ -318,6 +325,13 @@ const scenarios: Scenario[] = [
     viewport: 'desktop',
     setup: openPoi,
     state: 'POI information open',
+  },
+  {
+    name: 'desktop-position-information',
+    description: 'Position information uses the shared translucent panel surface',
+    viewport: 'desktop',
+    setup: openPositionInformation,
+    state: 'position information open',
   },
   {
     name: 'phone-stop-departures',
