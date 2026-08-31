@@ -321,6 +321,20 @@ export function MapControls({
               </button>
             </div>
             <div className="layer-panel-content" tabIndex={0}>
+              <div className="theme-setting">
+                <span className="theme-setting-label">Appearance</span>
+                <div className="theme-options" role="group" aria-label="Appearance">
+                  {([['light', 'Light', Sun], ['dark', 'Dark', Moon], ['system', 'System', Monitor]] as const).map(([value, label, Icon]) => (
+                    <button
+                      className={themePreference === value ? 'selected' : ''}
+                      key={value}
+                      type="button"
+                      aria-pressed={themePreference === value}
+                      onClick={() => onThemeChange(value)}
+                    ><Icon aria-hidden="true" /><span>{label}</span></button>
+                  ))}
+                </div>
+              </div>
               <div className="layer-list">
                 {primaryLayers.map((definition) => (
                   <LayerRow
@@ -344,20 +358,6 @@ export function MapControls({
                   ))}
                 </div>
               </details>
-              <div className="theme-setting">
-                <span className="theme-setting-label">Appearance</span>
-                <div className="theme-options" role="group" aria-label="Appearance">
-                  {([['light', 'Light', Sun], ['dark', 'Dark', Moon], ['system', 'System', Monitor]] as const).map(([value, label, Icon]) => (
-                    <button
-                      className={themePreference === value ? 'selected' : ''}
-                      key={value}
-                      type="button"
-                      aria-pressed={themePreference === value}
-                      onClick={() => onThemeChange(value)}
-                    ><Icon aria-hidden="true" /><span>{label}</span></button>
-                  ))}
-                </div>
-              </div>
             </div>
           </section>
         )}

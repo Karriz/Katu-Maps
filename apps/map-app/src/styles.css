@@ -632,9 +632,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 [data-theme='dark'] .route-endpoint-swap { background: #1a354d; border-color: #3b5b73; color: var(--color-ink); }
 [data-theme='dark'] .transit-panel-state { background: #173149; }
 [data-theme='dark'] .transit-panel-state.error { background: #4a2833; }
-[data-theme='dark'] .theme-setting { border-top: 1px solid var(--color-line); margin-top: 14px; padding: 14px 0 2px; }
+[data-theme='dark'] .theme-setting { padding: 2px 0 16px; }
 [data-theme='dark'] .theme-options button { color: var(--color-muted); }
-.theme-setting { border-top: 1px solid var(--color-line); margin-top: 14px; padding: 14px 0 2px; }
+.theme-setting { padding: 2px 0 16px; }
 .theme-setting-label { color: var(--color-muted); display: block; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
 .theme-options { display: grid; gap: 6px; grid-template-columns: repeat(3, 1fr); }
 .theme-options button { align-items: center; background: var(--surface-subtle); border: 1px solid var(--color-line); border-radius: 9px; color: var(--color-muted); cursor: pointer; display: flex; flex-direction: column; font: inherit; font-size: .67rem; gap: 5px; padding: 8px 4px; }
