@@ -72,6 +72,34 @@ async function openSelectedTrip(page: Page) {
   await expect(panel).toContainText('Stops on this route');
   await expect(panel).toContainText('Board here');
   await expect(panel.locator('.transit-route-stop')).toHaveCount(7);
+  await expectScrollablePanelBody(page, '.transit-trip-panel', '.transit-panel-header', '.transit-route-stop-scroll');
+}
+
+async function expectScrollablePanelBody(page: Page, panelSelector: string, headerSelector: string, bodySelector: string, requireOverflow = false) {
+  const snapshot = await page.locator(panelSelector).evaluate((panel, selectors) => {
+    const header = panel.querySelector<HTMLElement>(selectors.header);
+    const body = panel.querySelector<HTMLElement>(selectors.body);
+    if (!header || !body) return null;
+    const headerTop = header.getBoundingClientRect().top;
+    const initialTop = body.scrollTop;
+    body.scrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+    const result = {
+      headerTop,
+      headerTopAfterScroll: header.getBoundingClientRect().top,
+      bodyScrolled: body.scrollTop > initialTop,
+      hasOverflow: body.scrollHeight > body.clientHeight,
+      bodyOwnsOverflow: getComputedStyle(body).overflowY === 'auto' || getComputedStyle(body).overflowY === 'scroll',
+    };
+    body.scrollTop = initialTop;
+    return result;
+  }, { header: headerSelector, body: bodySelector });
+  expect(snapshot).not.toBeNull();
+  expect(snapshot!.headerTopAfterScroll).toBeCloseTo(snapshot!.headerTop, 1);
+  expect(snapshot!.bodyOwnsOverflow).toBe(true);
+  if (requireOverflow) {
+    expect(snapshot!.hasOverflow).toBe(true);
+    expect(snapshot!.bodyScrolled).toBe(true);
+  }
 }
 
 async function openRoute(page: Page) {

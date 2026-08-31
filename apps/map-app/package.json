@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:visual": "playwright test",
+    "test:visual:server": "vite --host 127.0.0.1 --port 4173",
+    "test:visual:external": "KATU_VISUAL_SERVER=external playwright test",
     "test:visual:scenario": "playwright test --grep"
   },
   "dependencies": {

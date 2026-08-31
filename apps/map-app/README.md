@@ -60,6 +60,17 @@ npm run test:visual
 npm run test:visual:scenario -- phone-search-autocomplete
 ```
 
+For long reload-heavy runs, the visual suite can use an externally managed
+Vite process so the server lifetime is independent of Playwright:
+
+```sh
+# terminal 1
+npm run test:visual:server
+
+# terminal 2
+npm run test:visual:external
+```
+
 Open `test-results/visual-report/index.html` after the run. The self-contained
 gallery links to full-size PNG files and records the scenario, viewport, fixture,
 browser, MapLibre and WebGL diagnostics, console errors, and failed requests.
