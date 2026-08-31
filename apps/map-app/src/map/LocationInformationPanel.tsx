@@ -5,6 +5,9 @@ import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import type { Favorite } from '../lib/Favorites';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import type { LocationSelection } from './useRoutePlanning';
+import { wikipediaUrl } from './LocationMedia';
+import { LocationImageCarousel } from './LocationImageCarousel';
+import { useLocationMedia } from './useLocationMedia';
 
 export function LocationInformationPanel({
   selection,
@@ -33,6 +36,13 @@ export function LocationInformationPanel({
   onShare: () => void;
   onDirections: () => void;
 }) {
+  const images = useLocationMedia(selection, selection.wikidata ?? `${selection.osmType ?? ''}${selection.osmId ?? selection.coordinates.join(',')}`);
+  const wikipedia = wikipediaUrl(selection.wikipedia);
+  const links = [
+    ...(wikipedia ? [{ label: 'Wikipedia', url: wikipedia }] : []),
+    ...(selection.website ? [{ label: 'Official website', url: selection.website }] : []),
+    ...(selection.socialLinks ?? []),
+  ];
   return (
     <aside className={`location-info-panel mobile-bottom-sheet${sheet.dragging ? ' is-dragging' : ''}`} style={sheet.style} data-snap={sheet.snap} aria-label="Location information">
       <MobileSheetHandle {...sheet} closeLabel="Close location information" onClose={onClose} />
@@ -47,16 +57,19 @@ export function LocationInformationPanel({
         </div>
       </div>
       <div className="location-info-content" tabIndex={0}>
+        <LocationImageCarousel images={images} />
         {detailsLoading && <p className="location-info-loading">Loading OpenStreetMap details…</p>}
-        {(selection.openingHours || selection.phone || selection.email || selection.website) && (
+        {(selection.openingHours || selection.phone || selection.email) && (
           <div className="location-info-details">
             {selection.openingHours && <div><strong>Hours</strong><span>{selection.openingHours}</span></div>}
             {selection.phone && <div><strong>Phone</strong><a href={`tel:${selection.phone}`}>{selection.phone}</a></div>}
             {selection.email && <div><strong>Email</strong><a href={`mailto:${selection.email}`}>{selection.email}</a></div>}
-            {selection.website && <div><strong>Web</strong><a href={selection.website} target="_blank" rel="noreferrer">Visit website</a></div>}
           </div>
         )}
-        {!detailsLoading && !selection.openingHours && !selection.phone && !selection.email && !selection.website && (
+        {links.length > 0 && <nav className="location-external-links" aria-label="External links">
+          {links.map((link) => <a key={`${link.label}-${link.url}`} href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>)}
+        </nav>}
+        {!detailsLoading && !selection.openingHours && !selection.phone && !selection.email && links.length === 0 && (
           <p className="location-info-empty">No opening hours or contact details are available in the current map data.</p>
         )}
         <span className="location-info-source">

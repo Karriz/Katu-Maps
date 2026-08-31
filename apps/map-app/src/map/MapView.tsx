@@ -72,6 +72,7 @@ import { MapCameraActions } from './MapCameraActions';
 import { RoutePlannerControls } from './RoutePlannerControls';
 import { PositionInformationPanel } from './PositionInformationPanel';
 import { LocationInformationPanel } from './LocationInformationPanel';
+import { parseLocationMetadata, safeHttpUrl } from './LocationMedia';
 import { InfoActionRow } from '../components/InfoActionRow';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
 import {
@@ -318,7 +319,8 @@ function locationDetails(properties: Record<string, unknown>) {
     openingHours: locationProperty(detailProperties, 'opening_hours', 'openingHours'),
     phone: locationProperty(detailProperties, 'phone', 'contact:phone', 'contact_phone'),
     email: locationProperty(detailProperties, 'email', 'contact:email', 'contact_email'),
-    website: website && (/^https?:\/\//i.test(website) ? website : `https://${website}`),
+    website: safeHttpUrl(website),
+    ...parseLocationMetadata(detailProperties),
   };
 }
 
