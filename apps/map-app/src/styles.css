@@ -183,6 +183,16 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-details span, .location-info-details a { color: #475569; font-size: 0.77rem; line-height: 1.35; overflow-wrap: anywhere; }
 .location-info-details a { color: var(--color-accent); text-decoration: none; }
 .location-info-details a:hover { text-decoration: underline; }
+.location-media { aspect-ratio: 3 / 2; background: #e8edf2; border-radius: 12px; margin: 2px 0 14px; overflow: hidden; position: relative; }
+.location-media > img { display: block; height: 100%; object-fit: cover; width: 100%; }
+.location-media > button { align-items: center; background: rgb(15 23 42 / 72%); border: 0; border-radius: 999px; color: white; display: flex; height: 34px; justify-content: center; position: absolute; top: calc(50% - 25px); width: 34px; }
+.location-media > button.previous { left: 8px; }
+.location-media > button.next { right: 8px; }
+.location-media-caption { align-items: center; background: linear-gradient(transparent, rgb(15 23 42 / 84%)); bottom: 0; color: white; display: flex; font-size: .63rem; gap: 6px; justify-content: space-between; left: 0; padding: 18px 9px 7px; position: absolute; right: 0; }
+.location-media-caption span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.location-media-caption a { align-items: center; color: white; display: flex; flex: 0 0 auto; gap: 3px; text-decoration: none; }
+.location-external-links { border-top: 1px solid #edf0f3; display: flex; flex-wrap: wrap; gap: 7px; margin: 4px 0 12px; padding-top: 11px; }
+.location-external-links a { background: color-mix(in srgb, var(--color-accent) 10%, transparent); border-radius: 999px; color: var(--color-accent); font-size: .72rem; font-weight: 650; padding: 5px 9px; text-decoration: none; }
 .location-info-source { color: #94a3b8; font-size: 0.68rem; }
 .location-info-attribution { color: #94a3b8; display: block; font-size: 0.64rem; margin-top: 4px; text-decoration: none; }
 .location-info-attribution:hover { color: var(--color-accent); text-decoration: underline; }

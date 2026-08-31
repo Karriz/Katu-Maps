@@ -4,8 +4,9 @@ import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import type { TransitProviderId } from './transit';
 import type { RouteMode, RouteResult } from './ValhallaRouting';
 import type { TransitRouteResult } from './TransitRouting';
+import type { LocationMetadata } from './LocationMedia';
 
-export type LocationSelection = {
+export type LocationSelection = LocationMetadata & {
   name: string;
   category: string;
   address?: string;
