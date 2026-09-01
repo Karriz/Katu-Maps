@@ -178,6 +178,11 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-content:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: -3px; }
 .location-info-content .location-info-empty { color: #94a3b8; font-size: 0.74rem; font-style: italic; margin: 2px 0 12px; }
 .location-info-content .location-info-loading { color: var(--color-accent); font-size: 0.74rem; margin: 2px 0 12px; }
+.location-description { border-top: 1px solid #edf0f3; margin: 4px 0 12px; padding-top: 11px; }
+.location-description p { color: #475569; display: -webkit-box; font-size: 0.8rem; line-height: 1.45; margin-bottom: 5px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
+.location-description small { color: #94a3b8; font-size: 0.65rem; }
+.location-description a { color: var(--color-accent); text-decoration: none; }
+.location-description a:hover { text-decoration: underline; }
 .location-info-details { border-top: 1px solid #edf0f3; display: grid; gap: 8px; margin: 4px 0 12px; padding-top: 11px; }
 .location-info-details div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .location-info-details strong { color: #94a3b8; font-size: 0.62rem; font-weight: 750; letter-spacing: 0.07em; text-transform: uppercase; }

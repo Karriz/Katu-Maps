@@ -8,6 +8,7 @@ import type { LocationSelection } from './useRoutePlanning';
 import { wikipediaUrl } from './LocationMedia';
 import { LocationImageCarousel } from './LocationImageCarousel';
 import { useLocationMedia } from './useLocationMedia';
+import { useLocationDescription } from './useLocationDescription';
 
 export function LocationInformationPanel({
   selection,
@@ -36,7 +37,9 @@ export function LocationInformationPanel({
   onShare: () => void;
   onDirections: () => void;
 }) {
-  const images = useLocationMedia(selection, selection.wikidata ?? `${selection.osmType ?? ''}${selection.osmId ?? selection.coordinates.join(',')}`);
+  const identity = selection.wikidata ?? `${selection.osmType ?? ''}${selection.osmId ?? selection.coordinates.join(',')}`;
+  const images = useLocationMedia(selection, identity);
+  const description = useLocationDescription(selection, identity);
   const wikipedia = wikipediaUrl(selection.wikipedia);
   const links = [
     ...(wikipedia ? [{ label: 'Wikipedia', url: wikipedia }] : []),
@@ -58,6 +61,14 @@ export function LocationInformationPanel({
       </div>
       <div className="location-info-content" tabIndex={0}>
         <LocationImageCarousel images={images} />
+        {description && <section className="location-description" aria-label="About this location">
+          <p>{description.text}</p>
+          <small>
+            {description.source === 'wikipedia' && description.articleUrl
+              ? <><a href={description.articleUrl} target="_blank" rel="noopener noreferrer">Read on Wikipedia</a> · Wikipedia, CC BY-SA</>
+              : 'Description from OpenStreetMap'}
+          </small>
+        </section>}
         {detailsLoading && <p className="location-info-loading">Loading OpenStreetMap details…</p>}
         {(selection.openingHours || selection.phone || selection.email) && (
           <div className="location-info-details">
