@@ -104,6 +104,7 @@ import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink
 import { useTheme } from '../theme';
 import { fetchWithTimeout } from './ApiRequest';
 import { serviceConfig } from './ServiceConfig';
+import { RequestRateGate } from './RequestRateGate';
 import { favoriteMapFeatures, findTransitFavorite, loadFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
@@ -715,7 +716,7 @@ export function MapView() {
   const lastUserInteractionRef = useRef(0);
   const locationDetailsAbortRef = useRef<AbortController | null>(null);
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
-  const nominatimNextRequestAtRef = useRef(0);
+  const nominatimRequestGateRef = useRef(new RequestRateGate(1_100));
   const routeSearchAnchorRefs = useRef<Record<'origin' | 'destination', HTMLDivElement | null>>({
     origin: null,
     destination: null,
@@ -903,17 +904,7 @@ export function MapView() {
     const cached = nominatimCacheRef.current.get(lookupKey);
     if (cached) return cached.address;
 
-    const scheduledAt = Math.max(Date.now(), nominatimNextRequestAtRef.current);
-    nominatimNextRequestAtRef.current = scheduledAt + 1100;
-    const wait = scheduledAt - Date.now();
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(resolve, wait);
-      signal.addEventListener('abort', () => {
-        window.clearTimeout(timer);
-        reject(new DOMException('Aborted', 'AbortError'));
-      }, { once: true });
-    });
-    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    await nominatimRequestGateRef.current.wait(signal);
     const params = new URLSearchParams({ format: 'jsonv2', addressdetails: '1' });
     const response = await fetchWithTimeout(
       `${serviceConfig.nominatimEndpoint}/reverse?lat=${coordinates[1]}&lon=${coordinates[0]}&zoom=18&${params}`,
@@ -2399,18 +2390,8 @@ export function MapView() {
     const controller = new AbortController();
     locationDetailsAbortRef.current = controller;
     setLocationDetailsLoading(true);
-    const scheduledAt = Math.max(Date.now(), nominatimNextRequestAtRef.current);
-    nominatimNextRequestAtRef.current = scheduledAt + 1100;
-    const wait = scheduledAt - Date.now();
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = window.setTimeout(resolve, wait);
-        controller.signal.addEventListener('abort', () => {
-          window.clearTimeout(timer);
-          reject(new DOMException('Aborted', 'AbortError'));
-        }, { once: true });
-      });
-      if (controller.signal.aborted) return;
+      await nominatimRequestGateRef.current.wait(controller.signal);
       const params = new URLSearchParams({
         format: 'jsonv2',
         addressdetails: '1',

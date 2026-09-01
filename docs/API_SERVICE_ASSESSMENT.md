@@ -23,7 +23,7 @@ documented in `.env.example`. This permits a tagged production build to move to
 a paid, proxied or self-hosted provider without source changes. These variables
 are visible to users and must not contain secrets.
 
-Selected-trip refresh defaults to 30 seconds and cannot be configured below 15
+Selected-trip refresh defaults to 15 seconds and cannot be configured below 15
 seconds. Polling stops while the document is hidden. When a journey tracks both
 the current and next transit leg, each refresh may issue two provider requests.
 

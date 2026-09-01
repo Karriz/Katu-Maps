@@ -12,7 +12,7 @@ function configuredEndpoint(value: string | undefined, fallback: string) {
   }
 }
 
-function configuredInterval(value: string | undefined, fallback: number, minimum: number) {
+export function configuredInterval(value: string | undefined, fallback: number, minimum: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(minimum, Math.round(parsed)) : fallback;
 }
@@ -27,5 +27,5 @@ export const serviceConfig = Object.freeze({
   transitousApiRoot: configuredEndpoint(import.meta.env.VITE_TRANSITOUS_API_ROOT, 'https://api.transitous.org/api/v6'),
   transitousRoutesEndpoint: configuredEndpoint(import.meta.env.VITE_TRANSITOUS_ROUTES_ENDPOINT, 'https://api.transitous.org/api/experimental/map/routes'),
   digitransitEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRANSIT_ENDPOINT, 'https://api.digitransit.fi/routing/v2/finland/gtfs/v1'),
-  transitTripRefreshMs: configuredInterval(import.meta.env.VITE_TRANSIT_TRIP_REFRESH_MS, 30_000, 15_000),
+  transitTripRefreshMs: configuredInterval(import.meta.env.VITE_TRANSIT_TRIP_REFRESH_MS, 15_000, 15_000),
 });
