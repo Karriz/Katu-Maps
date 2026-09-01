@@ -208,9 +208,19 @@ async function verifyMapAndHelpKeyboard(page: Page) {
   await help.focus();
   await help.press('Enter');
   await expect(page.getByRole('heading', { name: 'Controls help' })).toBeFocused();
+  const privacyLink = page.getByRole('link', { name: 'Privacy policy' });
+  await expect(privacyLink).toHaveAttribute('href', 'https://github.com/Karriz/Katu-Maps/blob/main/apps/map-app/public/privacy.md');
+  await expect(privacyLink).toHaveAttribute('target', '_blank');
   const sourceLink = page.getByRole('link', { name: 'View source on GitHub' });
   await expect(sourceLink).toHaveAttribute('href', 'https://github.com/Karriz/Katu-Maps');
   await expect(sourceLink).toHaveAttribute('target', '_blank');
+  const privacyLinkBox = await privacyLink.boundingBox();
+  const sourceLinkBox = await sourceLink.boundingBox();
+  expect(privacyLinkBox).not.toBeNull();
+  expect(sourceLinkBox).not.toBeNull();
+  if (privacyLinkBox && sourceLinkBox) {
+    expect(Math.abs(privacyLinkBox.x - sourceLinkBox.x)).toBeLessThanOrEqual(1);
+  }
   await page.keyboard.press('Escape');
   await expect(help).toBeFocused();
 
