@@ -194,11 +194,6 @@ export function MapControls({
 
   return (
     <>
-      {!routeOpen && (
-        <div className="map-brand" aria-hidden="true">
-          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
-        </div>
-      )}
       {!routeOpen && <div className="location-search">
         <form
           className="location-search-form"
