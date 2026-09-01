@@ -11,9 +11,10 @@ import type {
   TransitTripPlace,
 } from './types';
 import { decodePolyline, finiteNumber, text } from './utils';
+import { apiHttpError, fetchWithTimeout } from '../ApiRequest';
+import { serviceConfig } from '../ServiceConfig';
 
-const API_ROOT = 'https://api.transitous.org/api/v6';
-const HEADERS = { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' };
+const HEADERS = { Accept: 'application/json', 'X-Client-Id': serviceConfig.clientId };
 
 type RawStop = {
   name?: unknown;
@@ -157,8 +158,8 @@ export function normalizeTransitousRouteResults(itineraries: TransitousItinerary
 }
 
 async function jsonRequest<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal, headers: HEADERS });
-  if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
+  const response = await fetchWithTimeout(url, { signal, headers: HEADERS }, 20_000);
+  if (!response.ok) throw apiHttpError(response, 'Transitous');
   return response.json() as Promise<T>;
 }
 
@@ -174,7 +175,7 @@ export const transitousProvider: TransitProvider = {
       modes: 'TRANSIT',
       language: typeof navigator !== 'undefined' ? navigator.language : 'en',
     });
-    const payload = await jsonRequest<unknown>(`${API_ROOT}/map/stops?${params}`, signal);
+    const payload = await jsonRequest<unknown>(`${serviceConfig.transitousApiRoot}/map/stops?${params}`, signal);
     if (!Array.isArray(payload)) return [];
     return payload.flatMap((item, index) => {
       const stop = stopFrom(item as RawStop, index);
@@ -204,7 +205,7 @@ export const transitousProvider: TransitProvider = {
       params.set('exactRadius', 'true');
     }
     const payload = await jsonRequest<{ stopTimes?: Array<Record<string, unknown> & { place?: Record<string, unknown> }> }>(
-      `${API_ROOT}/stoptimes?${params}`,
+      `${serviceConfig.transitousApiRoot}/stoptimes?${params}`,
       signal,
     );
     return (payload.stopTimes ?? []).flatMap((item) => {
@@ -237,7 +238,7 @@ export const transitousProvider: TransitProvider = {
       joinInterlinedLegs: 'false',
       language: typeof navigator !== 'undefined' ? navigator.language : 'en',
     });
-    const payload = await jsonRequest<{ legs?: RawLeg[] }>(`${API_ROOT}/trip?${params}`, signal);
+    const payload = await jsonRequest<{ legs?: RawLeg[] }>(`${serviceConfig.transitousApiRoot}/trip?${params}`, signal);
     return { legs: (payload.legs ?? []).map(tripLeg) } satisfies TransitTrip;
   },
 
@@ -267,7 +268,7 @@ export const transitousProvider: TransitProvider = {
       const abort = () => controller.abort();
       options.signal?.addEventListener('abort', abort, { once: true });
       try {
-        response = await fetch(`${API_ROOT}/plan?${params}`, {
+        response = await fetch(`${serviceConfig.transitousApiRoot}/plan?${params}`, {
           signal: controller.signal,
           headers: HEADERS,
         });

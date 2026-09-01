@@ -3,6 +3,8 @@ import type { Map } from 'maplibre-gl';
 import { orderedFavorites, type Favorite } from '../lib/Favorites';
 import { parseCoordinates } from './PositionInformation';
 import { searchTransitStops, type TransitProviderId } from './transit';
+import { apiHttpError, fetchWithTimeout } from './ApiRequest';
+import { serviceConfig } from './ServiceConfig';
 
 export type PhotonFeature = {
   geometry: { coordinates: [number, number] };
@@ -108,8 +110,10 @@ export function useMapSearch(mapRef: RefObject<Map | null>, favorites: Favorite[
           setSearchResultsQuery(query);
           return;
         }
-        const response = await fetch(`https://photon.komoot.io/api/?${params.toString()}`, { signal: controller.signal });
-        if (!response.ok) throw new Error('Search service unavailable');
+        const response = await fetchWithTimeout(`${serviceConfig.photonEndpoint}/?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw apiHttpError(response, 'Photon');
         const data = await response.json() as { features?: PhotonFeature[] };
         const photonResults = data.features ?? [];
         const transitResults: PhotonFeature[] = [];

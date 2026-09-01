@@ -1,11 +1,12 @@
 import type { GeoJSONSource, LineLayerSpecification, Map } from 'maplibre-gl';
 import { decodePolyline } from './transit/utils';
+import { apiHttpError, fetchWithTimeout } from './ApiRequest';
+import { serviceConfig } from './ServiceConfig';
 
 const SOURCE_ID = 'transit-route-overlay';
 const CASING_LAYER_ID = 'transit-route-overlay-casing';
 const LINE_LAYER_ID = 'transit-route-overlay-lines';
-const API_ROOT = 'https://api.transitous.org/api/experimental/map/routes';
-const HEADERS = { Accept: 'application/json', 'X-Client-Id': 'tampere-3d-map' };
+const HEADERS = { Accept: 'application/json', 'X-Client-Id': serviceConfig.clientId };
 const RAIL_MODES = new Set([
   'TRAM', 'SUBWAY', 'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL', 'FUNICULAR',
 ]);
@@ -128,8 +129,11 @@ export class TransitRouteOverlay {
       language: typeof navigator === 'undefined' ? 'en' : navigator.language,
     });
     try {
-      const response = await fetch(`${API_ROOT}?${params}`, { signal: controller.signal, headers: HEADERS });
-      if (!response.ok) throw new Error(`Transitous returned HTTP ${response.status}`);
+      const response = await fetchWithTimeout(`${serviceConfig.transitousRoutesEndpoint}?${params}`, {
+        signal: controller.signal,
+        headers: HEADERS,
+      }, 20_000);
+      if (!response.ok) throw apiHttpError(response, 'Transitous');
       const payload = await response.json() as TransitousMapRoutes;
       if (this.map !== null && requestVersion === this.requestVersion) {
         (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData({

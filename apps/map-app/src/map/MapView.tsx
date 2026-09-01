@@ -102,6 +102,8 @@ import { installForegroundRecovery } from '../lib/ForegroundRecovery';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { useTheme } from '../theme';
+import { fetchWithTimeout } from './ApiRequest';
+import { serviceConfig } from './ServiceConfig';
 import { favoriteMapFeatures, findTransitFavorite, loadFavorites, resolvedFavoriteEntityType, saveFavorites, upsertFavorite, type Favorite, type FavoriteKind } from '../lib/Favorites';
 import {
   CARTOON_SUN_AZIMUTH_DEGREES,
@@ -713,7 +715,7 @@ export function MapView() {
   const lastUserInteractionRef = useRef(0);
   const locationDetailsAbortRef = useRef<AbortController | null>(null);
   const nominatimCacheRef = useRef(new globalThis.Map<string, Partial<LocationSelection>>());
-  const nominatimLastRequestRef = useRef(0);
+  const nominatimNextRequestAtRef = useRef(0);
   const routeSearchAnchorRefs = useRef<Record<'origin' | 'destination', HTMLDivElement | null>>({
     origin: null,
     destination: null,
@@ -901,7 +903,9 @@ export function MapView() {
     const cached = nominatimCacheRef.current.get(lookupKey);
     if (cached) return cached.address;
 
-    const wait = Math.max(0, 1100 - (Date.now() - nominatimLastRequestRef.current));
+    const scheduledAt = Math.max(Date.now(), nominatimNextRequestAtRef.current);
+    nominatimNextRequestAtRef.current = scheduledAt + 1100;
+    const wait = scheduledAt - Date.now();
     await new Promise<void>((resolve, reject) => {
       const timer = window.setTimeout(resolve, wait);
       signal.addEventListener('abort', () => {
@@ -910,10 +914,9 @@ export function MapView() {
       }, { once: true });
     });
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-    nominatimLastRequestRef.current = Date.now();
     const params = new URLSearchParams({ format: 'jsonv2', addressdetails: '1' });
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${coordinates[1]}&lon=${coordinates[0]}&zoom=18&${params}`,
+    const response = await fetchWithTimeout(
+      `${serviceConfig.nominatimEndpoint}/reverse?lat=${coordinates[1]}&lon=${coordinates[0]}&zoom=18&${params}`,
       { signal },
     );
     if (!response.ok) throw new Error('Nominatim reverse lookup failed');
@@ -2396,20 +2399,27 @@ export function MapView() {
     const controller = new AbortController();
     locationDetailsAbortRef.current = controller;
     setLocationDetailsLoading(true);
-    const wait = Math.max(0, 1100 - (Date.now() - nominatimLastRequestRef.current));
+    const scheduledAt = Math.max(Date.now(), nominatimNextRequestAtRef.current);
+    nominatimNextRequestAtRef.current = scheduledAt + 1100;
+    const wait = scheduledAt - Date.now();
     try {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, wait));
+      await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(resolve, wait);
+        controller.signal.addEventListener('abort', () => {
+          window.clearTimeout(timer);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
       if (controller.signal.aborted) return;
-      nominatimLastRequestRef.current = Date.now();
       const params = new URLSearchParams({
         format: 'jsonv2',
         addressdetails: '1',
         extratags: '1',
       });
       const endpoint = selection.osmType && selection.osmId
-        ? `https://nominatim.openstreetmap.org/lookup?osm_ids=${encodeURIComponent(`${selection.osmType}${selection.osmId}`)}&${params}`
-        : `https://nominatim.openstreetmap.org/reverse?lat=${selection.coordinates[1]}&lon=${selection.coordinates[0]}&zoom=18&${params}`;
-      const response = await fetch(endpoint, { signal: controller.signal });
+        ? `${serviceConfig.nominatimEndpoint}/lookup?osm_ids=${encodeURIComponent(`${selection.osmType}${selection.osmId}`)}&${params}`
+        : `${serviceConfig.nominatimEndpoint}/reverse?lat=${selection.coordinates[1]}&lon=${selection.coordinates[0]}&zoom=18&${params}`;
+      const response = await fetchWithTimeout(endpoint, { signal: controller.signal });
       if (!response.ok) throw new Error('Nominatim lookup failed');
       const payload = await response.json() as Record<string, unknown> | Array<Record<string, unknown>>;
       const result = Array.isArray(payload) ? payload[0] : payload;

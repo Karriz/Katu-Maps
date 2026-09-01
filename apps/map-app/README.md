@@ -19,6 +19,14 @@ The Vite variable is public at runtime because this is a static browser
 application; use a backend proxy if the deployment requires a secret
 credential.
 
+Public API endpoints, the identifying client ID, and selected-trip polling are
+also configurable through the variables documented in `.env.example`. This
+allows production builds to move from community endpoints to hosted or
+self-managed services without source changes. All `VITE_*` values are embedded
+in the browser bundle and must be treated as public. See
+[`docs/API_SERVICE_ASSESSMENT.md`](../../docs/API_SERVICE_ASSESSMENT.md) for the
+request controls, remaining risks, and suggested scale checkpoints.
+
 The map retains MapLibre terrain, hillshade, OpenMapTiles building
 extrusions, water styling, and deterministic procedural trees sampled from
 `landcover`, `landuse`, and `park`. Building colours use mapped facade colours

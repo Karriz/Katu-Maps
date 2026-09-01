@@ -1,4 +1,5 @@
 import type { TransitRouteResult } from './transit';
+import { serviceConfig } from './ServiceConfig';
 
 export type RouteMode = 'pedestrian' | 'bicycle' | 'auto' | 'transit';
 
@@ -32,10 +33,9 @@ type OsrmResponse = {
   message?: string;
 };
 
-const VALHALLA_ENDPOINT = 'https://valhalla1.openstreetmap.de/route';
 // Public OSRM servers are not consistently CORS-enabled. Keep OSRM opt-in so
 // the browser only calls a deployment-owned CORS proxy or OSRM instance.
-const OSRM_ENDPOINT = import.meta.env.VITE_OSRM_ENDPOINT?.trim();
+const OSRM_ENDPOINT = serviceConfig.osrmEndpoint;
 const OSRM_ENDPOINTS: Record<Exclude<RouteMode, 'transit'>, string> = {
   pedestrian: 'foot',
   bicycle: 'bike',
@@ -134,11 +134,11 @@ export async function fetchValhallaRoute(
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     try {
-      response = await fetch(VALHALLA_ENDPOINT, {
+      response = await fetch(serviceConfig.valhallaEndpoint, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-client-id': 'tampere-3d-map',
+          'x-client-id': serviceConfig.clientId,
         },
         body: JSON.stringify({
       locations: [
