@@ -219,6 +219,41 @@ async function verifyMapAndHelpKeyboard(page: Page) {
   expect(await canvas.getAttribute('aria-label')).toBe(zoomBefore);
 }
 
+async function verifyControlsHelpPlacement(page: Page, portrait: boolean) {
+  const trigger = page.getByRole('button', { name: 'Controls help' });
+  await trigger.click();
+  const panel = page.locator('#controls-help-panel');
+  await expect(panel).toBeVisible();
+  await expect(trigger).toBeInViewport();
+  await expect(panel).toBeInViewport();
+
+  const geometry = await page.evaluate(() => {
+    const triggerRect = document.querySelector('.map-tool-help')!.getBoundingClientRect();
+    const panelRect = document.querySelector('#controls-help-panel')!.getBoundingClientRect();
+    const searchRect = document.querySelector('.location-search-form')!.getBoundingClientRect();
+    const headerRect = document.querySelector('.controls-help-panel header')!.getBoundingClientRect();
+    const content = document.querySelector<HTMLElement>('.controls-help-content')!;
+    return {
+      trigger: { left: triggerRect.left, top: triggerRect.top },
+      panel: { left: panelRect.left, top: panelRect.top },
+      search: { left: searchRect.left, bottom: searchRect.bottom },
+      headerTop: headerRect.top,
+      contentOverflow: getComputedStyle(content).overflowY,
+    };
+  });
+
+  expect(geometry.contentOverflow).toBe('auto');
+  if (portrait) {
+    expect(geometry.trigger.left).toBeCloseTo(geometry.search.left, 1);
+    expect(geometry.trigger.top).toBeGreaterThanOrEqual(geometry.search.bottom);
+    expect(geometry.panel.left).toBeCloseTo(geometry.search.left, 1);
+    expect(geometry.panel.top).toBeGreaterThan(geometry.search.bottom);
+    expect(geometry.headerTop).toBeCloseTo(geometry.panel.top, 1);
+  } else {
+    expect(geometry.panel.left).toBeGreaterThan(geometry.trigger.left);
+  }
+}
+
 async function chooseRouteResult(page: Page, listName: string, resultText: string, useLast = false) {
   const list = page.getByRole('listbox', { name: listName });
   await expect(list).toBeVisible();
@@ -729,13 +764,22 @@ const scenarios: Scenario[] = [
     name: 'mobile-landscape-controls-help',
     description: 'Help remains visible beside Layers and fits a short landscape safe viewport',
     viewport: 'landscape',
-    setup: async page => {
-      await page.getByRole('button', { name: 'Controls help' }).click();
-      await expect(page.locator('#controls-help-panel')).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Controls help' })).toBeInViewport();
-      await expect(page.locator('#controls-help-panel')).toBeInViewport();
-    },
+    setup: page => verifyControlsHelpPlacement(page, false),
     state: 'responsive Help open in short mobile landscape',
+  },
+  {
+    name: 'phone-portrait-controls-help',
+    description: 'Help trigger and fixed-header panel sit below and align with search in portrait',
+    viewport: 'phone',
+    setup: page => verifyControlsHelpPlacement(page, true),
+    state: 'responsive Help open below search in mobile portrait',
+  },
+  {
+    name: 'desktop-controls-help',
+    description: 'Help opens inward from the left control dock and remains in the viewport',
+    viewport: 'desktop',
+    setup: page => verifyControlsHelpPlacement(page, false),
+    state: 'responsive Help open beside desktop dock',
   },
   {
     name: 'tablet-transit-alternatives',
