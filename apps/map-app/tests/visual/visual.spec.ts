@@ -219,34 +219,41 @@ async function verifyMapAndHelpKeyboard(page: Page) {
   expect(await canvas.getAttribute('aria-label')).toBe(zoomBefore);
 }
 
-async function verifyControlsHelpPlacement(page: Page, layout: 'dock' | 'portrait') {
+async function verifyControlsHelpPlacement(page: Page, layout: 'search' | 'portrait-dock') {
   const trigger = page.getByRole('button', { name: 'Controls help' });
-  await trigger.click();
-  const panel = page.locator('#controls-help-panel');
   await expect(trigger).toBeInViewport();
-  await expect(panel).toBeInViewport();
 
   const triggerBox = await trigger.boundingBox();
-  const panelBox = await panel.boundingBox();
   const searchBox = await page.locator('.location-search-form').boundingBox();
+  const layersBox = await page.getByRole('button', { name: 'Map layers' }).boundingBox();
+  const routeBox = await page.getByRole('button', { name: 'Plan a route' }).boundingBox();
   expect(triggerBox).not.toBeNull();
-  expect(panelBox).not.toBeNull();
   expect(searchBox).not.toBeNull();
-  if (!triggerBox || !panelBox || !searchBox) return;
+  expect(layersBox).not.toBeNull();
+  expect(routeBox).not.toBeNull();
+  if (!triggerBox || !searchBox || !layersBox || !routeBox) return;
 
-  if (layout === 'portrait') {
-    expect(Math.abs(triggerBox.x - searchBox.x)).toBeLessThanOrEqual(2);
-    expect(triggerBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height + 8);
-    expect(panelBox.y).toBeGreaterThanOrEqual(triggerBox.y + triggerBox.height + 8);
+  if (layout === 'portrait-dock') {
+    expect(Math.abs(triggerBox.x - layersBox.x)).toBeLessThanOrEqual(2);
+    expect(triggerBox.y).toBeGreaterThanOrEqual(routeBox.y + routeBox.height + 6);
   } else {
-    expect(panelBox.x).toBeGreaterThanOrEqual(triggerBox.x + triggerBox.width + 8);
+    expect(triggerBox.x).toBeGreaterThanOrEqual(searchBox.x + searchBox.width + 6);
+    expect(Math.abs(triggerBox.y - searchBox.y)).toBeLessThanOrEqual(2);
   }
 
+  await trigger.click();
+  const panel = page.locator('#controls-help-panel');
+  await expect(panel).toBeInViewport();
   const header = panel.locator('header');
   await expect(header.getByRole('heading', { name: 'Controls help' })).toBeVisible();
-  await expect(header.getByRole('button', { name: 'Close controls help' })).toBeVisible();
-  expect(await panel.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
+  const close = header.getByRole('button', { name: 'Close controls help' });
+  await expect(close).toBeVisible();
+  await expect(panel).toHaveCSS('pointer-events', 'auto');
   expect(await panel.locator('.controls-help-content').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+
+  await close.click();
+  await expect(panel).toBeHidden();
+  await expect(trigger).toBeFocused();
 }
 
 async function chooseRouteResult(page: Page, listName: string, resultText: string, useLast = false) {
@@ -757,24 +764,24 @@ const scenarios: Scenario[] = [
   },
   {
     name: 'desktop-controls-help-placement',
-    description: 'Help opens inward from the desktop tool dock and remains contained',
+    description: 'Help sits to the right of desktop search and its panel remains contained',
     viewport: 'desktop',
-    setup: page => verifyControlsHelpPlacement(page, 'dock'),
-    state: 'desktop Help open beside the tool dock',
+    setup: page => verifyControlsHelpPlacement(page, 'search'),
+    state: 'desktop Help open from beside search',
   },
   {
     name: 'phone-controls-help-placement',
-    description: 'Help trigger and fixed-header panel sit below the portrait search control',
+    description: 'Help is the bottom portrait dock item and its panel keeps a fixed header',
     viewport: 'phone',
-    setup: page => verifyControlsHelpPlacement(page, 'portrait'),
-    state: 'portrait Help open below search',
+    setup: page => verifyControlsHelpPlacement(page, 'portrait-dock'),
+    state: 'portrait Help open from the dock',
   },
   {
     name: 'mobile-landscape-controls-help',
-    description: 'Help remains visible beside Layers and fits a short landscape safe viewport',
+    description: 'Help sits to the right of search and fits a short landscape safe viewport',
     viewport: 'landscape',
-    setup: page => verifyControlsHelpPlacement(page, 'dock'),
-    state: 'responsive Help open in short mobile landscape',
+    setup: page => verifyControlsHelpPlacement(page, 'search'),
+    state: 'landscape Help open from beside search',
   },
   {
     name: 'tablet-transit-alternatives',
