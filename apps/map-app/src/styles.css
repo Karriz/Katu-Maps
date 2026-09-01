@@ -44,7 +44,7 @@
 
 * { box-sizing: border-box; }
 
-:where(.map-view h1, .map-view h2, .map-view h3, .layer-panel-heading strong, .route-panel-heading strong, .map-brand, .controls-help-brand) {
+:where(.map-view h1, .map-view h2, .map-view h3, .layer-panel-heading strong, .route-panel-heading strong, .controls-help-brand) {
   font-family: var(--font-heading);
   letter-spacing: -0.015em;
 }
@@ -537,7 +537,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .terrain-toggle { background: #f4fbff; border: 1px solid #86aac2; border-radius: 8px; color: #163047; cursor: pointer; font: inherit; font-size: 0.8rem; padding: 8px 10px; position: absolute; right: 16px; top: 84px; z-index: 1; }
 .terrain-toggle:hover { background: #dff3ff; }
 .terrain-toggle[aria-pressed='true'] { background: #b9e6ff; border-color: #4f9ac5; }
-.map-brand { display: none; }
 .location-search { left: var(--map-control-edge); position: absolute; top: 22px; width: min(348px, calc(100% - 56px)); z-index: 5; }
 .location-search-form { align-items: center; background: var(--surface-control); border: 1px solid rgb(203 215 228 / 82%); border-radius: 16px; box-shadow: var(--shadow-card); display: flex; gap: 14px; min-height: 64px; padding: 0 16px 0 20px; }
 .location-search-form:focus-within { border-color: #8ab7f5; box-shadow: var(--shadow-card), 0 0 0 3px rgb(80 145 235 / 20%); }
@@ -984,25 +983,4 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .transit-journey-detail .transit-route-leg { min-height: 82px; }
   .transit-journey-detail .transit-transfer-marker { margin: 6px 0 8px 1px; }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
-}
-
-@media (min-width: 1024px) and (min-height: 541px) {
-  .map-brand {
-    align-items: center;
-    background: var(--surface-control);
-    border: 1px solid rgb(203 215 228 / 82%);
-    border-radius: 16px;
-    box-shadow: var(--shadow-card);
-    display: flex;
-    height: 64px;
-    justify-content: center;
-    left: 28px;
-    position: absolute;
-    top: 22px;
-    width: 64px;
-    z-index: 5;
-  }
-  .map-brand img { border-radius: 11px; height: 44px; width: 44px; }
-  .location-search { left: 108px; }
-  .map-tools { left: 108px; }
 }
