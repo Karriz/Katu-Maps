@@ -7,7 +7,7 @@ import {
   Crosshair,
   Footprints,
   Globe2,
-  Github,
+  Code2,
   Layers3,
   Route,
   Mountain,
@@ -384,7 +384,7 @@ export function MapControls({
             </div>
             <footer className="controls-help-footer">
               <a href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noreferrer">
-                <Github aria-hidden="true" />
+                <Code2 aria-hidden="true" />
                 <span>View source on GitHub</span>
               </a>
             </footer>
