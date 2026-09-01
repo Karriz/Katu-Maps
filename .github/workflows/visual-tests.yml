@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  visual-review:
+  unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: apps/map-app
@@ -26,15 +26,35 @@ jobs:
       - run: npm ci
       - name: Run unit tests
         run: npm test
+
+  visual-review:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/map-app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/map-app/package-lock.json
       - name: Cache Playwright browser
+        id: playwright-cache
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/map-app/package-lock.json') }}
+      - run: npm ci
       - run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+      - run: npx playwright install chromium
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
       - name: Start visual test server
         run: |
-          VITE_DIGITRANSIT_SUBSCRIPTION_KEY=visual-fixture-key npm run test:visual:server > "$RUNNER_TEMP/katu-vite.log" 2>&1 &
+          VITE_DIGITRANSIT_SUBSCRIPTION_KEY=visual-fixture-key npm run test:visual:preview > "$RUNNER_TEMP/katu-vite.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/katu-vite.pid"
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
