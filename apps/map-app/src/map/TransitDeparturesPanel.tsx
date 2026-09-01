@@ -479,17 +479,14 @@ export function TransitDeparturesPanel({
               </button>
             );
           })}
+          {departures.length > 6 && (
+            <button className="transit-departure-more" type="button" onClick={() => setShowAll((current) => !current)}>
+              {showAll ? 'Show fewer departures' : 'View all departures'}
+              <ChevronRight className={showAll ? 'expanded' : ''} aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
-
-      {departures.length > 6 && (
-        <footer className="transit-panel-footer">
-          <button type="button" onClick={() => setShowAll((current) => !current)}>
-            {showAll ? 'Show fewer departures' : 'View all departures'}
-            <ChevronRight className={showAll ? 'expanded' : ''} aria-hidden="true" />
-          </button>
-        </footer>
-      )}
     </aside>
   );
 }
