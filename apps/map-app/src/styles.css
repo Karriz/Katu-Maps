@@ -44,7 +44,7 @@
 
 * { box-sizing: border-box; }
 
-:where(.map-view h1, .map-view h2, .map-view h3, .layer-panel-heading strong, .route-panel-heading strong, .controls-help-brand) {
+:where(.map-view h1, .map-view h2, .map-view h3, .layer-panel-heading strong, .route-panel-heading strong, .nearby-panel header strong, .controls-help-brand) {
   font-family: var(--font-heading);
   letter-spacing: -0.015em;
 }
