@@ -126,6 +126,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .controls-help-footer a:focus-visible { border-radius: 5px; outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 3px; }
 .controls-help-footer svg { height: 15px; width: 15px; }
 .controls-help-source { font-size: .8rem; font-weight: 500; opacity: .75; }
+.controls-help-source-offset { padding-left: 22px; }
 
 @media (max-width: 640px) {
   .controls-help-panel {
