@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Navigation, Pencil, Share2, Star, Trash2, X } from 'lucide-react';
 import { InfoActionRow } from '../components/InfoActionRow';
@@ -8,6 +9,7 @@ import type { LocationSelection } from './useRoutePlanning';
 import { wikipediaUrl } from './LocationMedia';
 import { LocationImageCarousel } from './LocationImageCarousel';
 import { useLocationMedia } from './useLocationMedia';
+import { locationOpenState } from './LocationOpeningHours';
 
 export function LocationInformationPanel({
   selection,
@@ -36,6 +38,15 @@ export function LocationInformationPanel({
   onShare: () => void;
   onDirections: () => void;
 }) {
+  const [openingHoursNow, setOpeningHoursNow] = useState(() => new Date());
+  useEffect(() => {
+    setOpeningHoursNow(new Date());
+    const interval = window.setInterval(() => setOpeningHoursNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
+  }, [selection.openingHours, selection.coordinates[0], selection.coordinates[1]]);
+  const openState = selection.openingHours
+    ? locationOpenState(selection.openingHours, selection.coordinates, openingHoursNow)
+    : null;
   const images = useLocationMedia(selection, selection.wikidata ?? `${selection.osmType ?? ''}${selection.osmId ?? selection.coordinates.join(',')}`);
   const wikipedia = wikipediaUrl(selection.wikipedia);
   const links = [
@@ -61,7 +72,13 @@ export function LocationInformationPanel({
         {detailsLoading && <p className="location-info-loading">Loading OpenStreetMap details…</p>}
         {(selection.openingHours || selection.phone || selection.email) && (
           <div className="location-info-details">
-            {selection.openingHours && <div><strong>Hours</strong><span>{selection.openingHours}</span></div>}
+            {selection.openingHours && <div>
+              <strong>Hours</strong>
+              <span className="location-hours-value">
+                {selection.openingHours}
+                {openState && <span className={`location-open-state is-${openState}`}>{openState === 'open' ? 'Open now' : 'Closed'}</span>}
+              </span>
+            </div>}
             {selection.phone && <div><strong>Phone</strong><a href={`tel:${selection.phone}`}>{selection.phone}</a></div>}
             {selection.email && <div><strong>Email</strong><a href={`mailto:${selection.email}`}>{selection.email}</a></div>}
           </div>
