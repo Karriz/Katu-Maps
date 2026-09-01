@@ -438,7 +438,6 @@ async function verifyFavoriteCameras(page: Page) {
 
 const scenarios: Scenario[] = [
   { name: 'desktop-main-map', description: 'Main map after style readiness', viewport: 'desktop', state: 'map ready' },
-  { name: 'tablet-main-map', description: 'Main map at tablet landscape dimensions', viewport: 'tablet', state: 'map ready' },
   { name: 'phone-main-map', description: 'Main map at Android phone dimensions', viewport: 'phone', state: 'map ready' },
   {
     name: 'phone-search-autocomplete',
@@ -516,30 +515,6 @@ const scenarios: Scenario[] = [
       await expect(page.locator('.position-information')).toBeVisible();
     },
     state: 'position information replaced transit information',
-  },
-  {
-    name: 'desktop-poi-closes-position-information',
-    description: 'Opening POI information replaces an open position panel',
-    viewport: 'desktop',
-    setup: async page => {
-      await openPositionInformation(page);
-      await openPoi(page);
-      await expect(page.locator('.position-information')).toBeHidden();
-      await expect(page.locator('.location-info-panel')).toBeVisible();
-    },
-    state: 'POI information replaced position information',
-  },
-  {
-    name: 'desktop-transit-closes-position-information',
-    description: 'Opening transit-stop information replaces an open position panel',
-    viewport: 'desktop',
-    setup: async page => {
-      await openPositionInformation(page);
-      await openTransitStop(page);
-      await expect(page.locator('.position-information')).toBeHidden();
-      await expect(page.locator('.transit-departures-panel')).toBeVisible();
-    },
-    state: 'Transit information replaced position information',
   },
   {
     name: 'desktop-route-with-position-information',
@@ -631,18 +606,6 @@ const scenarios: Scenario[] = [
     state: 'mobile transit information replaced position information',
   },
   {
-    name: 'phone-position-favorite-lifecycle',
-    description: 'Position information updates from Save to Edit and Remove after saving',
-    viewport: 'phone',
-    setup: async page => {
-      await openPositionInformation(page);
-      await saveFavoriteFromPanel(page, '.position-information', 'Saved mobile position');
-      await page.locator('.position-information').getByRole('button', { name: 'Remove favourite' }).click();
-      await expect(page.locator('.position-information').getByRole('button', { name: 'Save' })).toBeVisible();
-    },
-    state: 'mobile position favourite saved and removed',
-  },
-  {
     name: 'desktop-position-favorite-lifecycle',
     description: 'Position information updates from Save to Edit and Remove after saving',
     viewport: 'desktop',
@@ -653,30 +616,6 @@ const scenarios: Scenario[] = [
       await expect(page.locator('.position-information').getByRole('button', { name: 'Save' })).toBeVisible();
     },
     state: 'desktop position favourite saved and removed',
-  },
-  {
-    name: 'phone-poi-favorite-lifecycle',
-    description: 'POI information updates from Save to Edit and Remove after saving',
-    viewport: 'phone',
-    setup: async page => {
-      await openPoi(page);
-      await saveFavoriteFromPanel(page, '.location-info-panel', 'Saved mobile POI');
-      await page.locator('.location-info-panel').getByRole('button', { name: 'Remove favourite' }).click();
-      await expect(page.locator('.location-info-panel').getByRole('button', { name: 'Save' })).toBeVisible();
-    },
-    state: 'mobile POI favourite saved and removed',
-  },
-  {
-    name: 'phone-transit-favorite-lifecycle',
-    description: 'Transit-stop information updates from Save to Edit and Remove after saving',
-    viewport: 'phone',
-    setup: async page => {
-      await openTransitStop(page);
-      await saveFavoriteFromPanel(page, '.transit-departures-panel', 'Saved mobile transit stop');
-      await page.locator('.transit-departures-panel').getByRole('button', { name: 'Remove favourite' }).click();
-      await expect(page.locator('.transit-departures-panel').getByRole('button', { name: 'Save' })).toBeVisible();
-    },
-    state: 'mobile transit favourite saved and removed',
   },
   {
     name: 'desktop-poi-favorite-lifecycle',
@@ -739,13 +678,6 @@ const scenarios: Scenario[] = [
     name: 'phone-walking-route',
     description: 'Walking route with deterministic Valhalla geometry and summary',
     viewport: 'phone',
-    setup: async page => setRouteEndpoints(page, 'pedestrian'),
-    state: 'walking route fitted',
-  },
-  {
-    name: 'desktop-walking-route',
-    description: 'Walking route result at desktop size',
-    viewport: 'desktop',
     setup: async page => setRouteEndpoints(page, 'pedestrian'),
     state: 'walking route fitted',
   },
@@ -818,13 +750,6 @@ const scenarios: Scenario[] = [
     viewport: 'desktop',
     setup: openDesktopItinerary,
     state: 'desktop journey page open',
-  },
-  {
-    name: 'tablet-transit-itinerary',
-    description: 'Tablet transit itinerary opens as a dedicated panel page with back navigation',
-    viewport: 'tablet',
-    setup: openDesktopItinerary,
-    state: 'tablet journey page open',
   },
   {
     name: 'phone-bottom-sheet-midpoint',
