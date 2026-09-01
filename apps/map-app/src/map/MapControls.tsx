@@ -365,7 +365,7 @@ export function MapControls({
           >
             <header>
               <h2 id="controls-help-heading" ref={helpHeadingRef} tabIndex={-1}>Controls help</h2>
-              <button type="button" aria-label="Close controls help" onClick={closeHelp}><X aria-hidden="true" /></button>
+              <button className="controls-help-close" type="button" aria-label="Close controls help" onClick={closeHelp}><X aria-hidden="true" /></button>
             </header>
             <div className="controls-help-content">
               <section><h3>Touch</h3><ul>

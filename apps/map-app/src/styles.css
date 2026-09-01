@@ -90,7 +90,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 }
 .controls-help-panel header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; }
 .controls-help-panel h2, .controls-help-panel h3 { margin: 0; }
-.controls-help-panel header button { width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: inherit; }
+.controls-help-close { align-items: center; background: #f7f9fb; border: 1px solid var(--color-line); border-radius: 9px; color: #64748b; cursor: pointer; display: flex; flex: 0 0 auto; height: 34px; justify-content: center; padding: 0; width: 34px; }
+.controls-help-close:hover { background: #fff; color: var(--color-accent); }
+.controls-help-close:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
+.controls-help-close svg { height: 17px; width: 17px; }
 .controls-help-content { display: grid; grid-template-columns: 1fr 1.25fr; gap: 20px; margin-top: 12px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .controls-help-content ul { margin: 8px 0 0; padding-left: 20px; }
 .controls-help-content li { margin: 6px 0; }
@@ -537,13 +540,13 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-tool-dock svg { height: 23px; stroke-width: 1.9; width: 23px; }
 @media (min-width: 641px) {
   .map-tool-help {
-    left: 72px;
+    left: 364px;
     pointer-events: auto;
     position: absolute;
-    top: 0;
+    top: -86px;
   }
   .controls-help-panel {
-    left: 136px;
+    left: 72px;
   }
 }
 .map-tool-zoom { border-radius: 15px; box-shadow: 0 8px 24px rgb(37 55 79 / 14%); display: flex; flex-direction: column; overflow: hidden; }
@@ -717,6 +720,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 
 /* Dark overrides for controls and route cards whose daytime rules use white
    surfaces directly. */
+[data-theme='dark'] .controls-help-close,
 [data-theme='dark'] .transit-panel-close,
 [data-theme='dark'] .transit-panel-refresh,
 [data-theme='dark'] .favorite-menu-close,
@@ -728,6 +732,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 [data-theme='dark'] .transit-time-toggle,
 [data-theme='dark'] .layer-panel-close,
 [data-theme='dark'] .mobile-sheet-close { background: var(--surface-subtle); border-color: var(--color-line); color: var(--color-muted); }
+[data-theme='dark'] .controls-help-close:hover,
 [data-theme='dark'] .transit-panel-close:hover,
 [data-theme='dark'] .transit-panel-refresh:hover,
 [data-theme='dark'] .favorite-menu-close:hover,
@@ -878,9 +883,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .location-search { width: min(300px, calc(100% - 24px)); }
   .location-search-form { min-height: 48px; }
   .map-tool-help {
-    left: calc(20px + env(safe-area-inset-left, 0px) + min(300px, calc(100% - 24px)));
-    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: 320px;
+    top: calc(-86px + env(safe-area-inset-top, 0px));
   }
+  .controls-help-panel { left: 72px; }
   .map-tool-layers { top: calc(68px + env(safe-area-inset-top, 0px)); }
   .map-tool-dock button { height: 46px; width: 46px; }
   .transit-departures-panel,

@@ -237,8 +237,8 @@ async function verifyControlsHelpPlacement(page: Page, layout: 'desktop' | 'land
     expect(Math.abs(triggerBox.x - layersBox.x)).toBeLessThanOrEqual(2);
     expect(triggerBox.y).toBeGreaterThanOrEqual(routeBox.y + routeBox.height + 6);
   } else if (layout === 'desktop') {
-    expect(triggerBox.x).toBeGreaterThanOrEqual(layersBox.x + layersBox.width + 6);
-    expect(triggerBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height + 6);
+    expect(triggerBox.x).toBeGreaterThanOrEqual(searchBox.x + searchBox.width + 6);
+    expect(Math.abs(triggerBox.y - searchBox.y)).toBeLessThanOrEqual(2);
   } else {
     expect(triggerBox.x).toBeGreaterThanOrEqual(searchBox.x + searchBox.width + 6);
     expect(Math.abs(triggerBox.y - searchBox.y)).toBeLessThanOrEqual(2);
@@ -251,13 +251,15 @@ async function verifyControlsHelpPlacement(page: Page, layout: 'desktop' | 'land
   expect(panelBox).not.toBeNull();
   if (panelBox && layout === 'portrait-dock') {
     expect(panelBox.x).toBeGreaterThanOrEqual(layersBox.x + layersBox.width + 6);
-  } else if (panelBox && layout === 'desktop') {
-    expect(panelBox.x).toBeGreaterThanOrEqual(triggerBox.x + triggerBox.width + 6);
+  } else if (panelBox) {
+    expect(panelBox.x).toBeGreaterThanOrEqual(layersBox.x + layersBox.width + 6);
+    expect(panelBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height + 6);
   }
   const header = panel.locator('header');
   await expect(header.getByRole('heading', { name: 'Controls help' })).toBeVisible();
   const close = header.getByRole('button', { name: 'Close controls help' });
   await expect(close).toBeVisible();
+  await expect(close).toHaveCSS('cursor', 'pointer');
   await expect(panel).toHaveCSS('pointer-events', 'auto');
   expect(await panel.locator('.controls-help-content').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
 
