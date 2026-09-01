@@ -120,10 +120,12 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .controls-help-brand { align-items: center; display: inline-flex; gap: 8px; }
 .controls-help-brand img { border-radius: 7px; height: 26px; width: 26px; }
 .controls-help-brand strong { font-size: .92rem; font-weight: 700; }
+.controls-help-links { align-items: flex-end; display: flex; flex-direction: column; gap: 5px; }
 .controls-help-footer a { align-items: center; color: var(--color-accent); display: inline-flex; font-weight: 650; gap: 7px; text-decoration: none; }
 .controls-help-footer a:hover { text-decoration: underline; }
 .controls-help-footer a:focus-visible { border-radius: 5px; outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 3px; }
-.controls-help-footer svg { height: 17px; width: 17px; }
+.controls-help-footer svg { height: 15px; width: 15px; }
+.controls-help-source { font-size: .8rem; font-weight: 500; opacity: .75; }
 
 @media (max-width: 640px) {
   .controls-help-panel {
