@@ -117,9 +117,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .controls-help-content li { margin: 6px 0; }
 .controls-help-content kbd { padding: 1px 5px; border: 1px solid var(--color-line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-hover); font: inherit; font-size: .86em; }
 .controls-help-footer { align-items: center; display: flex; flex: 0 0 auto; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line); }
-.controls-help-brand { align-items: center; display: inline-flex; gap: 8px; }
+.controls-help-brand { align-items: center; display: inline-flex; gap: 8px; position: relative; }
 .controls-help-brand img { border-radius: 7px; height: 26px; width: 26px; }
 .controls-help-brand strong { font-size: .92rem; font-weight: 700; }
+.controls-help-version { color: var(--color-muted); font-size: .58rem; font-weight: 500; left: 0; line-height: 1; pointer-events: none; position: absolute; right: 0; text-align: center; top: calc(100% + 2px); white-space: nowrap; }
 .controls-help-links { align-items: flex-start; display: flex; flex-direction: column; gap: 5px; }
 .controls-help-footer a { align-items: center; color: var(--color-accent); display: inline-flex; font-weight: 650; gap: 7px; text-decoration: none; }
 .controls-help-footer a:hover { text-decoration: underline; }

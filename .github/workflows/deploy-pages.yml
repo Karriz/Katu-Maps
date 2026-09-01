@@ -2,8 +2,8 @@ name: Deploy map app to GitHub Pages
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    tags:
+      - 'v*.*.*'
 
 permissions:
   contents: read
@@ -65,6 +65,7 @@ jobs:
       - name: Build map app
         working-directory: apps/map-app
         env:
+          VITE_APP_VERSION: ${{ github.ref_name }}
           VITE_DIGITRANSIT_SUBSCRIPTION_KEY: ${{ secrets.DIGITRANSIT_SUBSCRIPTION_KEY }}
         run: npm run build -- --base="${{ steps.pages.outputs.base_path }}/"
 

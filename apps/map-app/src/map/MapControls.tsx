@@ -69,6 +69,8 @@ const advancedLayers: LayerDefinition[] = [
   { key: 'globe', label: 'Globe', description: 'World projection', icon: Globe2 },
 ];
 
+const appVersion = import.meta.env.VITE_APP_VERSION?.trim() || 'dev';
+
 function LayerRow({
   definition,
   enabled,
@@ -386,6 +388,7 @@ export function MapControls({
               <div className="controls-help-brand">
                 <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
                 <strong>Katu Maps</strong>
+                <span className="controls-help-version" aria-label={`Version ${appVersion}`}>{appVersion}</span>
               </div>
               <div className="controls-help-links">
                 <a className="controls-help-source controls-help-source-offset" href="https://github.com/Karriz/Katu-Maps/blob/main/apps/map-app/public/privacy.md" target="_blank" rel="noopener noreferrer">Privacy policy</a>
