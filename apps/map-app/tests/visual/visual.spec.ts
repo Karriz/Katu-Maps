@@ -53,6 +53,7 @@ async function openPoi(page: Page) {
   await page.getByRole('option', { name: /Tampere-talo/ }).click();
   await expect(page.locator('.location-info-panel')).toContainText('Tampere-talo');
   await expect(page.locator('.location-info-panel')).toContainText('Yliopistonkatu');
+  await expect(page.locator('.location-description')).toContainText('concert and congress centre');
 }
 
 async function openPositionInformation(page: Page) {

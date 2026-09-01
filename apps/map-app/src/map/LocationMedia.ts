@@ -1,8 +1,10 @@
 export type LocationMetadata = {
+  description?: string;
   wikipedia?: string;
   wikidata?: string;
   wikimediaCommons?: string;
   image?: string;
+  localLanguages?: string[];
   socialLinks?: Array<{ label: string; url: string }>;
 };
 
@@ -38,11 +40,17 @@ function property(properties: Record<string, unknown>, keys: string[]) {
 }
 
 export function parseLocationMetadata(properties: Record<string, unknown>): LocationMetadata {
+  const localLanguages = Object.keys(properties).flatMap((key) => {
+    const match = /^name:([a-z]{2,3}(?:-[a-z0-9]+)*)$/i.exec(key);
+    return match && typeof properties[key] === 'string' ? [match[1].toLowerCase()] : [];
+  });
   return {
+    description: property(properties, ['description']),
     wikipedia: property(properties, ['wikipedia']),
     wikidata: property(properties, ['wikidata']),
     wikimediaCommons: property(properties, ['wikimedia_commons', 'wikimedia:commons']),
     image: property(properties, ['image']),
+    localLanguages: [...new Set(localLanguages)],
     socialLinks: socialTags.flatMap(([label, keys]) => {
       const url = safeHttpUrl(property(properties, keys));
       return url ? [{ label, url }] : [];

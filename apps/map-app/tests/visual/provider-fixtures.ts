@@ -310,6 +310,7 @@ export async function installVisualProviderFixtures(page: Page) {
     display_name: 'Tampere-talo, Yliopistonkatu 55, Tampere',
     address: { house_number: '55', road: 'Yliopistonkatu', city: 'Tampere' },
     extratags: {
+      description: 'Tampere Hall is a concert and congress centre in central Tampere.',
       opening_hours: 'Mo-Su 08:00-22:00',
       website: 'https://www.tampere-talo.fi',
       phone: '+358 3 243 4111',
