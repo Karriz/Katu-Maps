@@ -2928,7 +2928,13 @@ export function MapView() {
   return (
     <div className="map-view">
       <div ref={containerRef} className="map-canvas" aria-label="Interactive map. Use arrow keys to pan and plus or minus to zoom." />
-      {!mapLoaded && !mapError && <div className="map-status">Loading map…</div>}
+      {!mapLoaded && !mapError && (
+        <div className="map-status map-splash" role="status">
+          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
+          <strong>Katu Maps</strong>
+          <span>Loading map…</span>
+        </div>
+      )}
       {mapError && (
         <div className="map-status map-status-error">
           <strong>Map unavailable</strong>
