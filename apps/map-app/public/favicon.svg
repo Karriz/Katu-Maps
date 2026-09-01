@@ -20,10 +20,10 @@
     <!-- Foreground terrain softens the building base -->
     <path d="M0 354C93 298 183 296 278 346C352 307 432 304 512 337V512H0Z" fill="#86bf4f"/>
 
-    <!-- Narrow pale edging around one bold, unmarked street -->
-    <path d="M235 544C253 459 304 393 385 352C425 332 468 319 526 309"
-          fill="none" stroke="#fffaf0" stroke-width="104" stroke-linecap="round"/>
-    <path d="M235 544C253 459 304 393 385 352C425 332 468 319 526 309"
-          fill="none" stroke="#263d52" stroke-width="76" stroke-linecap="round"/>
+    <!-- A tapered street creates depth: wide nearby, narrow at the horizon -->
+    <path d="M120 512C164 419 263 350 370 318C425 301 476 288 528 281V344C479 350 436 361 397 376C374 413 361 458 355 512Z"
+          fill="#fffaf0"/>
+    <path d="M146 512C187 433 274 372 378 334C430 316 478 306 528 300V325C482 331 441 341 406 356C368 397 343 448 330 512Z"
+          fill="#263d52"/>
   </g>
 </svg>
