@@ -11,6 +11,15 @@ const finiteInRange = (value: unknown, minimum: number, maximum: number): value 
   typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
 );
 
+const clampFiniteInRange = (
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.min(maximum, Math.max(minimum, value));
+};
+
 const normalizeLongitude = (longitude: number) => {
   if (longitude >= -180 && longitude <= 180) return longitude;
   return Number((
@@ -22,20 +31,21 @@ export function parsePersistedMapView(value: string | null): PersistedMapView | 
   if (!value) return null;
   try {
     const candidate = JSON.parse(value) as Partial<PersistedMapView>;
+    const pitch = clampFiniteInRange(candidate.pitch, 0, 85);
     if (!Array.isArray(candidate.center)
       || typeof candidate.center[0] !== 'number'
       || !Number.isFinite(candidate.center[0])
       || !finiteInRange(candidate.center[1], -90, 90)
       || !finiteInRange(candidate.zoom, 0, 18)
       || !finiteInRange(candidate.bearing, -360, 360)
-      || !finiteInRange(candidate.pitch, 0, 55)) return null;
+      || pitch === null) return null;
     return {
       // MapLibre permits horizontal world wrapping, so an otherwise valid
       // camera can report an equivalent longitude outside [-180, 180].
       center: [normalizeLongitude(candidate.center[0]), candidate.center[1]],
       zoom: candidate.zoom,
       bearing: candidate.bearing,
-      pitch: candidate.pitch,
+      pitch,
     };
   } catch {
     return null;

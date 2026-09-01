@@ -26,9 +26,13 @@ describe('parsePersistedMapView', () => {
     'not json',
     '{"center":[null,0],"zoom":4,"bearing":0,"pitch":0}',
     '{"center":[0,0],"zoom":99,"bearing":0,"pitch":0}',
-    '{"center":[0,0],"zoom":4,"bearing":0,"pitch":80}',
   ])('rejects invalid persisted data', (value) => {
     expect(parsePersistedMapView(value)).toBeNull();
+  });
+
+  it('accepts pitch slightly above the map maxPitch due to floating-point drift', () => {
+    expect(parsePersistedMapView('{"center":[23.7,61.5],"zoom":14,"bearing":0,"pitch":55.000000001}'))
+      .toEqual({ center: [23.7, 61.5], zoom: 14, bearing: 0, pitch: 55.000000001 });
   });
 
   it('restores MapLibre longitudes wrapped beyond the canonical world', () => {
