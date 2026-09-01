@@ -98,6 +98,11 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .controls-help-content ul { margin: 8px 0 0; padding-left: 20px; }
 .controls-help-content li { margin: 6px 0; }
 .controls-help-content kbd { padding: 1px 5px; border: 1px solid var(--color-line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-hover); font: inherit; font-size: .86em; }
+.controls-help-footer { flex: 0 0 auto; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line); }
+.controls-help-footer a { align-items: center; color: var(--color-accent); display: inline-flex; font-weight: 650; gap: 7px; text-decoration: none; }
+.controls-help-footer a:hover { text-decoration: underline; }
+.controls-help-footer a:focus-visible { border-radius: 5px; outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 3px; }
+.controls-help-footer svg { height: 17px; width: 17px; }
 
 @media (max-width: 640px) {
   .controls-help-panel {
