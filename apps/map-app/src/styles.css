@@ -182,6 +182,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-details div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .location-info-details strong { color: #94a3b8; font-size: 0.62rem; font-weight: 750; letter-spacing: 0.07em; text-transform: uppercase; }
 .location-info-details span, .location-info-details a { color: #475569; font-size: 0.77rem; line-height: 1.35; overflow-wrap: anywhere; }
+.location-info-details .location-hours-value { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+.location-info-details .location-open-state { border-radius: 999px; display: inline-flex; font-size: 0.64rem; font-weight: 750; line-height: 1; padding: 4px 7px; }
+.location-info-details .location-open-state.is-open { background: #dcfce7; color: #15803d; }
+.location-info-details .location-open-state.is-closed { background: #fee2e2; color: #b91c1c; }
 .location-info-details a { color: var(--color-accent); text-decoration: none; }
 .location-info-details a:hover { text-decoration: underline; }
 .location-media { aspect-ratio: 3 / 2; background: #e8edf2; border-radius: 12px; margin: 2px 0 14px; overflow: hidden; position: relative; }
