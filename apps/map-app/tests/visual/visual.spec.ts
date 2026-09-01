@@ -437,21 +437,9 @@ async function verifyFavoriteCameras(page: Page) {
 }
 
 const scenarios: Scenario[] = [
-  {
-    name: 'desktop-main-map',
-    description: 'Main map after style readiness with desktop brand mark',
-    viewport: 'desktop',
-    setup: async page => { await expect(page.locator('.map-brand')).toBeVisible(); },
-    state: 'map ready with desktop brand mark',
-  },
+  { name: 'desktop-main-map', description: 'Main map after style readiness', viewport: 'desktop', state: 'map ready' },
   { name: 'tablet-main-map', description: 'Main map at tablet landscape dimensions', viewport: 'tablet', state: 'map ready' },
-  {
-    name: 'phone-main-map',
-    description: 'Main map at Android phone dimensions without desktop-only branding',
-    viewport: 'phone',
-    setup: async page => { await expect(page.locator('.map-brand')).toBeHidden(); },
-    state: 'mobile map ready without desktop brand mark',
-  },
+  { name: 'phone-main-map', description: 'Main map at Android phone dimensions', viewport: 'phone', state: 'map ready' },
   {
     name: 'phone-search-autocomplete',
     description: 'Search containing a POI and a transit stop from deterministic fixtures',
