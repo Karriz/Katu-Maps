@@ -86,7 +86,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   display: flex; flex-direction: column; position: absolute; top: 0; left: 72px; width: min(440px, calc(100vw - 100px));
   max-height: calc(100dvh - 120px - env(safe-area-inset-bottom, 0px)); overflow: hidden;
   padding: 16px; border: 1px solid var(--color-line); border-radius: 16px;
-  background: var(--surface-raised); color: var(--color-ink); box-shadow: var(--shadow-card); z-index: 12;
+  background: var(--surface-raised); color: var(--color-ink); box-shadow: var(--shadow-card); pointer-events: auto; touch-action: pan-y; z-index: 12;
 }
 .controls-help-panel header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; }
 .controls-help-panel h2, .controls-help-panel h3 { margin: 0; }
@@ -101,7 +101,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     position: fixed;
     top: calc(136px + env(safe-area-inset-top, 0px));
     right: calc(12px + env(safe-area-inset-right, 0px));
-    left: calc(12px + env(safe-area-inset-left, 0px));
+    left: calc(74px + env(safe-area-inset-left, 0px));
     width: auto;
     max-height: calc(100dvh - 148px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
@@ -535,6 +535,17 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-tool-dock button.active { background: var(--color-accent-soft); border-color: #a9c9f7; color: var(--color-accent); }
 .map-tool-dock button:focus-visible { outline: 3px solid rgb(80 145 235 / 32%); outline-offset: 2px; }
 .map-tool-dock svg { height: 23px; stroke-width: 1.9; width: 23px; }
+@media (min-width: 641px) {
+  .map-tool-help {
+    left: 72px;
+    pointer-events: auto;
+    position: absolute;
+    top: 0;
+  }
+  .controls-help-panel {
+    left: 136px;
+  }
+}
 .map-tool-zoom { border-radius: 15px; box-shadow: 0 8px 24px rgb(37 55 79 / 14%); display: flex; flex-direction: column; overflow: hidden; }
 .map-tool-zoom button { border-radius: 0; box-shadow: none; }
 .map-tool-zoom button + button { border-top: 0; }
@@ -813,10 +824,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .map-tool-locate,
   .map-tool-compass,
   .map-tool-zoom { position: absolute; }
-  .map-tool-help { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(78px + env(safe-area-inset-top, 0px)); }
-  .map-tool-layers { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(136px + env(safe-area-inset-top, 0px)); }
-  .map-tool-mode { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(194px + env(safe-area-inset-top, 0px)); }
-  .map-tool-route { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(252px + env(safe-area-inset-top, 0px)); }
+  .map-tool-layers { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(78px + env(safe-area-inset-top, 0px)); }
+  .map-tool-mode { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(136px + env(safe-area-inset-top, 0px)); }
+  .map-tool-route { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(194px + env(safe-area-inset-top, 0px)); }
+  .map-tool-help { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(252px + env(safe-area-inset-top, 0px)); }
   .map-tool-locate { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
   .map-tool-compass { bottom: calc(128px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
   .map-tool-compass:not(.orientation-active) { display: none; }
@@ -866,6 +877,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 @media (max-height: 540px) and (orientation: landscape) {
   .location-search { width: min(300px, calc(100% - 24px)); }
   .location-search-form { min-height: 48px; }
+  .map-tool-help {
+    left: calc(20px + env(safe-area-inset-left, 0px) + min(300px, calc(100% - 24px)));
+    top: calc(12px + env(safe-area-inset-top, 0px));
+  }
   .map-tool-layers { top: calc(68px + env(safe-area-inset-top, 0px)); }
   .map-tool-dock button { height: 46px; width: 46px; }
   .transit-departures-panel,
