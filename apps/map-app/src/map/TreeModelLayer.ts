@@ -17,6 +17,9 @@ import {
 
 const TREE_MIN_ZOOM = 12;
 const TREE_MAX_VIEWPORT_METERS = 4_000;
+// Flight keeps trees within a fixed radius of the aircraft instead of using
+// the viewport-span cutoff above (see metricBoundsAroundPoint for why).
+const FLIGHT_TREE_RADIUS_METERS = 2_500;
 const MAX_TREE_COUNT = 5000;
 const MAX_ELEVATION_CACHE_ENTRIES = MAX_TREE_COUNT * 2;
 const FOREST_TREE_SPACING_METERS = 32;
@@ -266,6 +269,22 @@ function visibleMetricBounds(
   };
 }
 
+// map.getBounds() unprojects the screen's corners to find the visible area,
+// which breaks down under flight's combined steep pitch and roll: a corner
+// can rotate to no longer intersect the ground at all, and the resulting
+// bounds shrink on that side - visually still-in-view far trees get culled,
+// then reappear once the aircraft levels out. A fixed radius around the
+// aircraft's own ground position is immune to that per-corner degeneracy.
+function metricBoundsAroundPoint(center: MetricPoint, radiusMeters: number): MetricBounds {
+  const horizontalRadius = radiusMeters / longitudeScaleAtMetricY(center[1]);
+  return {
+    minX: center[0] - horizontalRadius,
+    minY: center[1] - radiusMeters,
+    maxX: center[0] + horizontalRadius,
+    maxY: center[1] + radiusMeters,
+  };
+}
+
 function displayedTreeKey(tree: TreeInstance) {
   // Identity is geographic, not visual. A vector-tile refresh can classify
   // the same procedural point as broadleaf/conifer (or shrub) when overlapping
@@ -304,22 +323,30 @@ function viewportSpanMeters(
 export function shouldRenderTreesForViewport(
   bounds: { west: number; south: number; east: number; north: number },
   zoom: number,
+  maxViewportMeters = TREE_MAX_VIEWPORT_METERS,
 ) {
   if (zoom < TREE_MIN_ZOOM) return false;
-  return viewportSpanMeters(bounds) <= TREE_MAX_VIEWPORT_METERS;
+  return viewportSpanMeters(bounds) <= maxViewportMeters;
 }
 
-function visibleTrees(map: MaplibreMap, sources: TreeSourceConfig) {
-  const zoom = map.getZoom();
-  const bounds = map.getBounds();
-  if (!shouldRenderTreesForViewport({
-    west: bounds.getWest(),
-    south: bounds.getSouth(),
-    east: bounds.getEast(),
-    north: bounds.getNorth(),
-  }, zoom)) return [];
+function visibleTrees(
+  map: MaplibreMap,
+  sources: TreeSourceConfig,
+  maxViewportMeters = TREE_MAX_VIEWPORT_METERS,
+  boundsOverride?: MetricBounds,
+) {
+  if (!boundsOverride) {
+    const zoom = map.getZoom();
+    const bounds = map.getBounds();
+    if (!shouldRenderTreesForViewport({
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    }, zoom, maxViewportMeters)) return [];
+  }
   const budget = MAX_TREE_COUNT;
-  const samplingBounds = visibleMetricBounds(map);
+  const samplingBounds = boundsOverride ?? visibleMetricBounds(map);
   const waterFeatures = sourceFeatures(map, sources.sourceId, sources.waterLayers);
   const waterPolygons = collectMetricPolygons(waterFeatures);
   const mappedTreeFeatures = sources.mappedTreeLayer
@@ -688,6 +715,7 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowsEnabled = true;
   private growthAnimationActive = false;
   private darkMode = false;
+  private extendedViewportRangeEnabled = false;
 
   constructor(private readonly sources: TreeSourceConfig) {}
 
@@ -718,6 +746,14 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.shadowsEnabled = enabled;
     if (this.shadowMesh) this.shadowMesh.visible = enabled;
     this.map?.triggerRepaint();
+  }
+
+  // map.getBounds() breaks down under flight's combined steep pitch and
+  // roll (a screen corner can rotate off the ground plane entirely), so
+  // flight uses a fixed radius around the aircraft instead of the normal
+  // viewport-span cutoff.
+  setExtendedViewportRange(enabled: boolean) {
+    this.extendedViewportRangeEnabled = enabled;
   }
 
   setTheme(dark: boolean) {
@@ -836,16 +872,19 @@ export class TreeModelLayer implements CustomLayerInterface {
     if (!map || !trunkMesh || !broadleafMesh || !coniferMesh
       || !shrubMesh || !shadowMesh) return;
 
-    const bounds = map.getBounds();
-    if (!shouldRenderTreesForViewport({
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
-    }, map.getZoom())) {
-      this.clearDisplayedTrees();
-      map.triggerRepaint();
-      return;
+    const flightMode = this.extendedViewportRangeEnabled;
+    if (!flightMode) {
+      const bounds = map.getBounds();
+      if (!shouldRenderTreesForViewport({
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+      }, map.getZoom())) {
+        this.clearDisplayedTrees();
+        map.triggerRepaint();
+        return;
+      }
     }
 
     this.sceneOrigin = map.getCenter();
@@ -860,9 +899,15 @@ export class TreeModelLayer implements CustomLayerInterface {
     const terrainZoomBucket = Math.floor(zoom + 1e-6);
     const shadowMaterial = shadowMesh.material as THREE.MeshBasicMaterial;
     shadowMaterial.opacity = treeShadowOpacity(zoom);
-    const generatedTrees = visibleTrees(map, this.sources);
+    const originMetric = toMetricPoint([this.sceneOrigin.lng, this.sceneOrigin.lat]);
+    const flightBounds = flightMode && originMetric
+      ? metricBoundsAroundPoint(originMetric, FLIGHT_TREE_RADIUS_METERS)
+      : undefined;
+    const generatedTrees = flightBounds
+      ? visibleTrees(map, this.sources, undefined, flightBounds)
+      : visibleTrees(map, this.sources);
     const budget = MAX_TREE_COUNT;
-    const visibleBounds = visibleMetricBounds(map);
+    const visibleBounds = flightBounds ?? visibleMetricBounds(map);
     const trees: TreeInstance[] = [];
     const selectedKeys = new Set<string>();
 
@@ -1069,13 +1114,16 @@ export class TreeModelLayer implements CustomLayerInterface {
     const renderer = this.renderer;
     if (!map || !renderer) return;
 
-    const bounds = map.getBounds();
-    const viewportAllowed = shouldRenderTreesForViewport({
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
-    }, map.getZoom());
+    let viewportAllowed = true;
+    if (!this.extendedViewportRangeEnabled) {
+      const bounds = map.getBounds();
+      viewportAllowed = shouldRenderTreesForViewport({
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+      }, map.getZoom());
+    }
     if (!viewportAllowed) {
       this.clearDisplayedTrees();
       map.triggerRepaint();

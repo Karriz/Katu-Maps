@@ -13,6 +13,7 @@ type LayerRefs = {
   treeRefreshRef: RefObject<(() => void) | null>;
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
+  flightActiveRef: RefObject<boolean>;
 };
 
 type MapLayerVisibilityOptions = LayerRefs & {
@@ -44,7 +45,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme,
   treeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
-  terrainSourceRef, terrainEnabledRef, building3dLayerIds, buildingShadowLayerIds,
+  terrainSourceRef, terrainEnabledRef, flightActiveRef, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled,
 }: MapLayerVisibilityOptions) {
@@ -67,15 +68,20 @@ export function useMapLayerVisibility({
     if (layerToggles.transitLines) void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
     setVisibility(waterEffectLayerIds, true);
     map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
-    terrainEnabledRef.current = layerToggles.terrain;
-    map.setTerrain(layerToggles.terrain ? { source: terrainSourceRef.current, exaggeration: 1.0 } : null);
-    if (map.getLayer('terrain-hillshade')) {
-      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
+    // Flight mode owns terrain/projection for the duration of the flight;
+    // re-asserting the saved preference here would fight its own setTerrain
+    // call every time this effect re-runs (e.g. from an unrelated toggle).
+    if (!flightActiveRef.current) {
+      terrainEnabledRef.current = layerToggles.terrain;
+      map.setTerrain(layerToggles.terrain ? { source: terrainSourceRef.current, exaggeration: 1.0 } : null);
+      if (map.getLayer('terrain-hillshade')) {
+        map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
+      }
     }
     map.triggerRepaint();
     treeRefreshRef.current?.();
     if (!layerToggles.transit) onTransitDisabled();
-  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, mapRef, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
+  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActiveRef, mapRef, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
 
   useEffect(() => {
     const map = mapRef.current;

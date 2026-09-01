@@ -58,6 +58,10 @@ import { TransitStopsLayer } from './TransitStopsLayer';
 import type { TransitVehicleTripSelection } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
+import { FlightModelLayer } from './flight/FlightModelLayer';
+import { FlightControls } from './flight/FlightControls';
+import { useFlightSimulator } from './flight/useFlightSimulator';
+import { useFlightModePresentation } from './flight/useFlightModePresentation';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
 import type { TransitStopSelection } from './TransitStopsLayer';
 import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
@@ -632,7 +636,7 @@ function globalWaterPatternLayer(): FillLayerSpecification {
   };
 }
 
-export function MapView() {
+export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: boolean) => void }) {
   const { preference: themePreference, resolvedTheme, setPreference: setThemePreference } = useTheme();
   const initialDeepLinkRef = useRef<MapDeepLink | null>(parseMapDeepLink(window.location.search));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -642,6 +646,8 @@ export function MapView() {
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
+  const flightModelLayerRef = useRef<FlightModelLayer | null>(null);
+  const flightActiveRef = useRef(false);
   const plannedVehicleTripRef = useRef<string | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(false);
@@ -815,6 +821,10 @@ export function MapView() {
     && layerToggles.buildings
     && layerToggles.trees
     && layerToggles.transitModels;
+  const handleTransitDisabled = useCallback(() => {
+    transitStopsLayerRef.current?.clearSelection();
+    setSelectedTransitStop(null);
+  }, []);
   useMapLayerVisibility({
     mapRef,
     mapLoaded,
@@ -826,6 +836,7 @@ export function MapView() {
     treeRefreshRef,
     terrainSourceRef,
     terrainEnabledRef,
+    flightActiveRef,
     building3dLayerIds: BUILDING_3D_LAYER_IDS,
     buildingShadowLayerIds: BUILDING_SHADOW_LAYER_IDS,
     buildingTransitionFootprintLayerId: GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
@@ -833,11 +844,46 @@ export function MapView() {
     cyclingLayerIds: GLOBAL_CYCLING_LAYER_IDS,
     hikingLayerIds: GLOBAL_HIKING_LAYER_IDS,
     waterEffectLayerIds: WATER_EFFECT_LAYER_IDS,
-    onTransitDisabled: () => {
-      transitStopsLayerRef.current?.clearSelection();
-      setSelectedTransitStop(null);
-    },
+    onTransitDisabled: handleTransitDisabled,
   });
+  const flight = useFlightSimulator({
+    mapRef,
+    mapLoaded,
+    modelLayerRef: flightModelLayerRef,
+    activeRef: flightActiveRef,
+    terrainSourceRef,
+    terrainEnabledRef,
+  });
+  useFlightModePresentation({
+    mapRef,
+    mapLoaded,
+    active: flight.active,
+    transitRouteOverlayRef,
+    transitLinesVisible: layerToggles.transitLines,
+  });
+  useEffect(() => {
+    onFlightModeChange?.(flight.active);
+    return () => onFlightModeChange?.(false);
+  }, [flight.active, onFlightModeChange]);
+  useEffect(() => {
+    if (!flight.active || !mapLoaded) return;
+    const treeLayer = treeLayerRef.current;
+    if (!treeLayer) return;
+    // Flight's steep camera pitch pushes map.getBounds() far toward the
+    // horizon even at low altitude, so the normal viewport-span cutoff
+    // (tuned for top-down browsing) would hide trees entirely; relax it.
+    treeLayer.setExtendedViewportRange(true);
+    // The normal tree refresh is debounced on moveend/idle, built for a
+    // pan-then-stop usage pattern. Flight is continuous motion, so those
+    // events rarely settle; refresh on a fixed interval instead so trees
+    // actually populate as the aircraft covers new ground.
+    treeLayer.updateTrees();
+    const intervalId = window.setInterval(() => treeLayer.updateTrees(), 10000);
+    return () => {
+      window.clearInterval(intervalId);
+      treeLayer.setExtendedViewportRange(false);
+    };
+  }, [flight.active, mapLoaded, treeLayerRef]);
   const {
     searchQuery, setSearchQuery, searchResults, setSearchResults, searchOpen, setSearchOpen,
     searchLoading, searchError, setSearchError, searchResultsQuery,
@@ -1081,7 +1127,8 @@ export function MapView() {
     ? findTransitFavorite(favorites, selectedTransitStop.stopId, selectedTransitStop.provider)
     : undefined;
 
-  const navigationView = measurement ? 'measurement'
+  const navigationView = flight.active ? 'flight'
+    : measurement ? 'measurement'
     : transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
       : transitDetailsOpen ? 'route-steps'
@@ -1093,6 +1140,7 @@ export function MapView() {
                   : searchOpen ? 'search' : null;
 
   useInAppNavigation(navigationView, (parentView) => {
+    if (flight.active) { flight.stop(); return; }
     if (measurement) { stopMeasurement(); return; }
     if (transitDepartureDetailOpen) {
       setTransitNavigationBackSignal((value) => value + 1);
@@ -1612,6 +1660,8 @@ export function MapView() {
     treeLayerRef.current = treeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
+    const flightModelLayer = new FlightModelLayer();
+    flightModelLayerRef.current = flightModelLayer;
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       latestVehiclePoseRef.current = pose;
       // Keep the custom model layer synchronized with the same estimated pose
@@ -1621,7 +1671,7 @@ export function MapView() {
       transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
       setVehiclePositionStatus(pose?.status ?? 'unavailable');
-      if (!pose || !vehicleFollowEnabledRef.current) return;
+      if (!pose || !vehicleFollowEnabledRef.current || flightActiveRef.current) return;
       if (Date.now() - lastUserInteractionRef.current < 400) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
       // Keep camera tracking independent of style loading/animation state.
@@ -1755,6 +1805,7 @@ export function MapView() {
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
+      if (flightActiveRef.current) return;
       if (measurementControllerRef.current) return;
       setNearbyPlaces(null);
       setRouteContextMenu(null);
@@ -1838,6 +1889,7 @@ export function MapView() {
       });
     };
     const handleMapKeyDown = (event: KeyboardEvent) => {
+      if (flightActiveRef.current) return;
       if (event.altKey || event.ctrlKey || event.metaKey || event.target !== map.getCanvas()) return;
       const pan: Record<string, [number, number]> = {
         ArrowLeft: [-100, 0], ArrowRight: [100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100],
@@ -1859,6 +1911,7 @@ export function MapView() {
     };
     const handleMapContextMenu = (event: MapMouseEvent) => {
       event.originalEvent.preventDefault();
+      if (flightActiveRef.current) return;
       if (measurementControllerRef.current) return;
       // Touch and pen long-presses are handled explicitly below. MapLibre/browser
       // contextmenu events can also arrive during a pinch, so never turn a
@@ -1869,6 +1922,7 @@ export function MapView() {
       showRouteContextMenu(event.point, [event.lngLat.lng, event.lngLat.lat]);
     };
     const handlePointerDown = (event: PointerEvent) => {
+      if (flightActiveRef.current) return;
       // Let manual map gestures take ownership from vehicle following.
       lastUserInteractionRef.current = Date.now();
       vehicleFollowEnabledRef.current = false;
@@ -1900,6 +1954,7 @@ export function MapView() {
       }, 600);
     };
     const handleWheel = () => {
+      if (flightActiveRef.current) return;
       cancelLongPressTimer();
       lastUserInteractionRef.current = Date.now();
       vehicleFollowEnabledRef.current = false;
@@ -1921,6 +1976,7 @@ export function MapView() {
       }
     };
     const handleMapGestureStart = () => {
+      if (flightActiveRef.current) return;
       cancelLongPressTimer();
       lastUserInteractionRef.current = Date.now();
     };
@@ -1932,6 +1988,7 @@ export function MapView() {
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
+      map.addLayer(flightModelLayer, 'global-road-labels');
       try {
         await addLocationIcons(map);
       } catch (error) {
@@ -2236,6 +2293,7 @@ export function MapView() {
       } catch { /* local storage can be disabled */ }
     };
     const handleMoveEnd = () => {
+      if (flightActiveRef.current) return;
       persistCamera();
       updateGlobalRoadWidths();
       scheduleTreeUpdate();
@@ -2254,6 +2312,7 @@ export function MapView() {
       reload: () => window.location.reload(),
     });
     const handleCameraMove = () => {
+      if (flightActiveRef.current) return;
       const zoom = map.getZoom();
       const pitch = map.getPitch();
       const nextLabelSignature = `${Math.round(zoom * 2) / 2}:${Math.round(pitch / 10) * 10}`;
@@ -2329,6 +2388,7 @@ export function MapView() {
       treeLayerRef.current = null;
       transitStopsLayerRef.current = null;
       transitVehicleLayerRef.current = null;
+      flightModelLayerRef.current = null;
     };
   }, []);
 
@@ -2709,6 +2769,7 @@ export function MapView() {
     let previousRouteLayout: string | undefined;
     const updatePadding = () => {
       frame = undefined;
+      if (flightActiveRef.current) return;
       if (routeOpen && routeResult) {
         const padding = panelViewportPadding(map, 48, 24);
         const layout = [
@@ -2784,6 +2845,7 @@ export function MapView() {
     let previousRouteLayout: string | undefined;
     const updatePadding = () => {
       frame = undefined;
+      if (flightActiveRef.current) return;
       if (routeOpen && routeResult) {
         const padding = panelViewportPadding(map, 48, 24);
         const layout = [
@@ -2924,7 +2986,7 @@ export function MapView() {
   };
 
   return (
-    <div className="map-view">
+    <div className={`map-view${flight.active ? ' flight-mode' : ''}`}>
       <div ref={containerRef} className="map-canvas" aria-label="Interactive map. Use arrow keys to pan and plus or minus to zoom." />
       {!mapLoaded && !mapError && (
         <div className="map-status map-splash" role="status">
@@ -2940,9 +3002,16 @@ export function MapView() {
           <small>Check that the browser can access the configured map style.</small>
         </div>
       )}
+      {mapLoaded && !mapError && flight.active && (
+        <FlightControls
+          telemetry={flight.telemetry}
+          onControlChange={flight.setControl}
+          onExit={flight.stop}
+        />
+      )}
       {mapLoaded && !mapError && (
         <>
-          <MapControls
+          {!flight.active && <MapControls
             query={searchQuery}
             searchOpen={searchOpen}
             searchLoading={searchLoading}
@@ -3050,7 +3119,21 @@ export function MapView() {
             notice={mapToolNotice}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
-          />
+            onFlightModeStart={() => {
+              setLayersOpen(false);
+              setSearchOpen(false);
+              setFavoritesOpen(false);
+              setRouteSearchTarget(null);
+              setRouteContextMenu(null);
+              setContextMenuMarker(null);
+              pendingSearchCameraRef.current = null;
+              routeCameraRequestRef.current += 1;
+              vehicleFollowEnabledRef.current = false;
+              setVehicleFollowing(false);
+              if (measurementControllerRef.current) stopMeasurement();
+              flight.start();
+            }}
+          />}
           {routeContextMenu && (
             <MapContextMenu
               position={{ x: routeContextMenu.x, y: routeContextMenu.y }}

@@ -143,6 +143,15 @@ async function openRoute(page: Page) {
   await expect(page.getByRole('button', { name: 'Close route planner' })).toBeVisible();
 }
 
+async function startFlightMode(page: Page) {
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(page.getByRole('region', { name: 'Flight simulator controls' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Exit flight' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Map layers' })).toHaveCount(0);
+  await expect(page.locator('.maplibregl-ctrl-attrib')).toBeVisible();
+}
+
 async function verifyThemeSettings(page: Page) {
   await page.getByRole('button', { name: 'Map layers' }).click();
   await expect(page.getByRole('group', { name: 'Appearance' })).toBeVisible();
@@ -777,6 +786,20 @@ const scenarios: Scenario[] = [
       await expect(page.locator('#map-layer-panel')).toBeVisible();
     },
     state: 'layers open',
+  },
+  {
+    name: 'desktop-flight-mode',
+    description: 'Third-person flight HUD with ordinary map UI removed',
+    viewport: 'desktop',
+    setup: startFlightMode,
+    state: 'flight simulator active',
+  },
+  {
+    name: 'phone-flight-mode',
+    description: 'Touch-accessible flight controls respect the phone safe layout',
+    viewport: 'phone',
+    setup: startFlightMode,
+    state: 'mobile flight simulator active',
   },
   {
     name: 'phone-provider-error',

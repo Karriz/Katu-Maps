@@ -612,14 +612,63 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .layer-toggle input:checked + .layer-switch { background: var(--color-accent); }
 .layer-toggle input:checked + .layer-switch span { transform: translateX(17px); }
 .layer-toggle input:focus-visible + .layer-switch { outline: 2px solid #8ebcff; outline-offset: 2px; }
+.flight-mode-entry { align-items: center; border-top: 1px solid var(--color-line); display: flex; gap: 12px; min-height: 74px; padding: 10px 8px; }
+.flight-mode-entry button { background: var(--color-accent); border: 0; border-radius: 9px; color: #fff; cursor: pointer; flex: 0 0 auto; font: inherit; font-size: .72rem; font-weight: 750; min-height: 36px; padding: 7px 12px; }
+.flight-mode-entry button:hover { background: #0e5ccc; }
+.flight-mode-entry button:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
 .layer-advanced { border-top: 1px solid var(--color-line); margin-top: 2px; }
 .layer-advanced summary { color: var(--color-muted); cursor: pointer; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; list-style: none; padding: 14px 8px 2px; text-transform: uppercase; }
 .layer-advanced summary::-webkit-details-marker { display: none; }
 .layer-advanced summary::after { content: ' +'; }
 .layer-advanced[open] summary::after { content: ' −'; }
 
+.map-view.flight-mode > :not(.map-canvas):not(.flight-controls) { display: none !important; }
+.flight-controls { color: #fff; inset: 0; pointer-events: none; position: absolute; z-index: 120; }
+.flight-hud { align-items: center; background: rgb(9 24 39 / 88%); border: 1px solid rgb(184 213 235 / 24%); border-radius: 15px; box-shadow: 0 10px 28px rgb(0 8 18 / 30%); display: flex; gap: 22px; left: 18px; padding: 10px 11px 10px 14px; pointer-events: auto; position: absolute; right: 18px; top: calc(18px + env(safe-area-inset-top, 0px)); }
+.flight-hud-title { align-items: center; display: flex; gap: 10px; min-width: 150px; }
+.flight-hud-title > svg { color: #7dd3fc; height: 24px; transform: rotate(-12deg); width: 24px; }
+.flight-hud-title div { display: flex; flex-direction: column; gap: 1px; }
+.flight-hud-title strong { font-family: var(--font-heading); font-size: .82rem; }
+.flight-hud-title span { color: #a9bfd1; font-size: .62rem; }
+.flight-telemetry { display: flex; gap: 24px; margin: 0 auto; }
+.flight-telemetry div { align-items: baseline; display: flex; gap: 7px; }
+.flight-telemetry dt { color: #8fb1ca; font-size: .58rem; font-weight: 800; letter-spacing: .08em; }
+.flight-telemetry dd { font-size: .76rem; font-variant-numeric: tabular-nums; font-weight: 750; margin: 0; min-width: 58px; }
+.flight-exit { align-items: center; background: rgb(255 255 255 / 9%); border: 1px solid rgb(255 255 255 / 20%); border-radius: 9px; color: #fff; cursor: pointer; display: flex; font: inherit; font-size: .7rem; font-weight: 750; gap: 7px; min-height: 36px; padding: 7px 10px; }
+.flight-exit:hover { background: rgb(255 255 255 / 16%); }
+.flight-exit:focus-visible { outline: 3px solid rgb(125 211 252 / 48%); outline-offset: 2px; }
+.flight-exit svg { height: 15px; width: 15px; }
+.flight-reticle { height: 28px; left: 50%; position: absolute; top: 48%; transform: translate(-50%, -50%); width: 28px; }
+.flight-reticle::before, .flight-reticle::after, .flight-reticle span::before, .flight-reticle span::after { background: rgb(255 255 255 / 82%); content: ''; position: absolute; }
+.flight-reticle::before { height: 1px; left: 0; top: 14px; width: 9px; }
+.flight-reticle::after { height: 1px; right: 0; top: 14px; width: 9px; }
+.flight-reticle span::before { height: 9px; left: 14px; top: 0; width: 1px; }
+.flight-reticle span::after { bottom: 0; height: 9px; left: 14px; width: 1px; }
+.flight-inputs { align-items: flex-end; bottom: calc(48px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: space-between; left: 18px; pointer-events: none; position: absolute; right: 54px; }
+.flight-input-group { align-items: center; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+.flight-input-group > span { background: rgb(9 24 39 / 78%); border-radius: 999px; color: #c6d8e6; font-size: .58rem; font-weight: 800; letter-spacing: .08em; padding: 4px 8px; text-transform: uppercase; }
+.flight-input-group > div { display: flex; gap: 8px; }
+.flight-input-group button { align-items: center; background: rgb(9 24 39 / 84%); border: 1px solid rgb(184 213 235 / 34%); border-radius: 13px; color: #fff; cursor: pointer; display: flex; height: 50px; justify-content: center; padding: 0; touch-action: none; user-select: none; width: 56px; }
+.flight-input-group button:hover { background: rgb(19 47 70 / 92%); }
+.flight-input-group button:active { background: #1769e8; transform: translateY(1px); }
+.flight-input-group button:focus-visible { outline: 3px solid rgb(125 211 252 / 48%); outline-offset: 2px; }
+.flight-input-group svg { height: 23px; width: 23px; }
+.flight-key-help { background: rgb(9 24 39 / 76%); border-radius: 999px; color: #c6d8e6; font-size: .64rem; margin: 0 0 2px; padding: 7px 11px; }
+.flight-key-help kbd { background: rgb(255 255 255 / 12%); border: 1px solid rgb(255 255 255 / 18%); border-radius: 4px; color: #fff; font: inherit; font-weight: 800; margin-right: 3px; padding: 2px 4px; }
+
 @media (max-width: 760px) {
   :root { --map-control-edge: 12px; }
+  .flight-hud { gap: 10px; left: 10px; right: 10px; top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .flight-hud-title { min-width: 0; }
+  .flight-hud-title span { display: none; }
+  .flight-telemetry { gap: 10px; }
+  .flight-telemetry div { align-items: flex-start; flex-direction: column; gap: 1px; }
+  .flight-telemetry dd { font-size: .68rem; min-width: 48px; }
+  .flight-exit span { display: none; }
+  .flight-exit { padding: 7px 10px; }
+  .flight-inputs { bottom: calc(52px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 50px; }
+  .flight-input-group button { height: 48px; width: 50px; }
+  .flight-key-help { display: none; }
   .position-information {
     animation: mobile-sheet-enter 220ms cubic-bezier(.22, .75, .24, 1);
     border-bottom: 0;
