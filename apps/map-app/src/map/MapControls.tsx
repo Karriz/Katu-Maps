@@ -7,6 +7,7 @@ import {
   Crosshair,
   Footprints,
   Globe2,
+  Github,
   Layers3,
   Route,
   Mountain,
@@ -381,6 +382,12 @@ export function MapControls({
                 <li><kbd>{shortcutModifier}</kbd> + <kbd>K</kbd> to focus search</li>
               </ul></section>
             </div>
+            <footer className="controls-help-footer">
+              <a href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noreferrer">
+                <Github aria-hidden="true" />
+                <span>View source on GitHub</span>
+              </a>
+            </footer>
           </section>
         )}
 
