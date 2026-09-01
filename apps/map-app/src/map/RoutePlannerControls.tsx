@@ -4,6 +4,7 @@ import type { MutableRefObject, RefObject } from 'react';
 import type { useRoutePlanning } from './useRoutePlanning';
 import type { TransitProviderId } from './transit';
 import { TransitRouteOptions } from './TransitRouteOptions';
+import { useAutocompleteNavigation } from '../lib/useAutocompleteNavigation';
 
 type PhotonFeature = {
   geometry: { coordinates: [number, number] };
@@ -78,6 +79,13 @@ export function RoutePlannerControls({
     transitTimeMode, setTransitTimeMode, transitDateTime, setTransitDateTime,
     routeOriginRef, routeDestinationRef, routeAbortRef,
   } = route;
+  const routeNavigation = useAutocompleteNavigation({
+    count: displayedSearchResults.length,
+    open: routeSearchTarget !== null,
+    onSelect: (index) => selectSearchResult(displayedSearchResults[index]),
+    onEscape: () => setRouteSearchTarget(null),
+    resetKey: `${routeSearchTarget ?? ''}:${searchQuery}`,
+  });
 
   return (
     <div className="route-planner-controls">
@@ -93,12 +101,16 @@ export function RoutePlannerControls({
               >
                 <MapPin aria-hidden="true" />
                 <input
+                  role="combobox"
                   aria-label={`Search ${label.toLowerCase()}`}
+                  aria-autocomplete="list"
                   aria-controls={`route-${kind}-search-results`}
                   aria-expanded={routeSearchTarget === kind}
+                  aria-activedescendant={routeSearchTarget === kind && routeNavigation.highlightedIndex >= 0 ? `route-${kind}-option-${routeNavigation.highlightedIndex}` : undefined}
                   placeholder={`Search ${label.toLowerCase()}`}
                   value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
                   onFocus={() => beginRouteSearch(kind)}
+                  onKeyDown={routeNavigation.onKeyDown}
                   onChange={(event) => {
                     setRouteSearchTarget(kind);
                     setSearchQuery(event.target.value);
@@ -140,7 +152,7 @@ export function RoutePlannerControls({
                   {!searchLoading && !searchError && searchQuery.trim().length >= 2 && displayedSearchResults.length === 0 && <div className="route-search-message">No places found</div>}
                   {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
                     const { primary, secondary } = photonResultLabel(feature);
-                    return <button className="route-search-result" key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" onClick={() => selectSearchResult(feature)}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
+                    return <button id={`route-${kind}-option-${index}`} role="option" aria-selected={routeNavigation.highlightedIndex === index} className={`route-search-result${routeNavigation.highlightedIndex === index ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(feature)}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
                   })}
                 </div>,
                 document.body,
