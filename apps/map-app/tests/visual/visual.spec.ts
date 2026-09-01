@@ -208,6 +208,9 @@ async function verifyMapAndHelpKeyboard(page: Page) {
   await help.focus();
   await help.press('Enter');
   await expect(page.getByRole('heading', { name: 'Controls help' })).toBeFocused();
+  const sourceLink = page.getByRole('link', { name: 'View source on GitHub' });
+  await expect(sourceLink).toHaveAttribute('href', 'https://github.com/Karriz/Katu-Maps');
+  await expect(sourceLink).toHaveAttribute('target', '_blank');
   await page.keyboard.press('Escape');
   await expect(help).toBeFocused();
 
