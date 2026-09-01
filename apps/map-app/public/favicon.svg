@@ -1,13 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Katu Maps</title>
-  <defs><clipPath id="c"><rect width="64" height="64" rx="14"/></clipPath></defs>
-  <g clip-path="url(#c)">
-    <rect width="64" height="64" fill="#74c8f4"/>
-    <path d="M0 39c12-8 23-8 34-1 12-9 22-9 30-4v30H0z" fill="#96c958"/>
-    <path d="M28 22h10v19H28zm8-8h13v28H36zm11 14h10v15H47z" fill="#fffaf0"/>
-    <path d="M8 64c5-12 12-21 22-29 8-7 17-12 29-17l5 5c-11 5-20 10-27 16-8 7-14 15-18 25z" fill="#263d52"/>
-    <path d="M15 57c2-5 5-9 8-13m6-7 6-5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-    <rect x="12" y="28" width="3" height="14" rx="1.5" fill="#74462e"/>
-    <circle cx="13.5" cy="25" r="8" fill="#5e9e42"/>
+  <desc id="desc">A white building, green landscape, and curving dark street under a blue sky.</desc>
+  <defs>
+    <clipPath id="icon-shape">
+      <rect width="512" height="512" rx="112"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#icon-shape)">
+    <rect width="512" height="512" fill="#74c8f4"/>
+
+    <!-- Distant terrain -->
+    <path d="M0 330C92 279 181 280 267 322C343 264 426 259 512 298V512H0Z" fill="#96c958"/>
+
+    <!-- One simplified architectural landmark -->
+    <path d="M124 184L220 126V337H124Z" fill="#fffaf0"/>
+    <path d="M220 126L280 171V337H220Z" fill="#e9e4d8"/>
+
+    <!-- Foreground terrain softens the building base -->
+    <path d="M0 354C93 298 183 296 278 346C352 307 432 304 512 337V512H0Z" fill="#86bf4f"/>
+
+    <!-- Narrow pale edging around one bold, unmarked street -->
+    <path d="M235 544C253 459 304 393 385 352C425 332 468 319 526 309"
+          fill="none" stroke="#fffaf0" stroke-width="104" stroke-linecap="round"/>
+    <path d="M235 544C253 459 304 393 385 352C425 332 468 319 526 309"
+          fill="none" stroke="#263d52" stroke-width="76" stroke-linecap="round"/>
   </g>
 </svg>
