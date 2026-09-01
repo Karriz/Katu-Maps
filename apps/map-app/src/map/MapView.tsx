@@ -1330,35 +1330,42 @@ export function MapView() {
 
   const selectYourLocation = (kind: 'origin' | 'destination') => {
     setRouteError(null);
-    const applyLocation = (coordinates: [number, number]) => {
+    const updateLocationMarker = (coordinates: [number, number]) => {
       userLocationRef.current = coordinates;
       (mapRef.current?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
         type: 'FeatureCollection',
         features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: { kind: 'gps' } }],
       });
-      setRouteEndpoint(kind, { name: 'Your location', category: 'Current location', coordinates, source: 'map' });
     };
     if (userLocationRef.current) {
-      applyLocation(userLocationRef.current);
+      updateLocationMarker(userLocationRef.current);
+      setRouteEndpoint(kind, { name: 'Your location', category: 'Current location', coordinates: userLocationRef.current, source: 'map' });
       return;
     }
     if (!navigator.geolocation) {
       setRouteError('Your location is not available in this browser. Choose another point.');
       return;
     }
+    // Commit the selection immediately so the listbox closes and the input shows
+    // "Your location". Coordinates will be resolved asynchronously; calculateRoute
+    // already handles the case where routeOriginRef is null for a Your-location
+    // selection and fetches geolocation at that point.
+    setRouteEndpoint(kind, { name: 'Your location', category: 'Current location', coordinates: [0, 0], source: 'map' });
+    if (kind === 'origin') routeOriginRef.current = null;
+    else routeDestinationRef.current = null;
     setRouteLoading(true);
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         setRouteLoading(false);
-        applyLocation([coords.longitude, coords.latitude]);
+        const coordinates: [number, number] = [coords.longitude, coords.latitude];
+        updateLocationMarker(coordinates);
+        if (kind === 'origin') routeOriginRef.current = coordinates;
+        else routeDestinationRef.current = coordinates;
+        setRoutePoints();
         if (userLocationWatchRef.current === null) {
           userLocationWatchRef.current = navigator.geolocation.watchPosition(
             ({ coords: update }) => {
-              const coordinates: [number, number] = [update.longitude, update.latitude];
-              userLocationRef.current = coordinates;
-              (mapRef.current?.getSource('user-location') as { setData: (data: unknown) => void } | undefined)?.setData({
-                type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: { kind: 'gps' } }],
-              });
+              updateLocationMarker([update.longitude, update.latitude]);
             },
             () => undefined,
             { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
