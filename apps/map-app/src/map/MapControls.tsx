@@ -387,10 +387,13 @@ export function MapControls({
                 <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
                 <strong>Katu Maps</strong>
               </div>
-              <a href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noreferrer">
-                <Code2 aria-hidden="true" />
-                <span>View source on GitHub</span>
-              </a>
+              <div className="controls-help-links">
+                <a href={`${import.meta.env.BASE_URL}privacy.md`} target="_blank" rel="noreferrer">Privacy policy</a>
+                <a className="controls-help-source" href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noreferrer">
+                  <Code2 aria-hidden="true" />
+                  <span>View source on GitHub</span>
+                </a>
+              </div>
             </footer>
           </section>
         )}
