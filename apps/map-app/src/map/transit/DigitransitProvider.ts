@@ -10,8 +10,9 @@ import type {
   TransitVehicleObservation,
 } from './types';
 import { decodePolyline, finiteNumber, isoDurationSeconds } from './utils';
+import { apiHttpError, fetchWithTimeout } from '../ApiRequest';
+import { serviceConfig } from '../ServiceConfig';
 
-const ENDPOINT = 'https://api.digitransit.fi/routing/v2/finland/gtfs/v1';
 const SUBSCRIPTION_KEY = import.meta.env.VITE_DIGITRANSIT_SUBSCRIPTION_KEY as string | undefined;
 
 type GraphQlResponse<T> = {
@@ -23,7 +24,7 @@ async function graphQl<T>(query: string, variables: Record<string, unknown>, sig
   if (!SUBSCRIPTION_KEY) {
     throw new Error('Digitransit is not configured. Set VITE_DIGITRANSIT_SUBSCRIPTION_KEY.');
   }
-  const response = await fetch(ENDPOINT, {
+  const response = await fetchWithTimeout(serviceConfig.digitransitEndpoint, {
     method: 'POST',
     signal,
     headers: {
@@ -33,6 +34,7 @@ async function graphQl<T>(query: string, variables: Record<string, unknown>, sig
     },
     body: JSON.stringify({ query, variables }),
   });
+  if (!response.ok) throw apiHttpError(response, 'Digitransit');
   const payload = await response.json() as GraphQlResponse<T>;
   if (!response.ok || payload.errors?.length || !payload.data) {
     throw new Error(payload.errors?.map((error) => error.message).filter(Boolean).join('; ')

@@ -31,6 +31,7 @@ import {
   vehicleResponseIsCurrent,
   type ObservedPositionTransition,
 } from './transit/vehiclePosition';
+import { serviceConfig } from './ServiceConfig';
 
 const TRANSIT_SOURCE_ID = 'transit-stops';
 const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
@@ -894,7 +895,10 @@ export class TransitStopsLayer {
     if (typeof document !== 'undefined' && document.hidden) return;
     void this.loadSelectedTrips(force);
     this.vehicleTimer = window.setInterval(() => this.updateEstimatedVehicle(), 250);
-    this.tripRefreshTimer = window.setInterval(() => void this.loadSelectedTrips(), 15_000);
+    this.tripRefreshTimer = window.setInterval(
+      () => void this.loadSelectedTrips(),
+      serviceConfig.transitTripRefreshMs,
+    );
   }
 
   private stopTripPolling() {
