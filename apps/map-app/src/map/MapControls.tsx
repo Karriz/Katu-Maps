@@ -388,8 +388,8 @@ export function MapControls({
                 <strong>Katu Maps</strong>
               </div>
               <div className="controls-help-links">
-                <a href={`${import.meta.env.BASE_URL}privacy.md`} target="_blank" rel="noreferrer">Privacy policy</a>
-                <a className="controls-help-source" href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noreferrer">
+                <a className="controls-help-source" href={`${import.meta.env.BASE_URL}privacy.md`} target="_blank" rel="noopener noreferrer">Privacy policy</a>
+                <a className="controls-help-source" href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noopener noreferrer">
                   <Code2 aria-hidden="true" />
                   <span>View source on GitHub</span>
                 </a>
