@@ -7,9 +7,19 @@ describe('location media metadata', () => {
       wikipedia: 'fi:Näsinneula', wikidata: 'Q11899420', wikimedia_commons: 'Category:Näsinneula',
       'contact:instagram': 'instagram.com/nasinneula', image: 'File:Näsinneula.jpg',
     })).toEqual({
+      description: undefined,
       wikipedia: 'fi:Näsinneula', wikidata: 'Q11899420', wikimediaCommons: 'Category:Näsinneula',
-      image: 'File:Näsinneula.jpg', socialLinks: [{ label: 'Instagram', url: 'https://instagram.com/nasinneula' }],
+      image: 'File:Näsinneula.jpg', localLanguages: [], socialLinks: [{ label: 'Instagram', url: 'https://instagram.com/nasinneula' }],
     });
+  });
+
+  it('only reads description links attached directly to the selected feature', () => {
+    expect(parseLocationMetadata({
+      description: 'A city observation tower.',
+      'name:fi': 'Näsinneula',
+      'brand:wikipedia': 'en:Särkänniemi',
+      'operator:wikidata': 'Q123',
+    })).toMatchObject({ description: 'A city observation tower.', localLanguages: ['fi'], wikipedia: undefined, wikidata: undefined });
   });
 
   it('rejects unsafe and malformed external URLs', () => {
