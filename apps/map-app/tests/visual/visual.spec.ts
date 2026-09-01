@@ -176,7 +176,7 @@ async function openRouteAutocomplete(page: Page) {
 
 async function verifyRouteKeyboard(page: Page) {
   await openRoute(page);
-  const origin = page.getByLabel('Search starting point');
+  const origin = page.getByRole('combobox', { name: 'Search starting point', exact: true });
   await origin.focus();
   await origin.press('ArrowDown');
   await expect(page.getByRole('option', { name: /Your location/ })).toHaveAttribute('aria-selected', 'true');
@@ -187,7 +187,7 @@ async function verifyRouteKeyboard(page: Page) {
   await origin.press('Enter');
   await expect(origin).toHaveValue('Your location');
 
-  const destination = page.getByLabel('Search destination');
+  const destination = page.getByRole('combobox', { name: 'Search destination', exact: true });
   await destination.focus();
   await expect(destination).not.toHaveAttribute('aria-activedescendant', /.+/);
   await destination.press('ArrowDown');
