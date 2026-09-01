@@ -194,6 +194,11 @@ export function MapControls({
 
   return (
     <>
+      {!routeOpen && (
+        <div className="map-brand" aria-hidden="true">
+          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
+        </div>
+      )}
       {!routeOpen && <div className="location-search">
         <form
           className="location-search-form"
@@ -383,6 +388,10 @@ export function MapControls({
               </ul></section>
             </div>
             <footer className="controls-help-footer">
+              <div className="controls-help-brand">
+                <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
+                <strong>Katu Maps</strong>
+              </div>
               <a href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noreferrer">
                 <Code2 aria-hidden="true" />
                 <span>View source on GitHub</span>
