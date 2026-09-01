@@ -101,7 +101,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     position: fixed;
     top: calc(136px + env(safe-area-inset-top, 0px));
     right: calc(12px + env(safe-area-inset-right, 0px));
-    left: calc(12px + env(safe-area-inset-left, 0px));
+    left: calc(74px + env(safe-area-inset-left, 0px));
     width: auto;
     max-height: calc(100dvh - 148px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   }
@@ -537,10 +537,13 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-tool-dock svg { height: 23px; stroke-width: 1.9; width: 23px; }
 @media (min-width: 641px) {
   .map-tool-help {
-    left: 364px;
+    left: 72px;
     pointer-events: auto;
     position: absolute;
-    top: -86px;
+    top: 0;
+  }
+  .controls-help-panel {
+    left: 136px;
   }
 }
 .map-tool-zoom { border-radius: 15px; box-shadow: 0 8px 24px rgb(37 55 79 / 14%); display: flex; flex-direction: column; overflow: hidden; }
