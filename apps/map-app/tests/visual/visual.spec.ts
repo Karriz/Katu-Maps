@@ -5,6 +5,7 @@ const viewports = {
   phone: { width: 412, height: 915, deviceScaleFactor: 1 },
   tablet: { width: 1024, height: 768, deviceScaleFactor: 1 },
   desktop: { width: 1440, height: 900, deviceScaleFactor: 1 },
+  landscape: { width: 740, height: 390, deviceScaleFactor: 1 },
 } as const;
 
 type Scenario = {
@@ -161,7 +162,7 @@ async function openRouteAutocomplete(page: Page) {
   await page.getByLabel('Search starting point').fill('Tampere');
   const results = page.getByRole('listbox', { name: 'Search starting point results' });
   await expect(results).toBeVisible();
-  await expect(results.getByRole('button')).toHaveCount(3);
+  await expect(results.getByRole('option')).toHaveCount(3);
   expect(await results.evaluate((element) => element.closest('.route-panel'))).toBeNull();
 
   const bounds = await results.boundingBox();
@@ -171,6 +172,51 @@ async function openRouteAutocomplete(page: Page) {
   expect(bounds!.height).toBeGreaterThan(120);
   expect(bounds!.y).toBeGreaterThanOrEqual(0);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
+}
+
+async function verifyRouteKeyboard(page: Page) {
+  await openRoute(page);
+  const origin = page.getByLabel('Search starting point');
+  await origin.focus();
+  await origin.press('ArrowDown');
+  await expect(page.getByRole('option', { name: /Your location/ })).toHaveAttribute('aria-selected', 'true');
+  await origin.press('ArrowUp');
+  await expect(origin).not.toHaveAttribute('aria-activedescendant', /.+/);
+  await origin.press('ArrowUp');
+  await expect(origin).toHaveAttribute('aria-activedescendant', 'route-origin-option-0');
+  await origin.press('Enter');
+  await expect(origin).toHaveValue('Your location');
+
+  const destination = page.getByLabel('Search destination');
+  await destination.focus();
+  await expect(destination).not.toHaveAttribute('aria-activedescendant', /.+/);
+  await destination.press('ArrowDown');
+  await destination.press('Enter');
+  await expect(destination).toHaveValue('Your location');
+}
+
+async function verifyMapAndHelpKeyboard(page: Page) {
+  const canvas = page.locator('.maplibregl-canvas');
+  await canvas.focus();
+  await canvas.press('ArrowRight');
+  await canvas.press('+');
+  await canvas.press('Shift+F10');
+  await expect(page.getByRole('menu', { name: 'Map point options' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  const help = page.getByRole('button', { name: 'Controls help' });
+  await help.focus();
+  await help.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Controls help' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(help).toBeFocused();
+
+  const search = page.getByLabel('Search for a place');
+  await search.focus();
+  await search.fill('typing');
+  const zoomBefore = await canvas.getAttribute('aria-label');
+  await search.press('+');
+  expect(await canvas.getAttribute('aria-label')).toBe(zoomBefore);
 }
 
 async function chooseRouteResult(page: Page, listName: string, resultText: string, useLast = false) {
@@ -664,6 +710,32 @@ const scenarios: Scenario[] = [
     viewport: 'phone',
     setup: openRouteAutocomplete,
     state: 'routing autocomplete open',
+  },
+  {
+    name: 'desktop-route-keyboard',
+    description: 'Both route endpoints include current location in cyclic keyboard navigation',
+    viewport: 'desktop',
+    setup: verifyRouteKeyboard,
+    state: 'both route endpoints selected using only the keyboard',
+  },
+  {
+    name: 'desktop-map-help-keyboard',
+    description: 'Map and controls Help are operable by keyboard with predictable focus',
+    viewport: 'desktop',
+    setup: verifyMapAndHelpKeyboard,
+    state: 'keyboard map actions and Help verified',
+  },
+  {
+    name: 'mobile-landscape-controls-help',
+    description: 'Help remains visible beside Layers and fits a short landscape safe viewport',
+    viewport: 'landscape',
+    setup: async page => {
+      await page.getByRole('button', { name: 'Controls help' }).click();
+      await expect(page.locator('#controls-help-panel')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Controls help' })).toBeInViewport();
+      await expect(page.locator('#controls-help-panel')).toBeInViewport();
+    },
+    state: 'responsive Help open in short mobile landscape',
   },
   {
     name: 'tablet-transit-alternatives',

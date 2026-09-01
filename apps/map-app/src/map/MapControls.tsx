@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Bike,
   Building2,
@@ -21,6 +21,7 @@ import {
   Moon,
   Sun,
   Monitor,
+  CircleHelp,
   type LucideIcon,
 } from 'lucide-react';
 import type { ThemePreference } from '../theme';
@@ -156,6 +157,9 @@ export function MapControls({
   onThemeChange: (theme: ThemePreference) => void;
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
+  const helpHeadingRef = useRef<HTMLHeadingElement>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
   const suggestionsVisible = searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0);
   const searchNavigation = useAutocompleteNavigation({
@@ -177,6 +181,15 @@ export function MapControls({
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
   }, [onSearchFocus]);
+
+  useEffect(() => {
+    if (helpOpen) helpHeadingRef.current?.focus();
+  }, [helpOpen]);
+
+  const closeHelp = () => {
+    setHelpOpen(false);
+    window.requestAnimationFrame(() => helpButtonRef.current?.focus());
+  };
 
   return (
     <>
@@ -278,6 +291,18 @@ export function MapControls({
             <Layers3 aria-hidden="true" />
           </button>
           <button
+            ref={helpButtonRef}
+            className={`map-tool-help${helpOpen ? ' active' : ''}`}
+            type="button"
+            aria-label="Controls help"
+            aria-expanded={helpOpen}
+            aria-controls="controls-help-panel"
+            title="Controls help"
+            onClick={() => { if (helpOpen) closeHelp(); else setHelpOpen(true); }}
+          >
+            <CircleHelp aria-hidden="true" />
+          </button>
+          <button
             className={`map-tool-mode${is3dMode ? ' active' : ''}`}
             type="button"
             aria-label={is3dMode ? 'Switch to 2D map' : 'Switch to 3D map'}
@@ -320,6 +345,29 @@ export function MapControls({
         </div>
 
         {notice && <div className="map-tool-notice" role="status">{notice}</div>}
+
+        {helpOpen && (
+          <section className="controls-help-panel" id="controls-help-panel" aria-labelledby="controls-help-heading" onKeyDown={(event) => { if (event.key === 'Escape') closeHelp(); }}>
+            <header>
+              <h2 id="controls-help-heading" ref={helpHeadingRef} tabIndex={-1}>Controls help</h2>
+              <button type="button" aria-label="Close controls help" onClick={closeHelp}><X aria-hidden="true" /></button>
+            </header>
+            <div className="controls-help-content">
+              <section><h3>Touch</h3><ul>
+                <li>Drag to move</li><li>Pinch to zoom</li><li>Rotate and tilt with two fingers</li>
+                <li>Long-press for location actions</li><li>Tap a place or marker for details</li>
+                <li>Drag or use provided controls to expand panels</li>
+              </ul></section>
+              <section><h3>Mouse and keyboard</h3><ul>
+                <li>Drag and scroll</li><li>Right-click for location actions</li>
+                <li><kbd>Arrow keys</kbd> to pan</li><li><kbd>+</kbd> / <kbd>−</kbd> to zoom</li>
+                <li><kbd>Tab</kbd> to navigate controls</li><li><kbd>Arrow keys</kbd> to navigate suggestions</li>
+                <li><kbd>Enter</kbd> to select or submit</li><li><kbd>Escape</kbd> to close the current menu</li>
+                <li><kbd>{shortcutModifier}</kbd> + <kbd>K</kbd> to focus search</li>
+              </ul></section>
+            </div>
+          </section>
+        )}
 
         {layersOpen && (
           <section className="layer-panel" id="map-layer-panel" aria-label="Map layer visibility">

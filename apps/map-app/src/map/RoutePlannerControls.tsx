@@ -80,9 +80,13 @@ export function RoutePlannerControls({
     routeOriginRef, routeDestinationRef, routeAbortRef,
   } = route;
   const routeNavigation = useAutocompleteNavigation({
-    count: displayedSearchResults.length,
+    count: displayedSearchResults.length + 1,
     open: routeSearchTarget !== null,
-    onSelect: (index) => selectSearchResult(displayedSearchResults[index]),
+    onSelect: (index) => {
+      if (routeSearchTarget === null) return;
+      if (index === 0) selectYourLocation(routeSearchTarget);
+      else selectSearchResult(displayedSearchResults[index - 1]);
+    },
     onEscape: () => setRouteSearchTarget(null),
     resetKey: `${routeSearchTarget ?? ''}:${searchQuery}`,
   });
@@ -143,7 +147,7 @@ export function RoutePlannerControls({
               </div>
               {routeSearchTarget === kind && createPortal(
                 <div className="route-search-results route-search-results-floating" id={`route-${kind}-search-results`} ref={routeSearchResultsRef} role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
-                  <button className="route-search-result route-search-current-location" type="button" onClick={() => selectYourLocation(kind)}>
+                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectYourLocation(kind)}>
                     <strong>Your location</strong>
                     <span>{userLocationRef.current ? 'Use current GPS position' : 'Request location access'}</span>
                   </button>
@@ -152,7 +156,8 @@ export function RoutePlannerControls({
                   {!searchLoading && !searchError && searchQuery.trim().length >= 2 && displayedSearchResults.length === 0 && <div className="route-search-message">No places found</div>}
                   {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
                     const { primary, secondary } = photonResultLabel(feature);
-                    return <button id={`route-${kind}-option-${index}`} role="option" aria-selected={routeNavigation.highlightedIndex === index} className={`route-search-result${routeNavigation.highlightedIndex === index ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(feature)}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
+                    const optionIndex = index + 1;
+                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(feature)}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
                   })}
                 </div>,
                 document.body,
