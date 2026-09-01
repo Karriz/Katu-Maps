@@ -388,7 +388,7 @@ export function MapControls({
                 <strong>Katu Maps</strong>
               </div>
               <div className="controls-help-links">
-                <a className="controls-help-source" href="https://github.com/Karriz/Katu-Maps/blob/main/apps/map-app/public/privacy.md" target="_blank" rel="noopener noreferrer">Privacy policy</a>
+                <a className="controls-help-source controls-help-source-offset" href="https://github.com/Karriz/Katu-Maps/blob/main/apps/map-app/public/privacy.md" target="_blank" rel="noopener noreferrer">Privacy policy</a>
                 <a className="controls-help-source" href="https://github.com/Karriz/Katu-Maps" target="_blank" rel="noopener noreferrer">
                   <Code2 aria-hidden="true" />
                   <span>View source on GitHub</span>
