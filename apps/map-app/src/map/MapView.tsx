@@ -1478,8 +1478,10 @@ export function MapView() {
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (routeSearchTarget) closeAutocomplete();
-      if (searchOpen) setSearchOpen(false);
+      if (routeContextMenu) { setRouteContextMenu(null); setContextMenuMarker(null); }
+      else if (routeSearchTarget) closeAutocomplete();
+      else if (searchOpen) setSearchOpen(false);
+      else if (layersOpen) setLayersOpen(false);
     };
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
@@ -1496,7 +1498,7 @@ export function MapView() {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('pointerdown', handlePointerDown);
     };
-  }, [routeSearchTarget, searchOpen]);
+  }, [layersOpen, routeContextMenu, routeSearchTarget, searchOpen]);
 
   const cancelRoute = () => {
     routeAbortRef.current?.abort();
@@ -1597,6 +1599,9 @@ export function MapView() {
         customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
       },
     });
+    // Use the explicitly documented key bindings below rather than MapLibre's
+    // broader defaults, so modifier keys and editable controls remain untouched.
+    map.keyboard.disable();
 
     const treeLayer = new TreeModelLayer({
       sourceId: OPENFREEMAP_SOURCE_ID,
@@ -1830,6 +1835,26 @@ export function MapView() {
         y: Math.min(Math.max(point.y, 12), container.clientHeight - 12),
         coordinates,
       });
+    };
+    const handleMapKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.target !== map.getCanvas()) return;
+      const pan: Record<string, [number, number]> = {
+        ArrowLeft: [-100, 0], ArrowRight: [100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100],
+      };
+      if (pan[event.key]) {
+        event.preventDefault();
+        map.panBy(pan[event.key], { duration: 180 });
+      } else if (event.key === '+' || event.key === '=') {
+        event.preventDefault(); map.zoomIn({ duration: 180 });
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault(); map.zoomOut({ duration: 180 });
+      } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        event.preventDefault();
+        const canvas = map.getCanvas();
+        const point = new maplibregl.Point(canvas.clientWidth / 2, canvas.clientHeight / 2);
+        const center = map.getCenter();
+        showRouteContextMenu(point, [center.lng, center.lat]);
+      }
     };
     const handleMapContextMenu = (event: MapMouseEvent) => {
       event.originalEvent.preventDefault();
@@ -2123,6 +2148,8 @@ export function MapView() {
       map.on('click', handleLocationClick);
       map.on('contextmenu', handleMapContextMenu);
       const canvas = map.getCanvas();
+      canvas.setAttribute('aria-label', 'Interactive map. Use arrow keys to pan, plus or minus to zoom, and Shift+F10 for location actions.');
+      canvas.addEventListener('keydown', handleMapKeyDown);
       canvas.addEventListener('pointerdown', handlePointerDown);
       canvas.addEventListener('wheel', handleWheel, { passive: true });
       canvas.addEventListener('pointermove', cancelLongPress);
@@ -2281,6 +2308,7 @@ export function MapView() {
       map.off('click', handleLocationClick);
       map.off('contextmenu', handleMapContextMenu);
       const canvas = map.getCanvas();
+      canvas.removeEventListener('keydown', handleMapKeyDown);
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('wheel', handleWheel);
       canvas.removeEventListener('pointermove', cancelLongPress);
@@ -2899,7 +2927,7 @@ export function MapView() {
 
   return (
     <div className="map-view">
-      <div ref={containerRef} className="map-canvas" />
+      <div ref={containerRef} className="map-canvas" aria-label="Interactive map. Use arrow keys to pan and plus or minus to zoom." />
       {!mapLoaded && !mapError && <div className="map-status">Loading map…</div>}
       {mapError && (
         <div className="map-status map-status-error">
