@@ -219,7 +219,7 @@ async function verifyMapAndHelpKeyboard(page: Page) {
   expect(await canvas.getAttribute('aria-label')).toBe(zoomBefore);
 }
 
-async function verifyControlsHelpPlacement(page: Page, layout: 'search' | 'portrait-dock') {
+async function verifyControlsHelpPlacement(page: Page, layout: 'desktop' | 'landscape' | 'portrait-dock') {
   const trigger = page.getByRole('button', { name: 'Controls help' });
   await expect(trigger).toBeInViewport();
 
@@ -236,6 +236,9 @@ async function verifyControlsHelpPlacement(page: Page, layout: 'search' | 'portr
   if (layout === 'portrait-dock') {
     expect(Math.abs(triggerBox.x - layersBox.x)).toBeLessThanOrEqual(2);
     expect(triggerBox.y).toBeGreaterThanOrEqual(routeBox.y + routeBox.height + 6);
+  } else if (layout === 'desktop') {
+    expect(triggerBox.x).toBeGreaterThanOrEqual(layersBox.x + layersBox.width + 6);
+    expect(triggerBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height + 6);
   } else {
     expect(triggerBox.x).toBeGreaterThanOrEqual(searchBox.x + searchBox.width + 6);
     expect(Math.abs(triggerBox.y - searchBox.y)).toBeLessThanOrEqual(2);
@@ -244,6 +247,13 @@ async function verifyControlsHelpPlacement(page: Page, layout: 'search' | 'portr
   await trigger.click();
   const panel = page.locator('#controls-help-panel');
   await expect(panel).toBeInViewport();
+  const panelBox = await panel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  if (panelBox && layout === 'portrait-dock') {
+    expect(panelBox.x).toBeGreaterThanOrEqual(layersBox.x + layersBox.width + 6);
+  } else if (panelBox && layout === 'desktop') {
+    expect(panelBox.x).toBeGreaterThanOrEqual(triggerBox.x + triggerBox.width + 6);
+  }
   const header = panel.locator('header');
   await expect(header.getByRole('heading', { name: 'Controls help' })).toBeVisible();
   const close = header.getByRole('button', { name: 'Close controls help' });
@@ -764,10 +774,10 @@ const scenarios: Scenario[] = [
   },
   {
     name: 'desktop-controls-help-placement',
-    description: 'Help sits to the right of desktop search and its panel remains contained',
+    description: 'Help sits below search, right of the desktop dock, and opens without covering its trigger',
     viewport: 'desktop',
-    setup: page => verifyControlsHelpPlacement(page, 'search'),
-    state: 'desktop Help open from beside search',
+    setup: page => verifyControlsHelpPlacement(page, 'desktop'),
+    state: 'desktop Help open beside the dock',
   },
   {
     name: 'phone-controls-help-placement',
@@ -780,7 +790,7 @@ const scenarios: Scenario[] = [
     name: 'mobile-landscape-controls-help',
     description: 'Help sits to the right of search and fits a short landscape safe viewport',
     viewport: 'landscape',
-    setup: page => verifyControlsHelpPlacement(page, 'search'),
+    setup: page => verifyControlsHelpPlacement(page, 'landscape'),
     state: 'landscape Help open from beside search',
   },
   {
