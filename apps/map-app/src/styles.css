@@ -163,10 +163,11 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-departure-time { align-items: flex-end; display: flex; flex: 0 0 auto; flex-direction: column; gap: 4px; min-width: 60px; }
 .transit-departure-time span { color: var(--color-success); font-size: 0.66rem; font-weight: 700; }
 .transit-departure-time strong { font-size: 0.78rem; font-variant-numeric: tabular-nums; }
-.transit-panel-footer { border-top: 1px solid var(--color-line); padding: 12px 16px; }
-.transit-panel-footer button { align-items: center; background: transparent; border: 0; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.75rem; font-weight: 750; justify-content: space-between; padding: 5px 3px; width: 100%; }
-.transit-panel-footer svg { height: 17px; transition: transform 160ms ease; width: 17px; }
-.transit-panel-footer svg.expanded { transform: rotate(-90deg); }
+.transit-departure-more { align-items: center; background: var(--surface-subtle); border: 1px solid var(--color-line); border-radius: 11px; color: var(--color-accent); cursor: pointer; display: flex; font: inherit; font-size: 0.75rem; font-weight: 750; justify-content: space-between; min-height: 40px; padding: 8px 11px; width: 100%; }
+.transit-departure-more:hover { background: var(--surface-hover); border-color: #cbd5df; }
+.transit-departure-more:focus-visible { outline: 3px solid rgb(80 145 235 / 26%); outline-offset: 1px; }
+.transit-departure-more svg { height: 17px; transition: transform 160ms ease; width: 17px; }
+.transit-departure-more svg.expanded { transform: rotate(-90deg); }
 .location-info-panel { color: var(--color-ink); display: flex; flex-direction: column; max-height: calc(100dvh - 56px); overflow: hidden; padding: 0; position: absolute; right: 28px; top: 28px; width: min(350px, calc(100% - 56px)); z-index: 100; }
 .location-info-header { align-items: flex-start; display: flex; flex: 0 0 auto; gap: 13px; padding: 22px 50px 12px 22px; }
 .location-info-icon { align-items: center; background: #64748b; border: 3px solid #dceaff; border-radius: 12px; color: #fff; display: flex; flex: 0 0 auto; height: 40px; justify-content: center; width: 40px; }
