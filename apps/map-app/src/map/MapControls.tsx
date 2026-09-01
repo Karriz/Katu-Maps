@@ -347,7 +347,22 @@ export function MapControls({
         {notice && <div className="map-tool-notice" role="status">{notice}</div>}
 
         {helpOpen && (
-          <section className="controls-help-panel" id="controls-help-panel" aria-labelledby="controls-help-heading" onKeyDown={(event) => { if (event.key === 'Escape') closeHelp(); }}>
+          <section
+            className="controls-help-panel"
+            id="controls-help-panel"
+            aria-labelledby="controls-help-heading"
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerMove={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === 'Escape') closeHelp();
+            }}
+          >
             <header>
               <h2 id="controls-help-heading" ref={helpHeadingRef} tabIndex={-1}>Controls help</h2>
               <button type="button" aria-label="Close controls help" onClick={closeHelp}><X aria-hidden="true" /></button>
