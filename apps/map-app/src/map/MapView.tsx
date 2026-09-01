@@ -68,6 +68,8 @@ import {
 const TransitJourneyDetails = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyDetails })));
 const TransitJourneyHeader = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyHeader })));
 import { MapContextMenu } from './MapContextMenu';
+import { NearbyPlacesPanel } from './NearbyPlacesPanel';
+import { rankNearbyPlaces, type NearbyPlace } from './NearbyPlaces';
 import { MapCameraActions } from './MapCameraActions';
 import { RoutePlannerControls } from './RoutePlannerControls';
 import { PositionInformationPanel } from './PositionInformationPanel';
@@ -126,7 +128,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-contact-shadow',
 ];
 const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
-const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information';
+const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel';
 
 function closeRangeCameraOffset(): [number, number] {
   if (window.innerWidth > 760) return [0, 0];
@@ -678,6 +680,7 @@ export function MapView() {
   const lastSearchFitRef = useRef('');
   const [locationDetailsLoading, setLocationDetailsLoading] = useState(false);
   const [contextMenuMarker, setContextMenuMarker] = useState<[number, number] | null>(null);
+  const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[] | null>(null);
   const elevationRequestRef = useRef(0);
   const positionAddressRequestRef = useRef(0);
   const favoriteAddressAbortRef = useRef<AbortController | null>(null);
@@ -723,6 +726,10 @@ export function MapView() {
     (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
       type: 'FeatureCollection', features: [],
     });
+  }, []);
+  const closeNearby = useCallback(() => {
+    setNearbyPlaces(null);
+    setContextMenuMarker(null);
   }, []);
   useEffect(() => {
     if (!routeSearchTarget) return;
@@ -1743,9 +1750,10 @@ export function MapView() {
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
       if (measurementControllerRef.current) return;
+      setNearbyPlaces(null);
       setRouteContextMenu(null);
       if (!positionInformation && !pendingFavorite) setContextMenuMarker(null);
-      const locationLayers = ['favorite-icons', 'search-result-icons', 'global-hiking-pois', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
+      const locationLayers = ['favorite-icons', 'search-result-icons', 'nearby-result-icons', 'global-hiking-pois', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
       const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
       if (routePickingRef.current) {
         const kind = routePickingRef.current;
@@ -1912,6 +1920,10 @@ export function MapView() {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+      map.addSource('nearby-results', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
       map.addSource('favorites', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -2056,6 +2068,20 @@ export function MapView() {
           'text-anchor': 'top',
           'text-optional': true,
           'text-allow-overlap': false,
+        },
+        paint: { 'text-color': MAP_COLORS.label, 'text-halo-color': MAP_COLORS.labelHalo, 'text-halo-width': 1.3 },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'nearby-result-halo', type: 'circle', source: 'nearby-results',
+        paint: { 'circle-radius': 13, 'circle-color': '#fff', 'circle-opacity': 0.96, 'circle-stroke-color': '#7c3aed', 'circle-stroke-width': 3 },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'nearby-result-icons', type: 'symbol', source: 'nearby-results',
+        layout: {
+          'icon-image': searchResultIconExpression(), 'icon-size': 1.25,
+          'icon-allow-overlap': true, 'icon-ignore-placement': true,
+          'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 11,
+          'text-offset': [0, 1.3], 'text-anchor': 'top', 'text-optional': true,
         },
         paint: { 'text-color': MAP_COLORS.label, 'text-halo-color': MAP_COLORS.labelHalo, 'text-halo-width': 1.3 },
       }, poiLayers.before);
@@ -2295,6 +2321,17 @@ export function MapView() {
       })),
     });
   }, [highlightedSearchResults, mapLoaded]);
+
+  useEffect(() => {
+    const source = mapRef.current?.getSource('nearby-results') as { setData: (data: unknown) => void } | undefined;
+    source?.setData({
+      type: 'FeatureCollection',
+      features: (nearbyPlaces ?? []).map((place) => ({
+        type: 'Feature', geometry: { type: 'Point', coordinates: place.coordinates },
+        properties: { ...place.properties, name: place.name || place.type.replaceAll('_', ' '), iconId: place.type },
+      })),
+    });
+  }, [nearbyPlaces, mapLoaded]);
 
   useEffect(() => {
     const source = mapRef.current?.getSource('favorites') as { setData: (data: unknown) => void } | undefined;
@@ -2802,6 +2839,64 @@ export function MapView() {
     });
   };
 
+  const openNearby = (anchor: [number, number]) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const layers = ['global-hiking-pois', 'location-poi-icons', 'location-poi-labels']
+      .filter((layer) => Boolean(map.getLayer(layer)));
+    const candidates = map.queryRenderedFeatures(undefined, { layers }).flatMap((feature) => {
+      if (feature.geometry.type !== 'Point') return [];
+      const properties = (feature.properties ?? {}) as Record<string, unknown>;
+      const coordinates = feature.geometry.coordinates as [number, number];
+      const type = String(properties.class ?? properties.osm_value ?? properties.subclass ?? '');
+      const osmId = properties.osm_id ?? feature.id;
+      return [{
+        id: osmId === undefined
+          ? `${feature.sourceLayer ?? type}:${coordinates.map((value) => value.toFixed(5)).join(',')}:${String(properties.name ?? '')}`
+          : `${properties.osm_type ?? feature.sourceLayer ?? ''}:${String(osmId)}`,
+        name: typeof properties.name === 'string' ? properties.name : undefined,
+        type,
+        coordinates,
+        properties,
+      }];
+    });
+    const places = rankNearbyPlaces(anchor, candidates);
+    setNearbyPlaces(places);
+    setRouteContextMenu(null);
+    setContextMenuMarker(anchor);
+    setSearchOpen(false);
+    setHighlightedSearchResults([]);
+    clearLocationSelection();
+    setSelectedTransitStop(null);
+    window.requestAnimationFrame(() => {
+      if (!places.length) return;
+      const bounds = new maplibregl.LngLatBounds(anchor, anchor);
+      places.forEach((place) => bounds.extend(place.coordinates));
+      map.fitBounds(bounds, { padding: panelViewportPadding(map, 36, 16), maxZoom: 16.5, duration: 650 });
+    });
+  };
+
+  const selectNearbyPlace = (place: NearbyPlace) => {
+    const selection: LocationSelection = {
+      name: place.name || place.type.replaceAll('_', ' '),
+      category: locationCategory(place.properties), coordinates: place.coordinates, source: 'map',
+      iconId: place.type,
+      osmId: typeof place.properties.osm_id === 'string' || typeof place.properties.osm_id === 'number' ? place.properties.osm_id : undefined,
+      osmType: typeof place.properties.osm_type === 'string' ? place.properties.osm_type : undefined,
+      ...locationDetails(place.properties),
+    };
+    setNearbyPlaces(null);
+    setContextMenuMarker(null);
+    prepareInfoPanelOpen();
+    clearTransitInfoSelection();
+    setSelectedTransitStop(null);
+    setSelectedLocation(selection);
+    (mapRef.current?.getSource('selected-location') as { setData: (data: unknown) => void } | undefined)?.setData({
+      type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: selection.coordinates }, properties: {} }],
+    });
+    void enrichLocationDetails(selection);
+  };
+
   return (
     <div className="map-view">
       <div ref={containerRef} className="map-canvas" />
@@ -2830,6 +2925,7 @@ export function MapView() {
               };
             })}
             onQueryChange={(query) => {
+              closeNearby();
               pendingSearchSubmitRef.current = null;
               setSearchQuery(query);
               setHighlightedSearchResults([]);
@@ -2847,6 +2943,7 @@ export function MapView() {
               setHighlightedSearchResults([]);
             }}
             onSearchFocus={() => {
+              closeNearby();
               setSearchOpen(true);
               setLayersOpen(false);
             }}
@@ -2930,6 +3027,7 @@ export function MapView() {
                 openPositionInformation(positionInformationState(coordinates));
                 setRouteContextMenu(null);
               }}
+              onNearby={() => openNearby([...routeContextMenu.coordinates])}
               onMeasureDistance={() => startMeasurement([...routeContextMenu.coordinates])}
               onSaveFavourite={() => {
                 saveSelection({ name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map' });
@@ -2952,6 +3050,9 @@ export function MapView() {
                 setRouteEndpoint('origin', selection);
               }}
             />
+          )}
+          {nearbyPlaces && (
+            <NearbyPlacesPanel places={nearbyPlaces} onClose={closeNearby} onSelect={selectNearbyPlace} />
           )}
           {positionInformation && (
             <PositionInformationPanel
