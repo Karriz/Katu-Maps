@@ -24,6 +24,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { ThemePreference } from '../theme';
+import { useAutocompleteNavigation } from '../lib/useAutocompleteNavigation';
 
 export type MapLayerKey =
   | 'globe'
@@ -156,6 +157,14 @@ export function MapControls({
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  const suggestionsVisible = searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0);
+  const searchNavigation = useAutocompleteNavigation({
+    count: searchResults.length,
+    open: suggestionsVisible,
+    onSelect: onSearchResultSelect,
+    onEscape: onSearchClose,
+    resetKey: query,
+  });
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -186,11 +195,17 @@ export function MapControls({
           <Search aria-hidden="true" />
           <input
             ref={searchInputRef}
+            role="combobox"
             aria-label="Search for a place"
+            aria-autocomplete="list"
+            aria-expanded={suggestionsVisible}
+            aria-controls="location-search-results"
+            aria-activedescendant={searchNavigation.highlightedIndex >= 0 ? `location-search-option-${searchNavigation.highlightedIndex}` : undefined}
             placeholder="Search places…"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             onFocus={onSearchFocus}
+            onKeyDown={searchNavigation.onKeyDown}
           />
           {query && (
             <button
@@ -223,7 +238,7 @@ export function MapControls({
             <Star aria-hidden="true" />
           </button>
         </form>
-        {searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0) && (
+        {suggestionsVisible && (
           <div id="location-search-results" className="location-search-results" role="listbox" aria-label={favoritesOpen ? 'Favourite places' : 'Location search results'}>
             {searchError && <div className="location-search-message">{searchError}</div>}
             {!searchLoading && !searchError && searchResults.length === 0 && (
@@ -231,10 +246,12 @@ export function MapControls({
             )}
             {searchResults.map((result, index) => (
               <button
-                className="location-search-result"
+                id={`location-search-option-${index}`}
+                className={`location-search-result${searchNavigation.highlightedIndex === index ? ' highlighted' : ''}`}
                 key={result.id}
                 type="button"
                 role="option"
+                aria-selected={searchNavigation.highlightedIndex === index}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onSearchResultSelect(index)}
               >
