@@ -72,6 +72,7 @@ export function usePanelCoordinator({
 
   function openPositionInformation(information: PositionInformationState) {
     prepareInfoPanelOpen();
+    setContextMenuMarker(information.coordinates);
     if (!routeVehicleViewRef.current) {
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
