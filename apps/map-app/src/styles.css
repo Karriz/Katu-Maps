@@ -694,6 +694,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 }
 [data-theme='dark'] body { background: #081827; }
 [data-theme='dark'] .map-status { background: rgb(18 37 55 / 96%); color: var(--color-ink); border-color: var(--color-line-strong); }
+[data-theme='dark'] .maplibregl-ctrl-attrib { background: rgb(12 29 44 / 94%); box-shadow: 0 1px 4px rgb(0 8 18 / 45%); color: #b8cddd; }
+[data-theme='dark'] .maplibregl-ctrl-attrib a { color: #b8dcff; }
+[data-theme='dark'] .maplibregl-ctrl-attrib a:hover, [data-theme='dark'] .maplibregl-ctrl-attrib a:focus-visible { color: #f1f8ff; }
+[data-theme='dark'] .maplibregl-ctrl-attrib-button { background-color: rgb(12 29 44 / 94%); background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20fill%3D%22%23f1f8ff%22%20fill-rule%3D%22evenodd%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20d%3D%22M4%2010a6%206%200%201%200%2012%200%206%206%200%201%200-12%200m5-3a1%201%200%201%200%202%200%201%201%200%201%200-2%200m0%203a1%201%200%201%201%202%200v3a1%201%200%201%201-2%200%22%2F%3E%3C%2Fsvg%3E"); }
 [data-theme='dark'] .map-tool-dock button { border-color: #38566e; color: #c6d9e8; }
 [data-theme='dark'] .map-tool-dock button:hover { background: #2a4d68; border-color: #6eaddd; color: #fff; }
 [data-theme='dark'] .map-tool-dock button.active { background: #214e72; border-color: #74b8ff; color: #d9edff; }
