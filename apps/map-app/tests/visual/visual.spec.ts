@@ -219,6 +219,36 @@ async function verifyMapAndHelpKeyboard(page: Page) {
   expect(await canvas.getAttribute('aria-label')).toBe(zoomBefore);
 }
 
+async function verifyControlsHelpPlacement(page: Page, layout: 'dock' | 'portrait') {
+  const trigger = page.getByRole('button', { name: 'Controls help' });
+  await trigger.click();
+  const panel = page.locator('#controls-help-panel');
+  await expect(trigger).toBeInViewport();
+  await expect(panel).toBeInViewport();
+
+  const triggerBox = await trigger.boundingBox();
+  const panelBox = await panel.boundingBox();
+  const searchBox = await page.locator('.location-search-form').boundingBox();
+  expect(triggerBox).not.toBeNull();
+  expect(panelBox).not.toBeNull();
+  expect(searchBox).not.toBeNull();
+  if (!triggerBox || !panelBox || !searchBox) return;
+
+  if (layout === 'portrait') {
+    expect(Math.abs(triggerBox.x - searchBox.x)).toBeLessThanOrEqual(2);
+    expect(triggerBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height + 8);
+    expect(panelBox.y).toBeGreaterThanOrEqual(triggerBox.y + triggerBox.height + 8);
+  } else {
+    expect(panelBox.x).toBeGreaterThanOrEqual(triggerBox.x + triggerBox.width + 8);
+  }
+
+  const header = panel.locator('header');
+  await expect(header.getByRole('heading', { name: 'Controls help' })).toBeVisible();
+  await expect(header.getByRole('button', { name: 'Close controls help' })).toBeVisible();
+  expect(await panel.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true);
+  expect(await panel.locator('.controls-help-content').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+}
+
 async function chooseRouteResult(page: Page, listName: string, resultText: string, useLast = false) {
   const list = page.getByRole('listbox', { name: listName });
   await expect(list).toBeVisible();
@@ -726,15 +756,24 @@ const scenarios: Scenario[] = [
     state: 'keyboard map actions and Help verified',
   },
   {
+    name: 'desktop-controls-help-placement',
+    description: 'Help opens inward from the desktop tool dock and remains contained',
+    viewport: 'desktop',
+    setup: page => verifyControlsHelpPlacement(page, 'dock'),
+    state: 'desktop Help open beside the tool dock',
+  },
+  {
+    name: 'phone-controls-help-placement',
+    description: 'Help trigger and fixed-header panel sit below the portrait search control',
+    viewport: 'phone',
+    setup: page => verifyControlsHelpPlacement(page, 'portrait'),
+    state: 'portrait Help open below search',
+  },
+  {
     name: 'mobile-landscape-controls-help',
     description: 'Help remains visible beside Layers and fits a short landscape safe viewport',
     viewport: 'landscape',
-    setup: async page => {
-      await page.getByRole('button', { name: 'Controls help' }).click();
-      await expect(page.locator('#controls-help-panel')).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Controls help' })).toBeInViewport();
-      await expect(page.locator('#controls-help-panel')).toBeInViewport();
-    },
+    setup: page => verifyControlsHelpPlacement(page, 'dock'),
     state: 'responsive Help open in short mobile landscape',
   },
   {

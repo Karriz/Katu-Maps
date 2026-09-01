@@ -83,26 +83,33 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 }
 
 .controls-help-panel {
-  position: absolute; top: 0; right: 62px; width: min(440px, calc(100vw - 86px));
-  max-height: calc(100dvh - 24px - env(safe-area-inset-bottom)); overflow: auto;
+  display: flex; flex-direction: column; position: absolute; top: 0; left: 72px; width: min(440px, calc(100vw - 100px));
+  max-height: calc(100dvh - 120px - env(safe-area-inset-bottom, 0px)); overflow: hidden;
   padding: 16px; border: 1px solid var(--color-line); border-radius: 16px;
   background: var(--surface-raised); color: var(--color-ink); box-shadow: var(--shadow-card); z-index: 12;
 }
-.controls-help-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.controls-help-panel header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; }
 .controls-help-panel h2, .controls-help-panel h3 { margin: 0; }
 .controls-help-panel header button { width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent; color: inherit; }
-.controls-help-content { display: grid; grid-template-columns: 1fr 1.25fr; gap: 20px; margin-top: 12px; }
+.controls-help-content { display: grid; grid-template-columns: 1fr 1.25fr; gap: 20px; margin-top: 12px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .controls-help-content ul { margin: 8px 0 0; padding-left: 20px; }
 .controls-help-content li { margin: 6px 0; }
 .controls-help-content kbd { padding: 1px 5px; border: 1px solid var(--color-line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-hover); font: inherit; font-size: .86em; }
 
-@media (max-width: 680px) {
-  .controls-help-panel { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px; left: 12px; width: auto; }
+@media (max-width: 640px) {
+  .controls-help-panel {
+    position: fixed;
+    top: calc(136px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    width: auto;
+    max-height: calc(100dvh - 148px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
   .controls-help-content { grid-template-columns: 1fr; gap: 14px; }
 }
 @media (max-height: 520px) and (orientation: landscape) {
   .map-tool-dock { display: grid; grid-template-columns: 44px 44px; }
-  .controls-help-panel { max-height: calc(100dvh - 16px - env(safe-area-inset-bottom)); }
+  .controls-help-panel { left: 104px; max-height: calc(100dvh - 124px - env(safe-area-inset-bottom, 0px)); width: min(440px, calc(100vw - 128px)); }
   .controls-help-content { grid-template-columns: 1fr 1.25fr; }
 }
 .transit-departures-panel, .location-info-panel, .position-information, .route-panel, .layer-panel {
@@ -800,14 +807,16 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .map-tool-dock button { border-radius: 13px; height: 50px; width: 50px; }
   .map-tool-dock svg { height: 22px; width: 22px; }
   .map-tool-layers,
+  .map-tool-help,
   .map-tool-mode,
   .map-tool-route,
   .map-tool-locate,
   .map-tool-compass,
   .map-tool-zoom { position: absolute; }
-  .map-tool-layers { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(78px + env(safe-area-inset-top, 0px)); }
-  .map-tool-mode { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(136px + env(safe-area-inset-top, 0px)); }
-  .map-tool-route { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(194px + env(safe-area-inset-top, 0px)); }
+  .map-tool-help { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(78px + env(safe-area-inset-top, 0px)); }
+  .map-tool-layers { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(136px + env(safe-area-inset-top, 0px)); }
+  .map-tool-mode { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(194px + env(safe-area-inset-top, 0px)); }
+  .map-tool-route { left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(252px + env(safe-area-inset-top, 0px)); }
   .map-tool-locate { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
   .map-tool-compass { bottom: calc(128px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
   .map-tool-compass:not(.orientation-active) { display: none; }
