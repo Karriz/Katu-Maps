@@ -15,6 +15,8 @@ type Scenario = {
   setup?: (page: Page) => Promise<void>;
   state: string;
   favorites?: StoredFavorite[];
+  initialView?: { center: [number, number]; zoom: number; bearing?: number; pitch?: number };
+
 };
 
 type StoredFavorite = {
@@ -155,6 +157,10 @@ async function verifyThemeSettings(page: Page) {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.getByRole('button', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  // Leave the final screenshot focused on the night map rather than repeating
+  // another open settings-panel composition.
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  await expect(page.locator('#map-layer-panel')).toBeHidden();
 }
 
 async function openRouteAutocomplete(page: Page) {
@@ -289,9 +295,10 @@ async function chooseRouteResult(page: Page, listName: string, resultText: strin
   await (useLast ? candidates.last() : candidates.first()).click();
 }
 
-async function setRouteEndpoints(page: Page, mode: 'pedestrian' | 'transit') {
+async function setRouteEndpoints(page: Page, mode: 'pedestrian' | 'bicycle' | 'transit' | 'auto') {
   await openRoute(page);
-  if (mode === 'transit') await page.getByRole('tab', { name: 'Transit' }).click();
+  const modeLabel = { pedestrian: 'Walk', bicycle: 'Cycle', transit: 'Transit', auto: 'Drive' }[mode];
+  if (mode !== 'pedestrian') await page.getByRole('tab', { name: modeLabel }).click();
 
   const origin = page.getByLabel('Search starting point');
   await origin.fill('Keskustori');
@@ -305,8 +312,11 @@ async function setRouteEndpoints(page: Page, mode: 'pedestrian' | 'transit') {
     await expect(page.locator('.transit-route-options')).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.transit-route-option')).toHaveCount(3);
   } else {
-    await expect(page.locator('.route-summary')).toContainText('1.1 km', { timeout: 15_000 });
-    await expect(page.locator('.route-summary')).toContainText('15 min');
+    await expect(page.locator('.route-summary')).toBeVisible({ timeout: 15_000 });
+    if (mode === 'pedestrian') {
+      await expect(page.locator('.route-summary')).toContainText('1.1 km');
+      await expect(page.locator('.route-summary')).toContainText('15 min');
+    }
   }
 }
 
@@ -447,8 +457,20 @@ async function verifyFavoriteCameras(page: Page) {
 }
 
 const scenarios: Scenario[] = [
-  { name: 'desktop-main-map', description: 'Main map after style readiness', viewport: 'desktop', state: 'map ready' },
-  { name: 'phone-main-map', description: 'Main map at Android phone dimensions', viewport: 'phone', state: 'map ready' },
+  {
+    name: 'desktop-main-map',
+    description: 'Far city view exercises overview-road weight, casing and label hierarchy',
+    viewport: 'desktop',
+    state: 'far-zoom city map ready',
+    initialView: { center: [23.7609, 61.4981], zoom: 10.5, bearing: 0, pitch: 0 },
+  },
+  {
+    name: 'phone-main-map',
+    description: 'Close neighborhood view combines buildings, POIs and transit stops',
+    viewport: 'phone',
+    state: 'close-zoom neighborhood map ready',
+    initialView: { center: [23.7609, 61.4981], zoom: 16.2, bearing: -12, pitch: 48 },
+  },
   {
     name: 'phone-search-autocomplete',
     description: 'Search containing a POI and a transit stop from deterministic fixtures',
@@ -744,8 +766,12 @@ const scenarios: Scenario[] = [
     name: 'tablet-transit-alternatives',
     description: 'Three transit alternatives parsed from Digitransit fixtures',
     viewport: 'tablet',
-    setup: openTransitAlternatives,
-    state: 'three transit alternatives',
+    setup: async page => {
+      await openTransitAlternatives(page);
+      await page.locator('.transit-route-option').nth(1).click();
+      await expect(page.getByRole('button', { name: 'Fit route' })).toBeVisible();
+    },
+    state: 'selected multimodal route with transfer nodes',
   },
   {
     name: 'phone-transit-itinerary',
@@ -789,7 +815,7 @@ const scenarios: Scenario[] = [
     },
     state: 'provider error',
   },
-  ...(['phone', 'tablet', 'desktop'] as const).map((viewport): Scenario => ({
+  ...(['phone', 'tablet'] as const).map((viewport): Scenario => ({
     name: `${viewport}-favorite-camera-types`,
     description: 'Position, place and transit-stop favourites restore exact coordinates and zoom from a world view',
     viewport,
@@ -798,11 +824,19 @@ const scenarios: Scenario[] = [
     favorites: favoriteCameraFixtures,
   })),
   {
+    name: 'desktop-driving-route',
+    description: 'Driving route line, casing and A/B endpoint hierarchy',
+    viewport: 'desktop',
+    setup: async page => setRouteEndpoints(page, 'auto'),
+    state: 'driving route fitted with endpoints',
+  },
+  {
     name: 'desktop-theme-settings',
     description: 'Light, Dark, and System appearance options update the shared UI without losing map state',
     viewport: 'desktop',
     setup: verifyThemeSettings,
-    state: 'dark panel and system preference transitions verified',
+    state: 'dark city map after appearance transitions',
+    initialView: { center: [23.7609, 61.4981], zoom: 13.2, bearing: 0, pitch: 25 },
   },
 ];
 
@@ -886,7 +920,7 @@ for (const scenario of scenarios) {
         throw new Error(`Map readiness preflight already failed; skipping repeated 45-second wait. First failure: ${readinessFailure}`);
       }
 
-      await page.addInitScript(({ favorites }) => {
+      await page.addInitScript(({ favorites, initialView }) => {
         localStorage.clear();
         localStorage.setItem('tampere-map-layer-options', JSON.stringify({
           globe: true,
@@ -899,8 +933,15 @@ for (const scenario of scenarios) {
         if (favorites.length) {
           localStorage.setItem('maps-favorites-v1', JSON.stringify(favorites));
           localStorage.setItem('maps-viewport-v1', JSON.stringify({ center: [0, 0], zoom: 2.2, bearing: 0, pitch: 0 }));
+        } else if (initialView) {
+          localStorage.setItem('maps-viewport-v1', JSON.stringify({
+            center: initialView.center,
+            zoom: initialView.zoom,
+            bearing: initialView.bearing ?? 0,
+            pitch: initialView.pitch ?? 0,
+          }));
         }
-      }, { favorites: scenario.favorites ?? [] });
+      }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView });
       await page.goto('/');
       const webgl2 = await page.evaluate(() => Boolean(document.createElement('canvas').getContext('webgl2')));
       expect(webgl2, 'WebGL2 is unavailable. Install Chromium dependencies and run with the SwiftShader flags from playwright.config.ts.').toBe(true);
