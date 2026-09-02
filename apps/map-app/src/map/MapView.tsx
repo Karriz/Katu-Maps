@@ -815,6 +815,10 @@ export function MapView() {
     && layerToggles.buildings
     && layerToggles.trees
     && layerToggles.transitModels;
+  const handleTransitDisabled = useCallback(() => {
+    transitStopsLayerRef.current?.clearSelection();
+    setSelectedTransitStop(null);
+  }, []);
   useMapLayerVisibility({
     mapRef,
     mapLoaded,
@@ -833,10 +837,7 @@ export function MapView() {
     cyclingLayerIds: GLOBAL_CYCLING_LAYER_IDS,
     hikingLayerIds: GLOBAL_HIKING_LAYER_IDS,
     waterEffectLayerIds: WATER_EFFECT_LAYER_IDS,
-    onTransitDisabled: () => {
-      transitStopsLayerRef.current?.clearSelection();
-      setSelectedTransitStop(null);
-    },
+    onTransitDisabled: handleTransitDisabled,
   });
   const {
     searchQuery, setSearchQuery, searchResults, setSearchResults, searchOpen, setSearchOpen,
