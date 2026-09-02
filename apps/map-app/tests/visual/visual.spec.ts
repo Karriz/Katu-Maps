@@ -166,12 +166,14 @@ async function openRouteAutocomplete(page: Page) {
   expect(await results.evaluate((element) => element.closest('.route-panel'))).toBeNull();
 
   const bounds = await results.boundingBox();
+  const lastOptionBounds = await results.getByRole('option').last().boundingBox();
   const viewport = page.viewportSize();
   expect(bounds).not.toBeNull();
+  expect(lastOptionBounds).not.toBeNull();
   expect(viewport).not.toBeNull();
   expect(bounds!.height).toBeGreaterThan(120);
   expect(bounds!.y).toBeGreaterThanOrEqual(0);
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
+  expect(lastOptionBounds!.y + lastOptionBounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
 }
 
 async function verifyRouteKeyboard(page: Page) {
