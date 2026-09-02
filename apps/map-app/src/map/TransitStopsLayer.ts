@@ -121,13 +121,13 @@ async function addTransitIcon(
   if (map.hasImage(id)) return;
   const renderedIcon = renderToStaticMarkup(createElement(icon, {
     color: '#ffffff',
-    size: 22,
-    strokeWidth: 2.5,
+    size: 24,
+    strokeWidth: 2.7,
   }));
   const svg = color
     ? renderedIcon.replace(
       /(<svg[^>]*>)/,
-      `$1<circle cx="12" cy="12" r="11" fill="${color}"/>`,
+      `$1<circle cx="12" cy="12" r="11.25" fill="${color}"/>`,
     )
     : renderedIcon;
   const image = new Image();
@@ -558,8 +558,8 @@ export class TransitStopsLayer {
       filter: ['in', ['get', 'mode'], ['literal', modes]],
       layout: {
         'icon-image': iconImage,
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.25, 14, 1.5, 18, 1.7],
-        'icon-padding': 8,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.32, 14, 1.58, 18, 1.82],
+        'icon-padding': 9,
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
@@ -643,8 +643,8 @@ export class TransitStopsLayer {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#fffdf8',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 5, 18, 10],
-        'line-opacity': 0.9,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 6, 14, 8, 18, 11],
+        'line-opacity': 0.94,
       },
     };
     const routeLines: LineLayerSpecification = {
@@ -654,8 +654,8 @@ export class TransitStopsLayer {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': ['get', 'color'],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.4, 18, 5],
-        'line-opacity': 0.88,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 4.5, 18, 6],
+        'line-opacity': 0.96,
       },
     };
     const selectedStopHalo: CircleLayerSpecification = {
@@ -663,10 +663,10 @@ export class TransitStopsLayer {
       type: 'circle',
       source: SELECTED_STOP_SOURCE_ID,
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 13, 18, 20],
-        'circle-color': ['get', 'color'],
-        'circle-opacity': 0.24,
-        'circle-stroke-color': '#ffffff',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 14, 18, 21],
+        'circle-color': '#ffffff',
+        'circle-opacity': 0.98,
+        'circle-stroke-color': ['get', 'color'],
         'circle-stroke-width': 3,
       },
     };
@@ -683,8 +683,8 @@ export class TransitStopsLayer {
           'SUBWAY', TRANSIT_ICON_IDS.metro,
           TRANSIT_ICON_IDS.train,
         ],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 1.25, 14, 1.45, 18, 1.65],
-        'icon-padding': 8,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 1.35, 14, 1.62, 18, 1.85],
+        'icon-padding': 9,
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
