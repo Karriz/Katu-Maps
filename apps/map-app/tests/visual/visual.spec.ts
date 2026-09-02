@@ -159,7 +159,7 @@ async function verifyThemeSettings(page: Page) {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   // Leave the final screenshot focused on the night map rather than repeating
   // another open settings-panel composition.
-  await page.getByRole('button', { name: 'Map layers' }).click();
+  await page.locator('#map-layer-panel').getByRole('button', { name: /Close/i }).click();
   await expect(page.locator('#map-layer-panel')).toBeHidden();
 }
 
@@ -827,7 +827,10 @@ const scenarios: Scenario[] = [
     name: 'desktop-driving-route',
     description: 'Driving route line, casing and A/B endpoint hierarchy',
     viewport: 'desktop',
-    setup: async page => setRouteEndpoints(page, 'auto'),
+    setup: async page => {
+      await setRouteEndpoints(page, 'auto');
+      await page.getByRole('button', { name: 'Fit route' }).click();
+    },
     state: 'driving route fitted with endpoints',
   },
   {
