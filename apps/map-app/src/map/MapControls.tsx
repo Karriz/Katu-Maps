@@ -165,6 +165,8 @@ export function MapControls({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const helpHeadingRef = useRef<HTMLHeadingElement>(null);
+  const onSearchFocusRef = useRef(onSearchFocus);
+  onSearchFocusRef.current = onSearchFocus;
   const [helpOpen, setHelpOpen] = useState(false);
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
   const suggestionsVisible = searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0);
@@ -181,12 +183,12 @@ export function MapControls({
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         searchInputRef.current?.focus();
-        onSearchFocus();
+        onSearchFocusRef.current();
       }
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [onSearchFocus]);
+  }, []);
 
   useEffect(() => {
     if (helpOpen) helpHeadingRef.current?.focus();
