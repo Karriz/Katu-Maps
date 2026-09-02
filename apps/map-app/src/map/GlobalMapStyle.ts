@@ -969,9 +969,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': MAP_COLORS.roadCasing,
         'line-width': [
           'interpolate', ['exponential', 2], ['zoom'],
-          1.5, ['match', ['get', 'class'], 'motorway', 3.8, 'trunk', 3.1, 'primary', 2, 1.35],
-          4, ['match', ['get', 'class'], 'motorway', 4.5, 'trunk', 3.8, 'primary', 2.4, 1.7],
-          7, ['match', ['get', 'class'], 'motorway', 5.7, 'trunk', 5, 'primary', 3.5, 2.6],
+          1.5, ['match', ['get', 'class'], 'motorway', 3.2, 'trunk', 2.7, 'primary', 1.7, 1.15],
+          4, ['match', ['get', 'class'], 'motorway', 3.9, 'trunk', 3.3, 'primary', 2.1, 1.45],
+          7, ['match', ['get', 'class'], 'motorway', 5, 'trunk', 4.3, 'primary', 3, 2.2],
           10, ['match', ['get', 'class'], 'motorway', 6.3, 'trunk', 5.7, 'primary', 4.5, 3.8],
           13.5, ['match', ['get', 'class'], 'motorway', 6.7, 'trunk', 6.2, 'primary', 5.3, 4.7],
         ],
@@ -997,9 +997,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': ROAD_COLOR,
         'line-width': [
           'interpolate', ['exponential', 2], ['zoom'],
-          1.5, ['match', ['get', 'class'], 'motorway', 2.8, 'trunk', 2.2, 'primary', 1.35, 0.8],
-          4, ['match', ['get', 'class'], 'motorway', 3.5, 'trunk', 2.9, 'primary', 1.7, 1.1],
-          7, ['match', ['get', 'class'], 'motorway', 4.6, 'trunk', 4, 'primary', 2.5, 1.8],
+          1.5, ['match', ['get', 'class'], 'motorway', 2.3, 'trunk', 1.8, 'primary', 1.1, 0.65],
+          4, ['match', ['get', 'class'], 'motorway', 3, 'trunk', 2.5, 'primary', 1.45, 0.9],
+          7, ['match', ['get', 'class'], 'motorway', 4, 'trunk', 3.4, 'primary', 2.15, 1.5],
           10, ['match', ['get', 'class'], 'motorway', 5.2, 'trunk', 4.7, 'primary', 3.4, 2.8],
           13.5, ['match', ['get', 'class'], 'motorway', 5.6, 'trunk', 5.2, 'primary', 4.3, 3.8],
         ],
@@ -2479,9 +2479,9 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
   const dark = true;
   const colors = dark ? {
     background: '#071525', land: '#10253a', green: '#17384a', park: '#163944',
-    water: '#0a2c46', waterEdge: '#164c66', road: '#b8aa80', roadCasing: '#625e53',
-    path: '#8b9e9d', rail: '#6b8295', building: '#293f53', buildingBand: '#625f52',
-    label: '#d9e8f5', halo: '#10253a', shadow: '#061322', boundary: '#7391a5',
+    water: '#0b304b', waterEdge: '#19536d', road: '#d2c59c', roadCasing: '#4d5660',
+    path: '#9cacab', rail: '#7890a3', building: '#2b4257', buildingBand: '#706b59',
+    label: '#e2edf7', halo: '#0e2236', shadow: '#061322', boundary: '#7795aa',
   } : {
     background: '#f3f4f1', land: '#c9e0b4', green: '#a8c88c', park: '#bfdda0',
     water: '#7fc4d6', waterEdge: '#5d9fb3', road: '#f7f5ee', roadCasing: '#adb8af',
@@ -2521,7 +2521,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
   if (map.getLayer('global-aerodrome-labels')) {
     map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon-dark');
   }
-  ['location-poi-icons', 'location-poi-labels'].forEach((id) => set(id, 'icon-opacity', 0.78));
+  ['location-poi-icons', 'location-poi-labels'].forEach((id) => set(id, 'icon-opacity', 0.9));
   refreshMapAfterTheme(map);
 }
 
