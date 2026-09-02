@@ -878,7 +878,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // events rarely settle; refresh on a fixed interval instead so trees
     // actually populate as the aircraft covers new ground.
     treeLayer.updateTrees();
-    const intervalId = window.setInterval(() => treeLayer.updateTrees(), 10000);
+    const intervalId = window.setInterval(() => treeLayer.updateTrees(), 4000);
     return () => {
       window.clearInterval(intervalId);
       treeLayer.setExtendedViewportRange(false);
@@ -2332,8 +2332,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
-    // idle handles the final set of newly loaded tiles.
-    map.on('idle', scheduleTreeUpdate);
+    // idle handles the final set of newly loaded tiles. Flight uses its own
+    // interval — idle would otherwise fire on every streamed tile and hitch.
+    const handleIdleTreeUpdate = () => {
+      if (flightActiveRef.current) return;
+      scheduleTreeUpdate();
+    };
+    map.on('idle', handleIdleTreeUpdate);
     map.on('error', (event: maplibregl.ErrorEvent) => {
       const message = event.error?.message ?? 'The map style could not be loaded.';
       // MapLibre can emit this while backfilling a missing edge DEM tile. It
@@ -2379,7 +2384,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.off('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
       map.off('mouseenter', 'global-hiking-pois', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.off('mouseleave', 'global-hiking-pois', () => { map.getCanvas().style.cursor = ''; });
-      map.off('idle', scheduleTreeUpdate);
+      map.off('idle', handleIdleTreeUpdate);
       transitStopsLayer.dispose();
       transitRouteOverlay.dispose();
       map.remove();

@@ -1,5 +1,5 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, LogOut, Plane } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, LogOut, Minus, Plane, Plus } from 'lucide-react';
 import type { FlightControl, FlightTelemetry } from './useFlightSimulator';
 
 function HoldControl({
@@ -54,11 +54,12 @@ export function FlightControls({
       <header className="flight-hud">
         <div className="flight-hud-title">
           <Plane aria-hidden="true" />
-          <div><strong>Flight mode</strong><span>Third-person camera</span></div>
+          <div><strong>Flight mode</strong><span>Realistic aerobatic dynamics</span></div>
         </div>
         <dl className="flight-telemetry">
           <div><dt>ALT</dt><dd>{Math.round(telemetry.altitude)} m</dd></div>
           <div><dt>SPD</dt><dd>{Math.round(telemetry.speed * 3.6)} km/h</dd></div>
+          <div><dt>THR</dt><dd>{Math.round(telemetry.throttle * 100)}%</dd></div>
           <div><dt>HDG</dt><dd>{String(Math.round(telemetry.heading) % 360).padStart(3, '0')}°</dd></div>
         </dl>
         <button ref={exitButtonRef} className="flight-exit" type="button" onClick={onExit}>
@@ -67,9 +68,47 @@ export function FlightControls({
         </button>
       </header>
 
+      {telemetry.isStalling && (
+        <div className="flight-stall-warning" role="alert" aria-live="assertive">
+          <AlertTriangle aria-hidden="true" />
+          <span>STALL WARNING</span>
+        </div>
+      )}
+
+      <div className="flight-throttle-bar" aria-label={`Throttle ${Math.round(telemetry.throttle * 100)} percent`}>
+        <div className="flight-throttle-track">
+          <div
+            className="flight-throttle-fill"
+            style={{ height: `${Math.round(telemetry.throttle * 100)}%` }}
+          />
+          <div className="flight-throttle-ticks">
+            <span className="tick-100" />
+            <span className="tick-75" title="Cruise power" />
+            <span className="tick-50" />
+            <span className="tick-25" />
+          </div>
+        </div>
+        <div className="flight-throttle-label">
+          <span className="label-text">PWR</span>
+          <span className="label-value">{Math.round(telemetry.throttle * 100)}%</span>
+        </div>
+      </div>
+
       <div className="flight-reticle" aria-hidden="true"><span /></div>
 
       <div className="flight-inputs">
+        <div className="flight-input-group" aria-label="Throttle controls">
+          <span>Throttle</span>
+          <div>
+            <HoldControl control="throttleDown" label="Decrease throttle" onControlChange={onControlChange}>
+              <Minus aria-hidden="true" />
+            </HoldControl>
+            <HoldControl control="throttleUp" label="Increase throttle" onControlChange={onControlChange}>
+              <Plus aria-hidden="true" />
+            </HoldControl>
+          </div>
+        </div>
+
         <div className="flight-input-group" aria-label="Roll controls">
           <span>Roll</span>
           <div>
@@ -81,7 +120,11 @@ export function FlightControls({
             </HoldControl>
           </div>
         </div>
-        <p className="flight-key-help"><kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> roll</p>
+
+        <p className="flight-key-help">
+          <kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>R</kbd><kbd>F</kbd> throttle
+        </p>
+
         <div className="flight-input-group" aria-label="Pitch controls">
           <span>Pitch</span>
           <div>
@@ -97,3 +140,4 @@ export function FlightControls({
     </section>
   );
 }
+

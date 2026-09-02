@@ -637,7 +637,21 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .flight-exit { align-items: center; background: rgb(255 255 255 / 9%); border: 1px solid rgb(255 255 255 / 20%); border-radius: 9px; color: #fff; cursor: pointer; display: flex; font: inherit; font-size: .7rem; font-weight: 750; gap: 7px; min-height: 36px; padding: 7px 10px; }
 .flight-exit:hover { background: rgb(255 255 255 / 16%); }
 .flight-exit:focus-visible { outline: 3px solid rgb(125 211 252 / 48%); outline-offset: 2px; }
-.flight-exit svg { height: 15px; width: 15px; }
+.flight-stall-warning { align-items: center; animation: stall-warning-flash 600ms ease-in-out infinite alternate; background: rgb(220 38 38 / 92%); border: 1px solid rgb(254 202 202 / 50%); border-radius: 999px; box-shadow: 0 4px 18px rgb(220 38 38 / 40%); color: #fff; display: flex; font-family: var(--font-heading); font-size: 0.78rem; font-weight: 850; gap: 8px; left: 50%; letter-spacing: 0.08em; padding: 8px 16px; pointer-events: none; position: absolute; top: calc(76px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 130; }
+.flight-stall-warning svg { height: 18px; width: 18px; }
+@keyframes stall-warning-flash { from { opacity: 0.75; transform: translateX(-50%) scale(0.97); } to { opacity: 1; transform: translateX(-50%) scale(1.03); } }
+.flight-throttle-bar { align-items: center; background: rgb(9 24 39 / 82%); backdrop-filter: blur(12px); border: 1px solid rgb(184 213 235 / 34%); border-radius: 14px; box-shadow: 0 8px 28px rgb(0 0 0 / 35%); display: flex; flex-direction: column; gap: 8px; left: max(18px, env(safe-area-inset-left, 18px)); padding: 12px 10px; pointer-events: none; position: absolute; top: 50%; transform: translateY(-50%); z-index: 125; }
+.flight-throttle-track { background: rgb(255 255 255 / 12%); border: 1px solid rgb(255 255 255 / 22%); border-radius: 999px; display: flex; flex-direction: column; height: 140px; justify-content: flex-end; overflow: hidden; position: relative; width: 14px; }
+.flight-throttle-fill { background: linear-gradient(to top, #0ea5e9 0%, #38bdf8 60%, #f59e0b 85%, #ef4444 100%); border-radius: 999px; transition: height 80ms linear; width: 100%; }
+.flight-throttle-ticks { inset: 0; pointer-events: none; position: absolute; }
+.flight-throttle-ticks span { background: rgb(255 255 255 / 30%); height: 1px; left: 2px; position: absolute; right: 2px; }
+.flight-throttle-ticks .tick-100 { top: 0%; }
+.flight-throttle-ticks .tick-75 { background: rgb(56 189 248 / 90%); height: 2px; top: 25%; }
+.flight-throttle-ticks .tick-50 { top: 50%; }
+.flight-throttle-ticks .tick-25 { top: 75%; }
+.flight-throttle-label { align-items: center; display: flex; flex-direction: column; font-family: var(--font-heading); gap: 1px; }
+.flight-throttle-label .label-text { color: #8fb1ca; font-size: 0.58rem; font-weight: 800; letter-spacing: 0.08em; }
+.flight-throttle-label .label-value { color: #fff; font-size: 0.78rem; font-variant-numeric: tabular-nums; font-weight: 850; }
 .flight-reticle { height: 28px; left: 50%; position: absolute; top: 48%; transform: translate(-50%, -50%); width: 28px; }
 .flight-reticle::before, .flight-reticle::after, .flight-reticle span::before, .flight-reticle span::after { background: rgb(255 255 255 / 82%); content: ''; position: absolute; }
 .flight-reticle::before { height: 1px; left: 0; top: 14px; width: 9px; }

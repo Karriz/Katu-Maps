@@ -7,6 +7,7 @@ import {
   degreesToRadians,
   flightCameraPose,
   radiansToDegrees,
+  FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
   FLIGHT_MIN_CLEARANCE_METERS,
   type FlightInput,
   type FlightState,
@@ -25,7 +26,7 @@ function haversineMeters(a: [number, number], b: [number, number]) {
   return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-export type FlightControl = 'pitchUp' | 'pitchDown' | 'rollLeft' | 'rollRight';
+export type FlightControl = 'pitchUp' | 'pitchDown' | 'rollLeft' | 'rollRight' | 'throttleUp' | 'throttleDown';
 
 export type FlightTelemetry = {
   altitude: number;
@@ -33,6 +34,8 @@ export type FlightTelemetry = {
   pitch: number;
   roll: number;
   speed: number;
+  throttle: number;
+  isStalling: boolean;
 };
 
 type FlightSimulatorOptions = {
@@ -54,6 +57,7 @@ function inputForControls(controls: Set<FlightControl>): FlightInput {
   return {
     pitch: Number(controls.has('pitchUp')) - Number(controls.has('pitchDown')),
     roll: Number(controls.has('rollRight')) - Number(controls.has('rollLeft')),
+    throttle: Number(controls.has('throttleUp')) - Number(controls.has('throttleDown')),
   };
 }
 
@@ -64,14 +68,19 @@ function telemetryForState(state: FlightState, terrainElevation: number): Flight
     pitch: radiansToDegrees(state.pitch),
     roll: radiansToDegrees(state.roll),
     speed: state.speed,
+    throttle: state.throttle,
+    isStalling: state.isStalling,
   };
 }
 
-function controlForCode(code: string): FlightControl | undefined {
-  if (code === 'KeyW' || code === 'ArrowUp') return 'pitchUp';
-  if (code === 'KeyS' || code === 'ArrowDown') return 'pitchDown';
-  if (code === 'KeyA' || code === 'ArrowLeft') return 'rollLeft';
-  if (code === 'KeyD' || code === 'ArrowRight') return 'rollRight';
+function controlForCode(code: string, key?: string): FlightControl | undefined {
+  const k = key?.toLowerCase();
+  if (code === 'KeyS' || code === 'ArrowDown' || k === 's') return 'pitchUp';
+  if (code === 'KeyW' || code === 'ArrowUp' || k === 'w') return 'pitchDown';
+  if (code === 'KeyA' || code === 'ArrowLeft' || k === 'a') return 'rollLeft';
+  if (code === 'KeyD' || code === 'ArrowRight' || k === 'd') return 'rollRight';
+  if (code === 'KeyR' || code === 'ShiftLeft' || code === 'ShiftRight' || k === 'r') return 'throttleUp';
+  if (code === 'KeyF' || code === 'ControlLeft' || code === 'ControlRight' || k === 'f') return 'throttleDown';
   return undefined;
 }
 
@@ -89,7 +98,9 @@ export function useFlightSimulator({
     heading: 0,
     pitch: 0,
     roll: 0,
-    speed: 55,
+    speed: FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
+    throttle: 0.75,
+    isStalling: false,
   });
   const flightStateRef = useRef<FlightState | null>(null);
   const pressedControlsRef = useRef(new Set<FlightControl>());
@@ -195,20 +206,20 @@ export function useFlightSimulator({
       previousTime = performance.now();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Escape') {
+      if (event.code === 'Escape' || event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
         stop();
         return;
       }
-      const control = controlForCode(event.code);
+      const control = controlForCode(event.code, event.key);
       if (!control) return;
       event.preventDefault();
       event.stopPropagation();
       pressedControlsRef.current.add(control);
     };
     const handleKeyUp = (event: KeyboardEvent) => {
-      const control = controlForCode(event.code);
+      const control = controlForCode(event.code, event.key);
       if (!control) return;
       event.preventDefault();
       event.stopPropagation();
@@ -277,7 +288,7 @@ export function useFlightSimulator({
         previousCameraOptions = { zoom: nextZoom, pitch: nextPitch, center: nextCenter };
         map.jumpTo({
           ...cameraOptions,
-          roll: radiansToDegrees(next.roll) * 0.12,
+          roll: radiansToDegrees(next.roll) * 0.3,
         }, { flightMode: true });
       }
 

@@ -54,3 +54,15 @@ npm run test:visual:scenario -- <scenario-name>
 - Visual tests use deterministic fixtures and SwiftShader. They are appropriate
   for layout, workflow, and WebGL-readiness checks, not physical-GPU
   performance claims.
+
+--- OPERATIONAL GUIDELINES ---
+- Handle todos sequentially: start one, complete it immediately, move on.
+- For browser work: use read_page over screenshots; navigate strategically with history/URL.
+- For terminal: prefer sync mode for one-shot commands; avoid unnecessary sleeps/polling.
+- For edits: read file first, make minimal focused changes, never show diffs to user.
+
+--- TEST STRATEGY ---
+- Prefer narrowest relevant unit or visual test first.
+- Use deterministic fixtures and SwiftShader for visual tests.
+- Do not expose credentials in source or logs.
+

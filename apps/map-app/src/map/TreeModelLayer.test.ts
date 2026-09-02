@@ -111,6 +111,7 @@ describe('TreeModelLayer', () => {
       north: 0,
       up: 0,
       growthStart: 0,
+      growthDuration: 600,
     }]]);
 
     layer.render({} as any, {
@@ -120,5 +121,60 @@ describe('TreeModelLayer', () => {
     } as any);
 
     expect(renderer.render).not.toHaveBeenCalled();
+  });
+
+  it('clears trees in flight mode once zoom drops below the tree minimum', () => {
+    const layer = new TreeModelLayer({
+      sourceId: 'openfreemap',
+      waterLayers: ['water'],
+      vegetationLayers: ['landcover'],
+    });
+    const map = {
+      getZoom: () => 9,
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      getBounds: () => ({
+        getWest: () => 20,
+        getSouth: () => 58,
+        getEast: () => 28,
+        getNorth: () => 65,
+      }),
+      querySourceFeatures: vi.fn(() => {
+        throw new Error('should not query source features at high altitude');
+      }),
+      triggerRepaint: vi.fn(),
+    } as any;
+
+    layer.setExtendedViewportRange(true);
+    (layer as any).map = map;
+    (layer as any).trunkMesh = { count: 1, instanceMatrix: { needsUpdate: false } };
+    (layer as any).broadleafMesh = { count: 1, instanceMatrix: { needsUpdate: false } };
+    (layer as any).coniferMesh = { count: 0, instanceMatrix: { needsUpdate: false } };
+    (layer as any).shrubMesh = { count: 0, instanceMatrix: { needsUpdate: false } };
+    (layer as any).shadowMesh = { count: 1, instanceMatrix: { needsUpdate: false } };
+    (layer as any).displayedTrees = new Map([['keep', {
+      tree: {
+        longitude: 23.78,
+        latitude: 61.51,
+        height: 12,
+        leafType: 'broadleaved',
+        vegetationType: 'broadleaf',
+        rotation: 0,
+        widthScale: 1,
+        colorVariation: 0,
+      },
+      elevation: 0,
+      mercatorX: 0,
+      mercatorY: 0,
+      east: 0,
+      north: 0,
+      up: 0,
+      growthStart: 0,
+      growthDuration: 600,
+    }]]);
+
+    expect(() => layer.updateTrees()).not.toThrow();
+    expect((layer as any).displayedTrees.size).toBe(0);
+    expect(map.querySourceFeatures).not.toHaveBeenCalled();
+    expect(map.triggerRepaint).toHaveBeenCalled();
   });
 });
