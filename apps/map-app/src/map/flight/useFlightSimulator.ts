@@ -499,7 +499,7 @@ export function useFlightSimulator({
             terrainEnabledRef.current = originalTerrainEnabled;
           },
         },
-        { label: 'sky', run: () => map.setSky(skyToRestore) },
+        { label: 'sky', run: () => { if (skyToRestore) map.setSky(skyToRestore); } },
         { label: 'projection', run: () => map.setProjection(originalProjection) },
         { label: 'max pitch', run: () => map.setMaxPitch(originalMaxPitch) },
         { label: 'max zoom', run: () => map.setMaxZoom(originalMaxZoom) },
