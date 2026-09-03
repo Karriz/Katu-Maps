@@ -91,7 +91,14 @@ export function FlightControls({
           <div><dt>THR</dt><dd>{Math.round(telemetry.throttle * 100)}%</dd></div>
           <div><dt>HDG</dt><dd>{String(Math.round(telemetry.heading) % 360).padStart(3, '0')}°</dd></div>
         </dl>
-        <button ref={exitButtonRef} className="flight-exit" type="button" onClick={onExit}>
+        <button
+          ref={exitButtonRef}
+          className="flight-exit"
+          type="button"
+          aria-label="Exit flight"
+          title="Exit flight"
+          onClick={onExit}
+        >
           <LogOut aria-hidden="true" />
           <span>Exit flight</span>
         </button>
@@ -128,24 +135,12 @@ export function FlightControls({
       <div className="flight-inputs">
         <div className="flight-input-group" aria-label="Throttle controls">
           <span>Throttle</span>
-          <div>
-            <HoldControl control="throttleDown" label="Decrease throttle" onControlChange={onControlChange}>
-              <Minus aria-hidden="true" />
-            </HoldControl>
+          <div className="flight-throttle-buttons">
             <HoldControl control="throttleUp" label="Increase throttle" onControlChange={onControlChange}>
               <Plus aria-hidden="true" />
             </HoldControl>
-          </div>
-        </div>
-
-        <div className="flight-input-group" aria-label="Roll controls">
-          <span>Roll</span>
-          <div>
-            <HoldControl control="rollLeft" label="Roll left" onControlChange={onControlChange}>
-              <ArrowLeft aria-hidden="true" />
-            </HoldControl>
-            <HoldControl control="rollRight" label="Roll right" onControlChange={onControlChange}>
-              <ArrowRight aria-hidden="true" />
+            <HoldControl control="throttleDown" label="Decrease throttle" onControlChange={onControlChange}>
+              <Minus aria-hidden="true" />
             </HoldControl>
           </div>
         </div>
@@ -154,11 +149,18 @@ export function FlightControls({
           <kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>R</kbd><kbd>F</kbd> throttle
         </p>
 
-        <div className="flight-input-group" aria-label="Pitch controls">
-          <span>Pitch</span>
-          <div>
+        <div className="flight-input-group flight-stick-control" aria-label="Pitch and roll controls">
+          <span>Pitch &amp; roll</span>
+          <div className="flight-stick-grid">
             <HoldControl control="pitchUp" label="Pitch up" onControlChange={onControlChange}>
               <ArrowUp aria-hidden="true" />
+            </HoldControl>
+            <HoldControl control="rollLeft" label="Roll left" onControlChange={onControlChange}>
+              <ArrowLeft aria-hidden="true" />
+            </HoldControl>
+            <span className="flight-stick-center" aria-hidden="true"><Plane /></span>
+            <HoldControl control="rollRight" label="Roll right" onControlChange={onControlChange}>
+              <ArrowRight aria-hidden="true" />
             </HoldControl>
             <HoldControl control="pitchDown" label="Pitch down" onControlChange={onControlChange}>
               <ArrowDown aria-hidden="true" />

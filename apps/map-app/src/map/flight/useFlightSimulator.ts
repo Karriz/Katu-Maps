@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { LngLat, type Map } from 'maplibre-gl';
+import { LngLat, type Map, type SkySpecification } from 'maplibre-gl';
+import type { ResolvedTheme } from '../../theme';
+import { runIndependentRestoreSteps } from './flightCleanup';
 import { FlightModelLayer } from './FlightModelLayer';
 import {
   advanceFlight,
@@ -112,7 +114,37 @@ type FlightSimulatorOptions = {
   activeRef: RefObject<boolean>;
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
+  resolvedTheme: ResolvedTheme;
 };
+
+export function flightSkyForTheme(theme: ResolvedTheme): SkySpecification {
+  if (theme === 'dark') {
+    return {
+      'sky-color': '#071525',
+      'horizon-color': '#274860',
+      'fog-color': '#1a3348',
+      'sky-horizon-blend': 0.78,
+      'horizon-fog-blend': 0.55,
+      'fog-ground-blend': 0.78,
+      'atmosphere-blend': 0,
+    };
+  }
+  // Do not spread a previous sky here. Dark mode writes sky-color and
+  // atmosphere-blend; a partial daylight update leaves those night values.
+  return {
+    'sky-color': '#7ec8ea',
+    'horizon-color': '#f3f8fb',
+    'fog-color': '#eef6fa',
+    'sky-horizon-blend': 0.7,
+    'horizon-fog-blend': 1,
+    'fog-ground-blend': 0.72,
+    'atmosphere-blend': 0,
+  };
+}
+
+function applyFlightSky(map: Map, theme: ResolvedTheme) {
+  map.setSky(flightSkyForTheme(theme));
+}
 
 type ToggleableHandler = {
   disable: () => void;
@@ -178,6 +210,7 @@ export function useFlightSimulator({
   activeRef,
   terrainSourceRef,
   terrainEnabledRef,
+  resolvedTheme,
 }: FlightSimulatorOptions) {
   const [active, setActive] = useState(false);
   const [telemetry, setTelemetry] = useState<FlightTelemetry>({
@@ -192,26 +225,53 @@ export function useFlightSimulator({
   const flightStateRef = useRef<FlightState | null>(null);
   const modelLayerRef = useRef<FlightModelLayer | null>(null);
   const pressedControlsRef = useRef<FlightControlSources>(new globalThis.Map());
+  const originalSkyRef = useRef<SkySpecification | undefined>(undefined);
+  const sessionCleanupRef = useRef(false);
+
+  const disposeAircraftLayer = useCallback(() => {
+    const map = mapRef.current;
+    const modelLayer = modelLayerRef.current;
+    if (!modelLayer) return;
+    try {
+      modelLayer.setPose(null);
+    } catch (error) {
+      console.error('Flight mode restore failed (aircraft pose).', error);
+    }
+    if (map?.getLayer(modelLayer.id)) {
+      try {
+        map.removeLayer(modelLayer.id);
+      } catch (error) {
+        console.error('Flight mode restore failed (aircraft layer).', error);
+      }
+    }
+    modelLayerRef.current = null;
+  }, [mapRef]);
 
   const stop = useCallback(() => {
     activeRef.current = false;
     pressedControlsRef.current.clear();
+    flightStateRef.current = null;
+    // The session effect removes the aircraft on the way out. If start() never
+    // reached that effect, drop the layer here so map mode is not left with it.
+    if (!sessionCleanupRef.current) disposeAircraftLayer();
     setActive(false);
-  }, [activeRef]);
+  }, [activeRef, disposeAircraftLayer]);
 
-  const start = useCallback(() => {
+  const start = useCallback((coordinates?: [number, number]) => {
     const map = mapRef.current;
     if (!map || !mapLoaded || activeRef.current) return;
     const modelLayer = new FlightModelLayer();
+    modelLayer.setTheme(resolvedTheme === 'dark');
     map.addLayer(
       modelLayer,
       map.getLayer('global-road-labels') ? 'global-road-labels' : undefined,
     );
     modelLayerRef.current = modelLayer;
     const center = map.getCenter();
-    const terrainElevation = queryElevationSafe(map, [center.lng, center.lat], 0);
+    const spawn: [number, number] = coordinates ?? [center.lng, center.lat];
+    const terrainElevation = queryElevationSafe(map, spawn, 0);
     const state = createInitialFlightState(
-      [center.lng, center.lat],
+      spawn,
       terrainElevation,
       map.getBearing(),
     );
@@ -220,7 +280,7 @@ export function useFlightSimulator({
     setTelemetry(telemetryForState(state, terrainElevation));
     activeRef.current = true;
     setActive(true);
-  }, [activeRef, mapLoaded, mapRef]);
+  }, [activeRef, mapLoaded, mapRef, resolvedTheme]);
 
   const setControl = useCallback((control: FlightControl, pressed: boolean, source = 'control') => {
     setFlightControlSource(pressedControlsRef.current, control, source, pressed);
@@ -248,6 +308,7 @@ export function useFlightSimulator({
     const originalProjection = map.getProjection();
     const originalTerrain = map.getTerrain();
     const originalSky = map.getSky();
+    originalSkyRef.current = originalSky;
     const originalMaxPitch = map.getMaxPitch();
     const originalMaxZoom = map.getMaxZoom();
     const originalCenterClampedToGround = map.getCenterClampedToGround();
@@ -266,15 +327,7 @@ export function useFlightSimulator({
     handlers.forEach((handler) => handler.disable());
     map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     map.setProjection({ type: 'mercator' });
-    map.setSky({
-      ...originalSky,
-      'horizon-color': '#f1f8fb',
-      'fog-color': '#f1f8fb',
-      'horizon-fog-blend': 1,
-      // Start the ground fade before the finite Mercator terrain edge so the
-      // dark style background cannot form a hard line at the horizon.
-      'fog-ground-blend': 0.78,
-    });
+    applyFlightSky(map, resolvedTheme);
     if (map.getSource(terrainSourceRef.current)) {
       terrainEnabledRef.current = true;
       map.setTerrain({ source: terrainSourceRef.current, exaggeration: 1 });
@@ -423,31 +476,52 @@ export function useFlightSimulator({
     };
     frame = window.requestAnimationFrame(update);
 
+    sessionCleanupRef.current = true;
     return () => {
+      sessionCleanupRef.current = false;
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
       window.removeEventListener('blur', clearControls);
       document.removeEventListener('visibilitychange', handleVisibility);
       pressedControlsRef.current.clear();
-      modelLayer.setPose(null);
-      if (map.getLayer(modelLayer.id)) map.removeLayer(modelLayer.id);
-      modelLayerRef.current = null;
-      map.stop();
-      mapTransform(map)?.clearNearFarZOverride?.();
-      map.setTerrain(originalTerrain);
-      terrainEnabledRef.current = originalTerrainEnabled;
-      map.setSky(originalSky);
-      map.setProjection(originalProjection);
-      map.setMaxPitch(originalMaxPitch);
-      map.setMaxZoom(originalMaxZoom);
-      map.setCenterClampedToGround(originalCenterClampedToGround);
-      map.jumpTo(originalCamera, { flightModeRestore: true });
-      handlers.forEach((handler, index) => {
-        if (enabledHandlers[index]) handler.enable();
-      });
+      flightStateRef.current = null;
+      disposeAircraftLayer();
+      const skyToRestore = originalSkyRef.current;
+      originalSkyRef.current = undefined;
+      runIndependentRestoreSteps([
+        { label: 'stop camera', run: () => map.stop() },
+        { label: 'near/far clip', run: () => mapTransform(map)?.clearNearFarZOverride?.() },
+        {
+          label: 'terrain',
+          run: () => {
+            map.setTerrain(originalTerrain);
+            terrainEnabledRef.current = originalTerrainEnabled;
+          },
+        },
+        { label: 'sky', run: () => map.setSky(skyToRestore) },
+        { label: 'projection', run: () => map.setProjection(originalProjection) },
+        { label: 'max pitch', run: () => map.setMaxPitch(originalMaxPitch) },
+        { label: 'max zoom', run: () => map.setMaxZoom(originalMaxZoom) },
+        { label: 'ground clamp', run: () => map.setCenterClampedToGround(originalCenterClampedToGround) },
+        { label: 'camera', run: () => map.jumpTo(originalCamera, { flightModeRestore: true }) },
+        ...handlers.map((handler, index) => ({
+          label: `interaction handler ${index}`,
+          run: () => {
+            if (enabledHandlers[index]) handler.enable();
+          },
+        })),
+      ]);
     };
-  }, [active, activeRef, mapLoaded, mapRef, stop, terrainEnabledRef, terrainSourceRef]);
+  }, [active, activeRef, disposeAircraftLayer, mapLoaded, mapRef, stop, terrainEnabledRef, terrainSourceRef]);
+
+  useEffect(() => {
+    if (!active || !mapLoaded) return;
+    const map = mapRef.current;
+    if (!map) return;
+    applyFlightSky(map, resolvedTheme);
+    modelLayerRef.current?.setTheme(resolvedTheme === 'dark');
+  }, [active, mapLoaded, mapRef, resolvedTheme]);
 
   useEffect(() => {
     activeRef.current = active;

@@ -146,8 +146,11 @@ async function openRoute(page: Page) {
 }
 
 async function startFlightMode(page: Page) {
-  await page.getByRole('button', { name: 'Map layers' }).click();
-  await page.getByRole('button', { name: 'Start' }).click();
+  const viewport = page.viewportSize();
+  const x = Math.min(520, Math.max(24, (viewport?.width ?? 520) - 30));
+  const y = Math.min(420, Math.max(24, (viewport?.height ?? 420) - 30));
+  await page.locator('.map-canvas').click({ button: 'right', position: { x, y } });
+  await page.getByRole('menuitem', { name: 'Fly from here' }).click();
   await expect(page.getByRole('region', { name: 'Flight simulator controls' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Exit flight' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Map layers' })).toHaveCount(0);

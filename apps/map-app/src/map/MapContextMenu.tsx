@@ -1,4 +1,4 @@
-import { Info, MapPin, Navigation, Radar, Ruler, Star } from 'lucide-react';
+import { Info, MapPin, Navigation, Plane, Radar, Ruler, Star } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 
 export type MapContextMenuProps = {
@@ -7,6 +7,7 @@ export type MapContextMenuProps = {
   onNearby: () => void;
   onMeasureDistance: () => void;
   onSaveFavourite: () => void;
+  onFlyFromHere: () => void;
   onRouteToHere: () => void;
   onRouteFromHere: () => void;
 };
@@ -17,6 +18,7 @@ export function MapContextMenu({
   onNearby,
   onMeasureDistance,
   onSaveFavourite,
+  onFlyFromHere,
   onRouteToHere,
   onRouteFromHere,
 }: MapContextMenuProps) {
@@ -54,6 +56,7 @@ export function MapContextMenu({
       <button type="button" role="menuitem" onClick={onMeasureDistance}><Ruler aria-hidden="true" /> Measure distance</button>
       <div className="map-context-menu-separator" role="separator" />
       <button type="button" role="menuitem" onClick={onSaveFavourite}><Star aria-hidden="true" /> Save as favourite</button>
+      <button type="button" role="menuitem" onClick={onFlyFromHere}><Plane aria-hidden="true" /> Fly from here</button>
       <div className="map-context-menu-separator" role="separator" />
       <button type="button" role="menuitem" onClick={onRouteToHere}><Navigation aria-hidden="true" /> Route to here</button>
       <button type="button" role="menuitem" onClick={onRouteFromHere}><Navigation aria-hidden="true" /> Route from here</button>

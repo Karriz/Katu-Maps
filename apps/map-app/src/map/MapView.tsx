@@ -826,6 +826,14 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     transitStopsLayerRef.current?.clearSelection();
     setSelectedTransitStop(null);
   }, []);
+  const flight = useFlightSimulator({
+    mapRef,
+    mapLoaded,
+    activeRef: flightActiveRef,
+    terrainSourceRef,
+    terrainEnabledRef,
+    resolvedTheme,
+  });
   useMapLayerVisibility({
     mapRef,
     mapLoaded,
@@ -838,6 +846,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     terrainSourceRef,
     terrainEnabledRef,
     flightActiveRef,
+    flightActive: flight.active,
     building3dLayerIds: BUILDING_3D_LAYER_IDS,
     buildingShadowLayerIds: BUILDING_SHADOW_LAYER_IDS,
     buildingTransitionFootprintLayerId: GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
@@ -846,13 +855,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     hikingLayerIds: GLOBAL_HIKING_LAYER_IDS,
     waterEffectLayerIds: WATER_EFFECT_LAYER_IDS,
     onTransitDisabled: handleTransitDisabled,
-  });
-  const flight = useFlightSimulator({
-    mapRef,
-    mapLoaded,
-    activeRef: flightActiveRef,
-    terrainSourceRef,
-    terrainEnabledRef,
   });
   useFlightModePresentation({
     mapRef,
@@ -906,12 +908,20 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     return () => {
       window.clearInterval(intervalId);
       if (mapRef.current !== map) return;
-      if (map.getLayer(flightTreeLayer.id)) map.removeLayer(flightTreeLayer.id);
+      try {
+        if (map.getLayer(flightTreeLayer.id)) map.removeLayer(flightTreeLayer.id);
+      } catch (error) {
+        console.error('Flight trees could not be removed.', error);
+      }
       flightTreeLayerRef.current = null;
       if (map.getLayer('tree-models-3d')) {
-        map.setLayoutProperty('tree-models-3d', 'visibility', 'visible');
+        map.setLayoutProperty(
+          'tree-models-3d',
+          'visibility',
+          layerToggles.trees ? 'visible' : 'none',
+        );
       }
-      treeRefreshRef.current?.();
+      if (layerToggles.trees) treeRefreshRef.current?.();
     };
   }, [flight.active, flight.stop, layerToggles.trees, mapLoaded]);
   useEffect(() => {
@@ -3231,20 +3241,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             notice={mapToolNotice}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
-            onFlightModeStart={() => {
-              setLayersOpen(false);
-              setSearchOpen(false);
-              setFavoritesOpen(false);
-              setRouteSearchTarget(null);
-              setRouteContextMenu(null);
-              setContextMenuMarker(null);
-              pendingSearchCameraRef.current = null;
-              routeCameraRequestRef.current += 1;
-              vehicleFollowEnabledRef.current = false;
-              setVehicleFollowing(false);
-              if (measurementControllerRef.current) stopMeasurement();
-              flight.start();
-            }}
           />}
           {routeContextMenu && (
             <MapContextMenu
@@ -3259,6 +3255,23 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               onSaveFavourite={() => {
                 saveSelection({ name: 'Map point', category: 'Pinned location', coordinates: routeContextMenu.coordinates, source: 'map' });
                 setRouteContextMenu(null);
+              }}
+              onFlyFromHere={() => {
+                const coordinates: [number, number] = [...routeContextMenu.coordinates];
+                setLayersOpen(false);
+                setSearchOpen(false);
+                setFavoritesOpen(false);
+                setRouteSearchTarget(null);
+                setRouteContextMenu(null);
+                setContextMenuMarker(null);
+                setPositionInformation(null);
+                setNearbyPlaces(null);
+                pendingSearchCameraRef.current = null;
+                routeCameraRequestRef.current += 1;
+                vehicleFollowEnabledRef.current = false;
+                setVehicleFollowing(false);
+                if (measurementControllerRef.current) stopMeasurement();
+                flight.start(coordinates);
               }}
               onRouteToHere={() => {
                 const selection: LocationSelection = {

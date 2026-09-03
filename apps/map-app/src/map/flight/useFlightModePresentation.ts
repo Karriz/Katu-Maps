@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 import type { Map as MaplibreMap, StyleLayer } from 'maplibre-gl';
 import type { TransitRouteOverlay } from '../TransitRouteOverlay';
+import { runIndependentRestoreSteps } from './flightCleanup';
 
 const APPLICATION_OVERLAY_PREFIXES = [
   'context-menu-location',
@@ -23,6 +24,34 @@ export function restoreTransitOverlay(
 ) {
   overlay?.setVisibility(visible);
   if (visible) void overlay?.update(map.getBounds(), map.getZoom());
+}
+
+type FlightPresentationMap = Pick<
+  MaplibreMap,
+  'getLayer' | 'setLayoutProperty' | 'triggerRepaint' | 'getBounds' | 'getZoom'
+>;
+
+export function restoreFlightPresentation(
+  map: FlightPresentationMap,
+  visibility: Map<string, boolean>,
+  overlay: FlightTransitOverlay | null,
+  transitLinesVisible: boolean,
+) {
+  runIndependentRestoreSteps([
+    ...[...visibility].map(([layerId, visible]) => ({
+      label: `layer ${layerId}`,
+      run: () => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+        }
+      },
+    })),
+    {
+      label: 'transit overlay',
+      run: () => restoreTransitOverlay(overlay, map, transitLinesVisible),
+    },
+    { label: 'repaint', run: () => map.triggerRepaint() },
+  ]);
 }
 
 export function shouldHideLayerInFlight(layer: Pick<StyleLayer, 'id' | 'type'>) {
@@ -59,13 +88,12 @@ export function useFlightModePresentation({
     map.triggerRepaint();
 
     return () => {
-      visibility.forEach((visible, layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
-        }
-      });
-      restoreTransitOverlay(transitRouteOverlayRef.current, map, transitLinesVisible);
-      map.triggerRepaint();
+      restoreFlightPresentation(
+        map,
+        visibility,
+        transitRouteOverlayRef.current,
+        transitLinesVisible,
+      );
     };
   }, [active, mapLoaded, mapRef, transitLinesVisible, transitRouteOverlayRef]);
 }

@@ -25,7 +25,6 @@ import {
   Sun,
   Monitor,
   CircleHelp,
-  Plane,
   type LucideIcon,
 } from 'lucide-react';
 import type { ThemePreference } from '../theme';
@@ -129,7 +128,6 @@ export function MapControls({
   notice,
   themePreference,
   onThemeChange,
-  onFlightModeStart,
 }: {
   query: string;
   searchOpen: boolean;
@@ -162,7 +160,6 @@ export function MapControls({
   notice: string | null;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
-  onFlightModeStart: () => void;
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
@@ -446,14 +443,6 @@ export function MapControls({
                     ><Icon aria-hidden="true" /><span>{label}</span></button>
                   ))}
                 </div>
-              </div>
-              <div className="flight-mode-entry">
-                <span className="layer-toggle-icon" aria-hidden="true"><Plane /></span>
-                <span className="layer-toggle-copy">
-                  <strong>Flight simulator</strong>
-                  <small>Fly the map in third person</small>
-                </span>
-                <button type="button" onClick={onFlightModeStart}>Start</button>
               </div>
               <div className="layer-list">
                 {primaryLayers.map((definition) => (
