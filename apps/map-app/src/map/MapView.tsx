@@ -540,8 +540,8 @@ function locationPoiLayers() {
         minzoom: 13.5, maxzoom: 15.5, filter: locationPoiFilter(),
         layout: {
           'icon-image': iconImage as unknown as ExpressionSpecification,
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 1.2, 17, 1.5] as ExpressionSpecification,
-          'icon-padding': 7,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 1.3, 15.5, 1.48, 18, 1.62] as ExpressionSpecification,
+          'icon-padding': 8,
           'icon-allow-overlap': false,
           'icon-ignore-placement': false,
           'symbol-sort-key': locationPriorityExpression(),
@@ -1211,26 +1211,41 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
 
   const setRouteGeometry = (result: RouteResult | null) => {
     const source = mapRef.current?.getSource('selected-route') as { setData: (data: unknown) => void } | undefined;
+    const transitionSource = mapRef.current?.getSource('route-transitions') as { setData: (data: unknown) => void } | undefined;
     if (!result) {
       source?.setData({ type: 'FeatureCollection', features: [] });
+      transitionSource?.setData({ type: 'FeatureCollection', features: [] });
       return;
     }
-    const legFeatures = result.transitLegs?.filter((leg) => leg.geometry && leg.geometry.coordinates.length > 1).map((leg) => ({
-      type: 'Feature',
-      geometry: leg.geometry,
-      properties: {
-        mode: leg.mode,
-        // Keep this on each feature so mixed-mode journeys can use the
-        // operator's line color without affecting walking or other legs.
-        routeColor: !isWalkingTransitMode(leg.mode) ? mapRouteColor(leg.routeColor) : undefined,
-      },
-    })) ?? [];
+    const legFeatures = result.transitLegs?.flatMap((leg) => {
+      const geometry = leg.geometry;
+      if (!geometry || geometry.coordinates.length <= 1) return [];
+      return [{
+        type: 'Feature',
+        geometry,
+        properties: {
+          mode: leg.mode,
+          // Keep this on each feature so mixed-mode journeys can use the
+          // operator's line color without affecting walking or other legs.
+          routeColor: !isWalkingTransitMode(leg.mode) ? mapRouteColor(leg.routeColor) : undefined,
+        },
+      }];
+    }) ?? [];
     const directMode = routeMode === 'pedestrian' ? 'WALK'
       : routeMode === 'bicycle' ? 'BICYCLE'
         : routeMode === 'auto' ? 'CAR' : undefined;
     source?.setData(legFeatures.length
       ? { type: 'FeatureCollection', features: legFeatures }
       : { type: 'Feature', geometry: result.geometry, properties: { mode: directMode } });
+    const transitions = legFeatures.slice(1).flatMap((leg) => {
+      const coordinates = leg.geometry.coordinates[0];
+      return coordinates ? [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates },
+        properties: { mode: leg.properties.mode },
+      }] : [];
+    });
+    transitionSource?.setData({ type: 'FeatureCollection', features: transitions });
   };
 
   const setRoutePoints = () => {
@@ -1663,25 +1678,33 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
 
     const deepLink = initialDeepLinkRef.current;
     const savedView = deepLink ? null : loadPersistedMapView();
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: GLOBAL_MAP_STYLE,
-      center: deepLink?.coordinates ?? savedView?.center ?? TAMPERE,
-      zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
-      pitch: savedView?.pitch ?? 0,
-      bearing: savedView?.bearing ?? 0,
-      // MapLibre line layers are screen-space strokes. At extreme pitch the
-      // perspective projection makes foreground roads look disproportionately
-      // wide; keep the line-based mode readable until polygon roads return.
-      maxPitch: 55,
-      // Keep the default view focused on an area a few hundred metres across;
-      // closer views make screen-space MapLibre roads dominate the scene.
-      maxZoom: 18,
-      attributionControl: {
-        compact: true,
-        customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
-      },
-    });
+    let map: Map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: GLOBAL_MAP_STYLE,
+        center: deepLink?.coordinates ?? savedView?.center ?? TAMPERE,
+        zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
+        pitch: savedView?.pitch ?? 0,
+        bearing: savedView?.bearing ?? 0,
+        // MapLibre line layers are screen-space strokes. At extreme pitch the
+        // perspective projection makes foreground roads look disproportionately
+        // wide; keep the line-based mode readable until polygon roads return.
+        maxPitch: 55,
+        // Keep the default view focused on an area a few hundred metres across;
+        // closer views make screen-space MapLibre roads dominate the scene.
+        maxZoom: 18,
+        attributionControl: {
+          compact: true,
+          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+        },
+      });
+    } catch (error) {
+      // MapLibre 6.7.0 throws GPUInitializationError from the constructor when
+      // WebGL2 is unavailable, instead of firing an error event after return.
+      setMapError(error instanceof Error ? error.message : 'The map could not be created.');
+      return;
+    }
     // Use the explicitly documented key bindings below rather than MapLibre's
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();
@@ -2058,12 +2081,20 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       });
+      map.addSource('route-transitions', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
       map.addLayer({
         id: 'selected-route-casing',
         type: 'line',
         source: 'selected-route',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 },
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 5, 6, 12, 8, 18, 11],
+          'line-opacity': 0.92,
+        },
       });
       map.addLayer({
         id: 'selected-route',
@@ -2085,7 +2116,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               ],
             ],
           ] as unknown as ExpressionSpecification,
-          'line-width': 5,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 5, 3, 12, 4.5, 18, 6],
           'line-opacity': 0.98,
           'line-dasharray': [
             'match', ['upcase', ['to-string', ['get', 'mode']]],
@@ -2097,13 +2128,45 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         },
       });
       map.addLayer({
+        id: 'route-transition-halo',
+        type: 'circle',
+        source: 'route-transitions',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 7, 18, 10],
+          'circle-color': '#ffffff',
+          'circle-opacity': 0.96,
+          'circle-stroke-color': '#64748b',
+          'circle-stroke-width': 1.5,
+        },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'route-transitions',
+        type: 'symbol',
+        source: 'route-transitions',
+        layout: {
+          'text-field': [
+            'match', ['upcase', ['to-string', ['get', 'mode']]],
+            'WALK', 'W', 'FOOT', 'W', 'PEDESTRIAN', 'W',
+            'BICYCLE', 'B', 'BIKE', 'B', 'CYCLING', 'B',
+            'TRAM', 'T', 'BUS', 'B', 'SUBWAY', 'M', 'RAIL', 'R', '•',
+          ],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 9, 8, 18, 11],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#334155' },
+      }, poiLayers.before);
+      map.addLayer({
         id: 'route-endpoint-halo',
         type: 'circle',
         source: 'route-endpoints',
         paint: {
-          'circle-radius': 12,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 10, 14, 12, 18, 14],
           'circle-color': '#ffffff',
           'circle-opacity': 0.98,
+          'circle-stroke-color': ['match', ['get', 'kind'], 'origin', '#178052', '#c94747'],
+          'circle-stroke-width': 2,
         },
       }, poiLayers.before);
       map.addLayer({
@@ -2111,11 +2174,24 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         type: 'circle',
         source: 'route-endpoints',
         paint: {
-          'circle-radius': 8,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 5, 14, 7, 18, 8],
           'circle-color': ['match', ['get', 'kind'], 'origin', '#1c9b61', '#e15858'],
           'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2,
+          'circle-stroke-width': 1.5,
         },
+      }, poiLayers.before);
+      map.addLayer({
+        id: 'route-endpoint-labels',
+        type: 'symbol',
+        source: 'route-endpoints',
+        layout: {
+          'text-field': ['match', ['get', 'kind'], 'origin', 'A', 'B'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 5, 8, 18, 11],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#ffffff' },
       }, poiLayers.before);
       map.addLayer({
         id: 'context-menu-location-halo', type: 'circle', source: 'context-menu-location',
@@ -2202,16 +2278,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.addLayer({
         id: 'selected-location-halo', type: 'circle', source: 'selected-location',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 10, 18, 15],
-          'circle-color': '#ffffff', 'circle-opacity': 0.95,
-          'circle-stroke-color': MAP_COLORS.transitBlue, 'circle-stroke-width': 2,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 12, 18, 17],
+          'circle-color': '#ffffff', 'circle-opacity': 0.98,
+          'circle-stroke-color': MAP_COLORS.transitBlue, 'circle-stroke-width': 2.5,
         },
       }, poiLayers.before);
       map.addLayer({
         id: 'selected-location-icon', type: 'circle', source: 'selected-location',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 18, 9],
-          'circle-color': MAP_COLORS.transitBlue, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 18, 10],
+          'circle-color': MAP_COLORS.transitBlue, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2,
         },
       }, poiLayers.before);
       map.addLayer({
@@ -3150,7 +3226,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             onZoomOut={zoomOut}
             onRouteOpen={openRoute}
             routeOpen={routeOpen}
-            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop)}
+            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
             themePreference={themePreference}

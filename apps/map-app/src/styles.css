@@ -247,6 +247,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-content:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: -3px; }
 .location-info-content .location-info-empty { color: #94a3b8; font-size: 0.74rem; font-style: italic; margin: 2px 0 12px; }
 .location-info-content .location-info-loading { color: var(--color-accent); font-size: 0.74rem; margin: 2px 0 12px; }
+/* Sticky action bar at the bottom of the location info scroll region */
+.location-info-sticky-actions { background: var(--surface-panel); border-top: 1px solid var(--color-line); padding: 10px 22px; }
 .location-description { border-top: 1px solid #edf0f3; margin: 4px 0 12px; padding-top: 11px; }
 .location-description p { color: #475569; display: -webkit-box; font-size: 0.8rem; line-height: 1.45; margin-bottom: 5px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
 .location-description small { color: #94a3b8; font-size: 0.65rem; }
@@ -474,14 +476,11 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-panel.transit-journey-detail .transit-route-legs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .transit-journey-detail .transit-route-legs { border-top: 0; margin-top: 0; padding-top: 16px; }
 
-@media (min-width: 761px) {
+@media (min-width: 641px) {
   /* Keep map chrome together on the left; the active information surface lives
      on the opposite side so it never competes with search or map controls. */
   .location-search {
     left: 28px;
-  }
-  .map-tools.route-open {
-    display: none;
   }
   .route-panel {
     left: 28px;
@@ -510,13 +509,15 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .map-context-menu button:hover, .map-context-menu button:focus-visible { background: var(--surface-hover); color: var(--color-accent); outline: 0; }
 .map-context-menu-separator { background: var(--color-line); height: 1px; margin: 4px 13px; }
 .nearby-panel { background: var(--surface-card); border: 1px solid var(--color-line); border-radius: 16px; box-shadow: var(--shadow-card); color: var(--color-ink); max-height: calc(100dvh - 56px); overflow: hidden; position: absolute; right: 28px; top: 28px; width: min(350px, calc(100% - 56px)); z-index: 110; }
-.nearby-panel header { align-items: center; border-bottom: 1px solid var(--color-line); display: flex; justify-content: space-between; padding: 14px 16px; }
+.nearby-panel header { align-items: center; border-bottom: 1px solid var(--color-line); display: flex; gap: 8px; justify-content: space-between; padding: 14px 16px; }
 .nearby-panel header div { display: flex; flex-direction: column; gap: 2px; }
 .nearby-panel header span, .nearby-panel li span { color: var(--color-muted); font-size: .72rem; text-transform: capitalize; }
-.nearby-panel header button { align-items: center; background: transparent; border: 0; border-radius: 9px; color: inherit; cursor: pointer; display: flex; padding: 8px; }
-.nearby-panel header button:hover, .nearby-panel header button:focus-visible { background: var(--surface-hover); outline: 2px solid var(--color-accent); }
-.nearby-panel header svg { height: 18px; width: 18px; }
 .nearby-panel ol { list-style: none; margin: 0; max-height: calc(100dvh - 135px); overflow-y: auto; padding: 0; }
+.nearby-panel-close { align-items: center; background: transparent; border: 0; border-radius: 9px; color: inherit; cursor: pointer; display: flex; flex: 0 0 auto; padding: 8px; }
+.nearby-panel-close:hover, .nearby-panel-close:focus-visible { background: var(--surface-hover); outline: 2px solid var(--color-accent); }
+.nearby-panel-close svg { height: 18px; width: 18px; }
+/* Hide desktop close when the mobile sheet handle (with its own close) is visible */
+@media (max-width: 640px) { .nearby-panel-close { display: none; } }
 .nearby-panel li button { background: transparent; border: 0; border-bottom: 1px solid var(--color-line); color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-height: 48px; padding: 10px 16px; text-align: left; width: 100%; }
 .nearby-panel li button:hover, .nearby-panel li button:focus-visible { background: var(--surface-hover); outline: 0; }
 .nearby-panel li strong { font-size: .82rem; }
@@ -670,99 +671,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .flight-key-help { background: rgb(9 24 39 / 76%); border-radius: 999px; color: #c6d8e6; font-size: .64rem; margin: 0 0 2px; padding: 7px 11px; }
 .flight-key-help kbd { background: rgb(255 255 255 / 12%); border: 1px solid rgb(255 255 255 / 18%); border-radius: 4px; color: #fff; font: inherit; font-weight: 800; margin-right: 3px; padding: 2px 4px; }
 
-@media (max-width: 760px) {
-  :root { --map-control-edge: 12px; }
-  .flight-hud { gap: 10px; left: 10px; right: 10px; top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .flight-hud-title { min-width: 0; }
-  .flight-hud-title span { display: none; }
-  .flight-telemetry { gap: 10px; }
-  .flight-telemetry div { align-items: flex-start; flex-direction: column; gap: 1px; }
-  .flight-telemetry dd { font-size: .68rem; min-width: 48px; }
-  .flight-exit span { display: none; }
-  .flight-exit { padding: 7px 10px; }
-  .flight-inputs { bottom: calc(52px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 50px; }
-  .flight-input-group button { height: 48px; width: 50px; }
-  .flight-key-help { display: none; }
-  .position-information {
-    animation: mobile-sheet-enter 220ms cubic-bezier(.22, .75, .24, 1);
-    border-bottom: 0;
-    border-left: 0;
-    border-radius: 22px 22px 0 0;
-    border-right: 0;
-    bottom: 0;
-    left: 0;
-    max-height: min(68dvh, 560px);
-    overflow: hidden;
-    padding: 0 22px calc(22px + env(safe-area-inset-bottom, 0px));
-    right: 0;
-    top: auto;
-    width: 100%;
-  }
-  .position-information .mobile-sheet-handle { margin: 0 -22px 18px; }
-  .transit-departures-panel,
-  .location-info-panel {
-    animation: mobile-sheet-enter 220ms cubic-bezier(.22, .75, .24, 1);
-    border-bottom: 0;
-    border-left: 0;
-    border-radius: 22px 22px 0 0;
-    border-right: 0;
-    bottom: 0;
-    left: 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    right: 0;
-    top: auto;
-    width: 100%;
-  }
-  .transit-departures-panel { max-height: min(76dvh, 640px); }
-  .transit-trip-panel { max-height: min(58dvh, 500px); }
-  .location-info-panel { max-height: min(68dvh, 560px); }
-  .transit-panel-header { padding-top: 18px; }
-  .location-info-panel { padding-top: 0; }
-  .location-info-panel .mobile-sheet-handle { flex: 0 0 auto; width: 100%; }
-  .location-info-header { padding: 18px 50px 12px 22px; }
-  .location-info-content { padding: 0 22px calc(22px + env(safe-area-inset-bottom, 0px)); }
-  .location-info-close { top: 58px; }
-  .layer-panel::before {
-    background: #cbd4dd;
-    border-radius: 999px;
-    content: '';
-    height: 4px;
-    left: 50%;
-    position: absolute;
-    top: 9px;
-    transform: translateX(-50%);
-    width: 38px;
-  }
-  .route-panel {
-    border-bottom: 0;
-    border-radius: 18px 18px 0 0;
-    bottom: 0;
-    left: 0;
-    padding: 0;
-    max-height: min(62dvh, 600px);
-    overflow-y: auto;
-    top: auto;
-    width: 100%;
-    z-index: 80;
-  }
-  .mobile-sheet-handle { align-items: center; border-bottom: 1px solid var(--color-line); cursor: grab; display: flex; flex: 0 0 auto; gap: 8px; height: 42px; justify-content: center; position: relative; touch-action: none; }
-  .mobile-sheet-handle:active { cursor: grabbing; }
-  .mobile-sheet-handle > span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 34px; }
-  .mobile-sheet-handle button { align-items: center; background: var(--color-accent-soft); border: 0; border-radius: 8px; color: var(--color-accent); cursor: pointer; display: flex; height: 30px; justify-content: center; padding: 0; width: 38px; }
-  .mobile-sheet-handle button:hover, .mobile-sheet-handle button:focus-visible { background: #dceaff; outline: 2px solid rgb(80 145 235 / 30%); outline-offset: 1px; }
-  .mobile-sheet-handle button:disabled { background: #f3f5f7; color: #aab4bf; cursor: default; }
-  .mobile-sheet-handle svg { height: 19px; stroke-width: 2.4; width: 19px; }
-  .mobile-sheet-handle .mobile-sheet-close { background: #f7f9fb; border: 1px solid var(--color-line); color: #5f6f81; height: 34px; position: absolute; right: 8px; top: 4px; width: 34px; }
-  .mobile-sheet-handle .mobile-sheet-close:hover, .mobile-sheet-handle .mobile-sheet-close:focus-visible { background: #fff; color: var(--color-accent); }
-  .mobile-sheet-handle .mobile-sheet-close svg { height: 17px; width: 17px; }
-  .mobile-bottom-sheet > .location-info-close,
-  .mobile-bottom-sheet > .route-panel-heading .route-panel-close,
-  .mobile-bottom-sheet > .transit-panel-header .transit-panel-close { display: none; }
-  @keyframes mobile-sheet-enter {
-    from { opacity: 0; transform: translateY(24px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-}
+/* Phone-specific overrides begin at 640px — below this width every overlay
+   becomes a bottom sheet and map chrome collapses to absolute button positions. */
 
 /* Dark mode is a blue-hour palette, not an inversion of the daytime UI. */
 [data-theme='dark'] {
@@ -884,10 +794,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 [data-theme='dark'] .map-context-menu button { color: #e3eef8; }
 [data-theme='dark'] .map-context-menu button svg { color: #9bb5c9; }
 
-@media (max-width: 760px) {
-  .nearby-panel { border-radius: 20px 20px 0 0; bottom: 0; left: 0; max-height: min(58dvh, 520px); right: 0; top: auto; width: 100%; }
-  .nearby-panel ol { max-height: calc(min(58dvh, 520px) - 70px); }
-}
 [data-theme='dark'] .layer-toggle { color: #d9e8f4; }
 [data-theme='dark'] .layer-toggle + .layer-toggle { border-color: var(--color-line); }
 [data-theme='dark'] .layer-toggle-icon { color: #a9c9df; }
@@ -900,6 +806,107 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 }
 
 @media (max-width: 640px) {
+  :root { --map-control-edge: 12px; }
+  .flight-hud { gap: 10px; left: 10px; right: 10px; top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .flight-hud-title { min-width: 0; }
+  .flight-hud-title span { display: none; }
+  .flight-telemetry { gap: 10px; }
+  .flight-telemetry div { align-items: flex-start; flex-direction: column; gap: 1px; }
+  .flight-telemetry dd { font-size: .68rem; min-width: 48px; }
+  .flight-exit span { display: none; }
+  .flight-exit { padding: 7px 10px; }
+  .flight-inputs { bottom: calc(52px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 50px; }
+  .flight-input-group button { height: 48px; width: 50px; }
+  .flight-key-help { display: none; }
+
+  /* Bottom-sheet panels */
+  .position-information {
+    animation: mobile-sheet-enter 220ms cubic-bezier(.22, .75, .24, 1);
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 22px 22px 0 0;
+    border-right: 0;
+    bottom: 0;
+    left: 0;
+    max-height: min(68dvh, 560px);
+    overflow: hidden;
+    padding: 0 22px calc(22px + env(safe-area-inset-bottom, 0px));
+    right: 0;
+    top: auto;
+    width: 100%;
+  }
+  .position-information .mobile-sheet-handle { margin: 0 -22px 18px; }
+  .transit-departures-panel,
+  .location-info-panel {
+    animation: mobile-sheet-enter 220ms cubic-bezier(.22, .75, .24, 1);
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 22px 22px 0 0;
+    border-right: 0;
+    bottom: 0;
+    left: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    right: 0;
+    top: auto;
+    width: 100%;
+  }
+  .transit-departures-panel { max-height: min(76dvh, 640px); }
+  .transit-trip-panel { max-height: min(58dvh, 500px); }
+  .location-info-panel { max-height: min(68dvh, 560px); }
+  .transit-panel-header { padding-top: 18px; }
+  .location-info-panel { padding-top: 0; }
+  .location-info-panel .mobile-sheet-handle { flex: 0 0 auto; width: 100%; }
+  .location-info-header { padding: 18px 50px 12px 22px; }
+  .location-info-content { padding: 0 22px calc(22px + env(safe-area-inset-bottom, 0px)); }
+  .location-info-close { top: 58px; }
+  .location-info-sticky-actions { bottom: 0; left: 0; padding: 10px 22px calc(10px + env(safe-area-inset-bottom, 0px)); position: sticky; right: 0; }
+  .route-panel {
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
+    bottom: 0;
+    left: 0;
+    padding: 0;
+    max-height: min(62dvh, 600px);
+    overflow-y: auto;
+    top: auto;
+    width: 100%;
+    z-index: 80;
+  }
+  .nearby-panel {
+    animation: mobile-sheet-enter 220ms cubic-bezier(.22, .75, .24, 1);
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 22px 22px 0 0;
+    border-right: 0;
+    bottom: 0;
+    left: 0;
+    max-height: min(58dvh, 520px);
+    right: 0;
+    top: auto;
+    width: 100%;
+  }
+  .nearby-panel ol { max-height: none; }
+
+  /* Mobile sheet handle (shared drag affordance) */
+  .mobile-sheet-handle { align-items: center; border-bottom: 1px solid var(--color-line); cursor: grab; display: flex; flex: 0 0 auto; gap: 8px; height: 42px; justify-content: center; position: relative; touch-action: none; }
+  .mobile-sheet-handle:active { cursor: grabbing; }
+  .mobile-sheet-handle > span { background: #cbd4dd; border-radius: 999px; height: 4px; width: 34px; }
+  .mobile-sheet-handle button { align-items: center; background: var(--color-accent-soft); border: 0; border-radius: 8px; color: var(--color-accent); cursor: pointer; display: flex; height: 30px; justify-content: center; padding: 0; width: 38px; }
+  .mobile-sheet-handle button:hover, .mobile-sheet-handle button:focus-visible { background: #dceaff; outline: 2px solid rgb(80 145 235 / 30%); outline-offset: 1px; }
+  .mobile-sheet-handle button:disabled { background: #f3f5f7; color: #aab4bf; cursor: default; }
+  .mobile-sheet-handle svg { height: 19px; stroke-width: 2.4; width: 19px; }
+  .mobile-sheet-handle .mobile-sheet-close { background: #f7f9fb; border: 1px solid var(--color-line); color: #5f6f81; height: 34px; position: absolute; right: 8px; top: 4px; width: 34px; }
+  .mobile-sheet-handle .mobile-sheet-close:hover, .mobile-sheet-handle .mobile-sheet-close:focus-visible { background: #fff; color: var(--color-accent); }
+  .mobile-sheet-handle .mobile-sheet-close svg { height: 17px; width: 17px; }
+  .mobile-bottom-sheet > .location-info-close,
+  .mobile-bottom-sheet > .route-panel-heading .route-panel-close,
+  .mobile-bottom-sheet > .transit-panel-header .transit-panel-close { display: none; }
+  @keyframes mobile-sheet-enter {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Absolute-positioned map tools */
   .pwa-install-card { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); max-width: none; width: calc(100% - 94px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)); }
   .pwa-install-card { align-items: flex-start; flex-wrap: wrap; }
   .pwa-install-actions { flex-basis: 100%; justify-content: flex-end; }
@@ -910,6 +917,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     width: calc(100% - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .location-search-form { min-height: 54px; padding-left: 15px; }
+  /* Hide the desktop keyboard shortcut hint on touch screens */
+  .location-search-shortcut { display: none; }
   .location-search-results { max-height: min(44dvh, 360px); overflow-y: auto; overscroll-behavior: contain; }
   .map-camera-actions {
     right: calc(12px + env(safe-area-inset-right, 0px));
@@ -949,12 +958,13 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     left: 0;
     max-height: min(72dvh, 620px);
     overscroll-behavior: contain;
-    padding: 0 18px calc(18px + env(safe-area-inset-bottom, 0px));
+    padding: 0;
     position: fixed;
     top: auto;
     width: 100vw;
   }
-  .layer-panel-heading { padding-top: 28px; }
+  .layer-panel-heading { padding: 10px 18px 18px; }
+  .layer-panel-content { padding: 0 18px calc(18px + env(safe-area-inset-bottom, 0px)); }
   .map-tool-notice { bottom: calc(128px + env(safe-area-inset-bottom, 0px)); left: auto; right: calc(70px + env(safe-area-inset-right, 0px)); top: auto; }
   .map-tools.content-panel-open { display: none; }
   .location-info-header { padding-left: calc(18px + env(safe-area-inset-left, 0px)); padding-right: calc(50px + env(safe-area-inset-right, 0px)); }
@@ -972,7 +982,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 390px) {
   .favorite-kind-options { grid-template-columns: 1fr; }
   .favorite-kind-options button { flex-direction: row; padding: 12px 14px; text-align: left; }
-  .location-search-shortcut { display: none; }
   .map-tool-dock button { height: 48px; width: 48px; }
   .map-tool-dock svg { height: 21px; width: 21px; }
   .layer-toggle { min-height: 62px; }
@@ -980,7 +989,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .route-selection-banner { align-items: flex-start; flex-wrap: wrap; }
 }
 
-@media (max-height: 540px) and (orientation: landscape) {
+@media (max-height: 520px) and (orientation: landscape) {
   .location-search { width: min(300px, calc(100% - 24px)); }
   .location-search-form { min-height: 48px; }
   .map-tool-help {
@@ -990,11 +999,14 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .controls-help-panel { left: 72px; }
   .map-tool-layers { top: calc(68px + env(safe-area-inset-top, 0px)); }
   .map-tool-dock button { height: 46px; width: 46px; }
+  /* In landscape the side sheets peek from the edge rather than covering the full width */
   .transit-departures-panel,
   .location-info-panel,
+  .nearby-panel,
   .layer-panel { max-height: 88dvh; max-width: min(390px, 58vw); }
   .transit-departures-panel,
-  .location-info-panel { border-radius: 20px 0 0; left: auto; }
+  .location-info-panel,
+  .nearby-panel { border-radius: 20px 0 0; left: auto; }
   .layer-panel { border-radius: 0 20px 0 0; right: auto; }
 }
 
@@ -1019,7 +1031,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 640px) {
   .mobile-bottom-sheet {
     height: min(var(--mobile-sheet-height), calc(100dvh - env(safe-area-inset-top, 0px) - 8px));
     max-height: none;

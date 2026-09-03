@@ -103,6 +103,11 @@ export function LocationInformationPanel({
         <span className="location-info-source">
           {selection.source === 'search' ? 'Found with Photon · details from OpenStreetMap' : 'OpenStreetMap place'}
         </span>
+        <a className="location-info-attribution" href="https://nominatim.openstreetmap.org/" target="_blank" rel="noreferrer">
+          © OpenStreetMap contributors · Nominatim
+        </a>
+      </div>
+      <div className="location-info-sticky-actions">
         <InfoActionRow actions={[
           ...(favorite
             ? [{ label: 'Edit favourite', icon: Pencil, onClick: onEditFavorite, iconOnly: true }, { label: 'Remove favourite', icon: Trash2, onClick: onRemoveFavorite, iconOnly: true }]
@@ -110,9 +115,6 @@ export function LocationInformationPanel({
           { label: 'Share', icon: Share2, onClick: onShare },
           { label: 'Directions', icon: Navigation, tone: 'primary' as const, onClick: onDirections },
         ]} />
-        <a className="location-info-attribution" href="https://nominatim.openstreetmap.org/" target="_blank" rel="noreferrer">
-          © OpenStreetMap contributors · Nominatim
-        </a>
       </div>
       <button className="location-info-close" type="button" aria-label="Close location information" onClick={onClose}>
         <X aria-hidden="true" />

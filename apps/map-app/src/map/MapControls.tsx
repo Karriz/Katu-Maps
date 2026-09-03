@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
+import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import {
   Bike,
   Building2,
@@ -168,6 +170,7 @@ export function MapControls({
   const onSearchFocusRef = useRef(onSearchFocus);
   onSearchFocusRef.current = onSearchFocus;
   const [helpOpen, setHelpOpen] = useState(false);
+  const layerSheet = useMobileBottomSheet('half');
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
   const suggestionsVisible = searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0);
   const searchNavigation = useAutocompleteNavigation({
@@ -407,7 +410,14 @@ export function MapControls({
         )}
 
         {layersOpen && (
-          <section className="layer-panel" id="map-layer-panel" aria-label="Map layer visibility">
+          <section
+            className={`layer-panel mobile-bottom-sheet${layerSheet.dragging ? ' is-dragging' : ''}`}
+            id="map-layer-panel"
+            aria-label="Map layer visibility"
+            style={layerSheet.style}
+            data-snap={layerSheet.snap}
+          >
+            <MobileSheetHandle {...layerSheet} closeLabel="Close map layers" onClose={() => onLayersOpenChange(false)} />
             <div className="layer-panel-heading">
               <div>
                 <strong>Map layers</strong>
