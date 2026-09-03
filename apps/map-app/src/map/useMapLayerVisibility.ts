@@ -13,6 +13,8 @@ type LayerRefs = {
   treeRefreshRef: RefObject<(() => void) | null>;
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
+  flightActiveRef: RefObject<boolean>;
+  flightActive: boolean;
 };
 
 type MapLayerVisibilityOptions = LayerRefs & {
@@ -44,7 +46,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme,
   treeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
-  terrainSourceRef, terrainEnabledRef, building3dLayerIds, buildingShadowLayerIds,
+  terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled,
 }: MapLayerVisibilityOptions) {
@@ -52,6 +54,11 @@ export function useMapLayerVisibility({
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     const setVisibility = (layerIds: string[], visible: boolean) => setMapLayerVisibility(map, layerIds, visible);
+    // Flight owns trees, terrain, projection, and theme sky while active.
+    // Re-run this effect when flight ends so map mode reclaims those.
+    if (flightActive || flightActiveRef.current) {
+      return;
+    }
     setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
       .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'), layerToggles.transit);
@@ -75,14 +82,15 @@ export function useMapLayerVisibility({
     map.triggerRepaint();
     treeRefreshRef.current?.();
     if (!layerToggles.transit) onTransitDisabled();
-  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, mapRef, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
+  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     treeLayerRef.current?.setTheme(resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(resolvedTheme === 'dark');
+    if (flightActive || flightActiveRef.current) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
-  }, [mapLoaded, mapRef, resolvedTheme, transitVehicleLayerRef, treeLayerRef]);
+  }, [flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, transitVehicleLayerRef, treeLayerRef]);
 }
