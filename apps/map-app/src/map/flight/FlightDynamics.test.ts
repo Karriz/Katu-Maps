@@ -7,6 +7,8 @@ import {
   createInitialFlightState,
   flightCameraPose,
   offsetCoordinate,
+  smoothFlightCameraRig,
+  type FlightCameraRig,
   wrapSignedRadians,
 } from './FlightDynamics';
 
@@ -44,6 +46,24 @@ describe('flight dynamics', () => {
 
     const pitchedLeft = advanceFlight(sidewaysState, { pitch: -1, roll: 0, throttle: 0 }, 0.05, 0);
     expect(pitchedLeft.heading).toBeLessThan(Math.PI);
+  });
+
+  it('preserves heading-rate direction while inverted', () => {
+    const invertedState = {
+      ...createInitialFlightState([0, 0], 0, 180),
+      heading: Math.PI,
+      pitch: Math.PI * 2 / 3,
+      roll: Math.PI / 2,
+    };
+
+    const next = advanceFlight(
+      invertedState,
+      { pitch: 1, roll: 0, throttle: 0 },
+      0.05,
+      0,
+    );
+
+    expect(next.heading).toBeLessThan(invertedState.heading);
   });
 
   it('adjusts throttle and airspeed accordingly', () => {
@@ -141,6 +161,60 @@ describe('flight dynamics', () => {
     expect(camera.from[1]).toBeLessThan(state.latitude);
     expect(camera.target[1]).toBeGreaterThan(state.latitude);
     expect(camera.fromAltitude).toBeGreaterThan(state.altitude);
+    expect(camera.bearing).toBeCloseTo(0, 8);
+    expect(camera.roll).toBeCloseTo(0, 8);
+  });
+
+  it('banks the chase camera with the aircraft and looks along its heading', () => {
+    const eastbound = { ...createInitialFlightState([0, 0], 0, 90), heading: Math.PI / 2 };
+    const eastCamera = flightCameraPose(eastbound);
+    expect(eastCamera.from[0]).toBeLessThan(eastbound.longitude);
+    expect(eastCamera.target[0]).toBeGreaterThan(eastbound.longitude);
+    expect(eastCamera.bearing).toBeCloseTo(90, 8);
+
+    const bankedRight = { ...createInitialFlightState([0, 0], 0, 0), roll: Math.PI / 4 };
+    const bankedCamera = flightCameraPose(bankedRight);
+    expect(bankedCamera.from[0]).toBeGreaterThan(0);
+    expect(bankedCamera.roll).toBeCloseTo(45, 8);
+  });
+
+  it('raises the chase camera during climbs to keep terrain in view', () => {
+    const climbingState = {
+      ...createInitialFlightState([0, 0], 0, 0),
+      pitch: Math.PI / 9,
+    };
+    const climbing = flightCameraPose(climbingState);
+    expect(climbing.target[1]).toBeGreaterThan(climbingState.latitude);
+    expect(climbing.targetAltitude).toBeCloseTo(
+      climbingState.altitude + 8 * Math.sin(climbingState.pitch),
+      8,
+    );
+    expect(climbing.fromAltitude).toBeGreaterThan(climbing.targetAltitude);
+  });
+
+  it('smooths the chase camera toward the aircraft heading, including wraps', () => {
+    const initial = createInitialFlightState([0, 0], 0, 0);
+    const turning = { ...initial, heading: 0.4, roll: 0.3 };
+    const stepped = smoothFlightCameraRig(initial, turning, 0.05);
+    expect(stepped.heading).toBeGreaterThan(initial.heading);
+    expect(stepped.heading).toBeLessThan(turning.heading);
+    expect(stepped.roll).toBeGreaterThan(0);
+    expect(stepped.roll).toBeLessThan(turning.roll);
+
+    const nearWrap = smoothFlightCameraRig(
+      { ...initial, heading: 0.08 },
+      { ...initial, heading: Math.PI * 2 - 0.08 },
+      0.05,
+    );
+    expect(nearWrap.heading).toBeLessThan(0.08);
+    expect(nearWrap.heading).toBeGreaterThanOrEqual(0);
+
+    let settled: FlightCameraRig = initial;
+    for (let index = 0; index < 80; index += 1) {
+      settled = smoothFlightCameraRig(settled, turning, 0.05);
+    }
+    expect(settled.heading).toBeCloseTo(turning.heading, 5);
+    expect(settled.roll).toBeCloseTo(turning.roll, 5);
   });
 
   it('wraps coordinates across the antimeridian', () => {

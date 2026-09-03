@@ -1,4 +1,9 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, LogOut, Minus, Plane, Plus } from 'lucide-react';
 import type { FlightControl, FlightTelemetry } from './useFlightSimulator';
 
@@ -10,14 +15,35 @@ function HoldControl({
 }: {
   control: FlightControl;
   label: string;
-  onControlChange: (control: FlightControl, pressed: boolean) => void;
+  onControlChange: (control: FlightControl, pressed: boolean, source?: string) => void;
   children: React.ReactNode;
 }) {
-  const release = () => onControlChange(control, false);
+  const keyboardSourcesRef = useRef(new Set<string>());
+  const releasePointer = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    onControlChange(control, false, `pointer:${event.pointerId}`);
+  };
   const press = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    onControlChange(control, true);
+    onControlChange(control, true, `pointer:${event.pointerId}`);
+  };
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.code !== 'Enter' && event.code !== 'Space') return;
+    event.preventDefault();
+    const source = `button-keyboard:${event.code}`;
+    keyboardSourcesRef.current.add(source);
+    onControlChange(control, true, source);
+  };
+  const handleKeyUp = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.code !== 'Enter' && event.code !== 'Space') return;
+    event.preventDefault();
+    const source = `button-keyboard:${event.code}`;
+    keyboardSourcesRef.current.delete(source);
+    onControlChange(control, false, source);
+  };
+  const releaseKeyboard = () => {
+    keyboardSourcesRef.current.forEach((source) => onControlChange(control, false, source));
+    keyboardSourcesRef.current.clear();
   };
   return (
     <button
@@ -25,9 +51,12 @@ function HoldControl({
       aria-label={label}
       title={label}
       onPointerDown={press}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onLostPointerCapture={release}
+      onPointerUp={releasePointer}
+      onPointerCancel={releasePointer}
+      onLostPointerCapture={releasePointer}
+      onKeyDown={handleKeyDown}
+      onKeyUp={handleKeyUp}
+      onBlur={releaseKeyboard}
       onContextMenu={(event) => event.preventDefault()}
     >
       {children}
@@ -41,7 +70,7 @@ export function FlightControls({
   onExit,
 }: {
   telemetry: FlightTelemetry;
-  onControlChange: (control: FlightControl, pressed: boolean) => void;
+  onControlChange: (control: FlightControl, pressed: boolean, source?: string) => void;
   onExit: () => void;
 }) {
   const exitButtonRef = useRef<HTMLButtonElement>(null);

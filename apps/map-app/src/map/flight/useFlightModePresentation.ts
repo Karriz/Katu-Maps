@@ -14,6 +14,17 @@ const APPLICATION_OVERLAY_PREFIXES = [
   'user-location',
 ];
 
+type FlightTransitOverlay = Pick<TransitRouteOverlay, 'setVisibility' | 'update'>;
+
+export function restoreTransitOverlay(
+  overlay: FlightTransitOverlay | null,
+  map: Pick<MaplibreMap, 'getBounds' | 'getZoom'>,
+  visible: boolean,
+) {
+  overlay?.setVisibility(visible);
+  if (visible) void overlay?.update(map.getBounds(), map.getZoom());
+}
+
 export function shouldHideLayerInFlight(layer: Pick<StyleLayer, 'id' | 'type'>) {
   if (layer.id === 'flight-aircraft-model-3d') return false;
   if (layer.id.startsWith('transit-')) return true;
@@ -53,7 +64,7 @@ export function useFlightModePresentation({
           map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
         }
       });
-      transitRouteOverlayRef.current?.setVisibility(transitLinesVisible);
+      restoreTransitOverlay(transitRouteOverlayRef.current, map, transitLinesVisible);
       map.triggerRepaint();
     };
   }, [active, mapLoaded, mapRef, transitLinesVisible, transitRouteOverlayRef]);

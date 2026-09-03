@@ -58,8 +58,8 @@ import { TransitStopsLayer } from './TransitStopsLayer';
 import type { TransitVehicleTripSelection } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
-import { FlightModelLayer } from './flight/FlightModelLayer';
 import { FlightControls } from './flight/FlightControls';
+import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
 import { useFlightSimulator } from './flight/useFlightSimulator';
 import { useFlightModePresentation } from './flight/useFlightModePresentation';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
@@ -646,8 +646,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
-  const flightModelLayerRef = useRef<FlightModelLayer | null>(null);
+  const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
   const flightActiveRef = useRef(false);
+  const flightWasActiveRef = useRef(false);
   const plannedVehicleTripRef = useRef<string | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(false);
@@ -849,7 +850,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const flight = useFlightSimulator({
     mapRef,
     mapLoaded,
-    modelLayerRef: flightModelLayerRef,
     activeRef: flightActiveRef,
     terrainSourceRef,
     terrainEnabledRef,
@@ -866,24 +866,58 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     return () => onFlightModeChange?.(false);
   }, [flight.active, onFlightModeChange]);
   useEffect(() => {
-    if (!flight.active || !mapLoaded) return;
-    const treeLayer = treeLayerRef.current;
-    if (!treeLayer) return;
-    // Flight's steep camera pitch pushes map.getBounds() far toward the
-    // horizon even at low altitude, so the normal viewport-span cutoff
-    // (tuned for top-down browsing) would hide trees entirely; relax it.
-    treeLayer.setExtendedViewportRange(true);
-    // The normal tree refresh is debounced on moveend/idle, built for a
-    // pan-then-stop usage pattern. Flight is continuous motion, so those
-    // events rarely settle; refresh on a fixed interval instead so trees
-    // actually populate as the aircraft covers new ground.
-    treeLayer.updateTrees();
-    const intervalId = window.setInterval(() => treeLayer.updateTrees(), 4000);
+    if (flight.active) {
+      flightWasActiveRef.current = true;
+      return;
+    }
+    if (!flightWasActiveRef.current) return;
+    flightWasActiveRef.current = false;
+    const frame = window.requestAnimationFrame(() => mapRef.current?.getCanvas().focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [flight.active]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!flight.active || !mapLoaded || !layerToggles.trees || !map) return;
+
+    const flightTreeLayer = new FlightTreeModelLayer({
+      sourceId: OPENFREEMAP_SOURCE_ID,
+      waterLayers: ['water'],
+      vegetationLayers: ['landcover', 'landuse', 'park'],
+    });
+    flightTreeLayer.setExtendedViewportRange(true);
+    try {
+      map.addLayer(
+        flightTreeLayer,
+        map.getLayer('global-road-labels') ? 'global-road-labels' : undefined,
+      );
+    } catch (error) {
+      if (map.getLayer(flightTreeLayer.id)) map.removeLayer(flightTreeLayer.id);
+      console.error('Flight mode stopped because flight trees could not be initialized.', error);
+      flight.stop();
+      return;
+    }
+    flightTreeLayerRef.current = flightTreeLayer;
+    if (map.getLayer('tree-models-3d')) {
+      map.setLayoutProperty('tree-models-3d', 'visibility', 'none');
+    }
+    flightTreeLayer.updateTrees();
+    const intervalId = window.setInterval(() => flightTreeLayer.updateTrees(), 4000);
+
     return () => {
       window.clearInterval(intervalId);
-      treeLayer.setExtendedViewportRange(false);
+      if (mapRef.current !== map) return;
+      if (map.getLayer(flightTreeLayer.id)) map.removeLayer(flightTreeLayer.id);
+      flightTreeLayerRef.current = null;
+      if (map.getLayer('tree-models-3d')) {
+        map.setLayoutProperty('tree-models-3d', 'visibility', 'visible');
+      }
+      treeRefreshRef.current?.();
     };
-  }, [flight.active, mapLoaded, treeLayerRef]);
+  }, [flight.active, flight.stop, layerToggles.trees, mapLoaded]);
+  useEffect(() => {
+    if (!flight.active) return;
+    flightTreeLayerRef.current?.setTheme(resolvedTheme === 'dark');
+  }, [flight.active, resolvedTheme]);
   const {
     searchQuery, setSearchQuery, searchResults, setSearchResults, searchOpen, setSearchOpen,
     searchLoading, searchError, setSearchError, searchResultsQuery,
@@ -1660,8 +1694,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     treeLayerRef.current = treeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
-    const flightModelLayer = new FlightModelLayer();
-    flightModelLayerRef.current = flightModelLayer;
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       latestVehiclePoseRef.current = pose;
       // Keep the custom model layer synchronized with the same estimated pose
@@ -1988,7 +2020,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
-      map.addLayer(flightModelLayer, 'global-road-labels');
       try {
         await addLocationIcons(map);
       } catch (error) {
@@ -2332,8 +2363,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
-    // idle handles the final set of newly loaded tiles. Flight uses its own
-    // interval — idle would otherwise fire on every streamed tile and hitch.
+    // idle handles the final set of newly loaded tiles. Flight trees have a
+    // dedicated refresh interval, so avoid updating the hidden regular layer.
     const handleIdleTreeUpdate = () => {
       if (flightActiveRef.current) return;
       scheduleTreeUpdate();
@@ -2391,9 +2422,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       mapRef.current = null;
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
+      flightTreeLayerRef.current = null;
       transitStopsLayerRef.current = null;
       transitVehicleLayerRef.current = null;
-      flightModelLayerRef.current = null;
     };
   }, []);
 

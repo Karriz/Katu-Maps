@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { LngLat, type Map } from 'maplibre-gl';
-import type { FlightModelLayer } from './FlightModelLayer';
+import { FlightModelLayer } from './FlightModelLayer';
 import {
   advanceFlight,
   createInitialFlightState,
   degreesToRadians,
   flightCameraPose,
   radiansToDegrees,
+  smoothFlightCameraRig,
   FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
   FLIGHT_MIN_CLEARANCE_METERS,
+  type FlightCameraRig,
   type FlightInput,
   type FlightState,
 } from './FlightDynamics';
@@ -26,6 +28,72 @@ function haversineMeters(a: [number, number], b: [number, number]) {
   return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+type MapCameraWithTerrain = { terrain: unknown };
+
+type FlightTransform = {
+  nearZ: number;
+  farZ: number;
+  cameraToCenterDistance: number;
+  pixelsPerMeter: number;
+  overrideNearFarZ?: (nearZ: number, farZ: number) => void;
+  clearNearFarZOverride?: () => void;
+};
+
+/** Keep terrain ~this far ahead drawable from high-altitude chase views.
+ * MapLibre otherwise pulls the far clip in to the look-at, which hides
+ * distant ground before it reaches the fogged horizon. */
+const FLIGHT_MIN_FAR_CLIP_METERS = 1_000_000;
+
+function mapCamera(map: Map): MapCameraWithTerrain | undefined {
+  return (map as Map & { _camera?: MapCameraWithTerrain })._camera;
+}
+
+function mapTransform(map: Map): FlightTransform | undefined {
+  const withTransform = map as Map & {
+    transform?: FlightTransform;
+    _camera?: { transform?: FlightTransform };
+  };
+  return withTransform.transform ?? withTransform._camera?.transform;
+}
+
+function keepDistantTerrainVisible(map: Map) {
+  const transform = mapTransform(map);
+  if (!transform?.overrideNearFarZ) return;
+  const near = Math.max(0.1, transform.cameraToCenterDistance * 0.01);
+  const far = Math.max(
+    transform.farZ,
+    transform.cameraToCenterDistance * 8,
+    transform.pixelsPerMeter * FLIGHT_MIN_FAR_CLIP_METERS,
+  );
+  transform.overrideNearFarZ(near, far);
+}
+
+function queryElevationSafe(map: Map, coordinate: [number, number], fallback: number) {
+  try {
+    return map.queryTerrainElevation(coordinate) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** jumpTo samples DEM at the destination zoom. From globe/space that zoom is
+ * far above loaded terrain tiles, so the bilinear lookup throws and kills
+ * the chase loop. We already pass elevation, so skip the sample. */
+function jumpToFlightCamera(map: Map, options: Parameters<Map['jumpTo']>[0]) {
+  const camera = mapCamera(map);
+  if (!camera) {
+    map.jumpTo(options, { flightMode: true });
+    return;
+  }
+  const terrain = camera.terrain;
+  camera.terrain = null;
+  try {
+    map.jumpTo(options, { flightMode: true });
+  } finally {
+    camera.terrain = terrain;
+  }
+}
+
 export type FlightControl = 'pitchUp' | 'pitchDown' | 'rollLeft' | 'rollRight' | 'throttleUp' | 'throttleDown';
 
 export type FlightTelemetry = {
@@ -41,7 +109,6 @@ export type FlightTelemetry = {
 type FlightSimulatorOptions = {
   mapRef: RefObject<Map | null>;
   mapLoaded: boolean;
-  modelLayerRef: RefObject<FlightModelLayer | null>;
   activeRef: RefObject<boolean>;
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
@@ -53,12 +120,33 @@ type ToggleableHandler = {
   isEnabled: () => boolean;
 };
 
-function inputForControls(controls: Set<FlightControl>): FlightInput {
+export type FlightControlSources = globalThis.Map<FlightControl, Set<string>>;
+
+export function flightInputForControlSources(controls: FlightControlSources): FlightInput {
+  const pressed = (control: FlightControl) => (controls.get(control)?.size ?? 0) > 0;
   return {
-    pitch: Number(controls.has('pitchUp')) - Number(controls.has('pitchDown')),
-    roll: Number(controls.has('rollRight')) - Number(controls.has('rollLeft')),
-    throttle: Number(controls.has('throttleUp')) - Number(controls.has('throttleDown')),
+    pitch: Number(pressed('pitchUp')) - Number(pressed('pitchDown')),
+    roll: Number(pressed('rollRight')) - Number(pressed('rollLeft')),
+    throttle: Number(pressed('throttleUp')) - Number(pressed('throttleDown')),
   };
+}
+
+export function setFlightControlSource(
+  controls: FlightControlSources,
+  control: FlightControl,
+  source: string,
+  pressed: boolean,
+) {
+  if (pressed) {
+    const sources = controls.get(control) ?? new Set<string>();
+    sources.add(source);
+    controls.set(control, sources);
+    return;
+  }
+  const sources = controls.get(control);
+  if (!sources) return;
+  sources.delete(source);
+  if (sources.size === 0) controls.delete(control);
 }
 
 function telemetryForState(state: FlightState, terrainElevation: number): FlightTelemetry {
@@ -87,7 +175,6 @@ function controlForCode(code: string, key?: string): FlightControl | undefined {
 export function useFlightSimulator({
   mapRef,
   mapLoaded,
-  modelLayerRef,
   activeRef,
   terrainSourceRef,
   terrainEnabledRef,
@@ -103,7 +190,8 @@ export function useFlightSimulator({
     isStalling: false,
   });
   const flightStateRef = useRef<FlightState | null>(null);
-  const pressedControlsRef = useRef(new Set<FlightControl>());
+  const modelLayerRef = useRef<FlightModelLayer | null>(null);
+  const pressedControlsRef = useRef<FlightControlSources>(new globalThis.Map());
 
   const stop = useCallback(() => {
     activeRef.current = false;
@@ -114,8 +202,14 @@ export function useFlightSimulator({
   const start = useCallback(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || activeRef.current) return;
+    const modelLayer = new FlightModelLayer();
+    map.addLayer(
+      modelLayer,
+      map.getLayer('global-road-labels') ? 'global-road-labels' : undefined,
+    );
+    modelLayerRef.current = modelLayer;
     const center = map.getCenter();
-    const terrainElevation = map.queryTerrainElevation(center) ?? 0;
+    const terrainElevation = queryElevationSafe(map, [center.lng, center.lat], 0);
     const state = createInitialFlightState(
       [center.lng, center.lat],
       terrainElevation,
@@ -128,9 +222,8 @@ export function useFlightSimulator({
     setActive(true);
   }, [activeRef, mapLoaded, mapRef]);
 
-  const setControl = useCallback((control: FlightControl, pressed: boolean) => {
-    if (pressed) pressedControlsRef.current.add(control);
-    else pressedControlsRef.current.delete(control);
+  const setControl = useCallback((control: FlightControl, pressed: boolean, source = 'control') => {
+    setFlightControlSource(pressedControlsRef.current, control, source, pressed);
   }, []);
 
   useEffect(() => {
@@ -150,10 +243,13 @@ export function useFlightSimulator({
       bearing: map.getBearing(),
       pitch: map.getPitch(),
       roll: map.getRoll(),
+      padding: map.getPadding(),
     };
     const originalProjection = map.getProjection();
     const originalTerrain = map.getTerrain();
+    const originalSky = map.getSky();
     const originalMaxPitch = map.getMaxPitch();
+    const originalMaxZoom = map.getMaxZoom();
     const originalCenterClampedToGround = map.getCenterClampedToGround();
     const originalTerrainEnabled = terrainEnabledRef.current;
     const handlers: ToggleableHandler[] = [
@@ -168,22 +264,38 @@ export function useFlightSimulator({
 
     map.stop();
     handlers.forEach((handler) => handler.disable());
+    map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     map.setProjection({ type: 'mercator' });
+    map.setSky({
+      ...originalSky,
+      'horizon-color': '#f1f8fb',
+      'fog-color': '#f1f8fb',
+      'horizon-fog-blend': 1,
+      // Start the ground fade before the finite Mercator terrain edge so the
+      // dark style background cannot form a hard line at the horizon.
+      'fog-ground-blend': 0.78,
+    });
     if (map.getSource(terrainSourceRef.current)) {
       terrainEnabledRef.current = true;
       map.setTerrain({ source: terrainSourceRef.current, exaggeration: 1 });
     }
+    // MapLibre accepts larger pitch limits, but terrain tile covering and
+    // culling are not reliable once the camera looks beyond the horizon.
+    // The adaptive chase rig keeps the aircraft aerobatic while the map
+    // camera remains within this terrain-safe range.
     map.setMaxPitch(85);
+    map.setMaxZoom(22);
     map.setCenterClampedToGround(false);
     modelLayer.setPose(initialState);
 
     let frame: number | undefined;
     let previousTime = performance.now();
     let previousTelemetryTime = 0;
-    let lastTerrainElevation = map.queryTerrainElevation([
+    let cameraRig: FlightCameraRig | null = null;
+    let lastTerrainElevation = queryElevationSafe(map, [
       initialState.longitude,
       initialState.latitude,
-    ]) ?? 0;
+    ], 0);
     // MapLibre's terrain-aware camera math (calculateCameraOptionsFromTo)
     // samples DEM elevation for the current position. While flying into
     // freshly-streamed terrain that sample can transiently fall back to sea
@@ -216,14 +328,14 @@ export function useFlightSimulator({
       if (!control) return;
       event.preventDefault();
       event.stopPropagation();
-      pressedControlsRef.current.add(control);
+      setFlightControlSource(pressedControlsRef.current, control, `keyboard:${event.code}`, true);
     };
     const handleKeyUp = (event: KeyboardEvent) => {
       const control = controlForCode(event.code, event.key);
       if (!control) return;
       event.preventDefault();
       event.stopPropagation();
-      pressedControlsRef.current.delete(control);
+      setFlightControlSource(pressedControlsRef.current, control, `keyboard:${event.code}`, false);
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -232,71 +344,82 @@ export function useFlightSimulator({
     document.addEventListener('visibilitychange', handleVisibility);
 
     const update = (now: number) => {
-      const current = flightStateRef.current;
-      if (!current || !activeRef.current) return;
-      const terrainElevation = map.queryTerrainElevation([
-        current.longitude,
-        current.latitude,
-      ]);
-      if (terrainElevation !== null) lastTerrainElevation = terrainElevation;
-      const next = advanceFlight(
-        current,
-        inputForControls(pressedControlsRef.current),
-        (now - previousTime) / 1_000,
-        lastTerrainElevation,
-      );
-      previousTime = now;
-      flightStateRef.current = next;
-      modelLayer.setPose(next);
+      if (!activeRef.current) return;
+      try {
+        const current = flightStateRef.current;
+        if (!current) return;
+        lastTerrainElevation = queryElevationSafe(
+          map,
+          [current.longitude, current.latitude],
+          lastTerrainElevation,
+        );
+        const elapsedSeconds = (now - previousTime) / 1_000;
+        const next = advanceFlight(
+          current,
+          flightInputForControlSources(pressedControlsRef.current),
+          elapsedSeconds,
+          lastTerrainElevation,
+        );
+        previousTime = now;
+        flightStateRef.current = next;
+        modelLayer.setPose(next);
 
-      const camera = flightCameraPose(next);
-      // The chase camera trails behind the aircraft, so terrain or a
-      // building under that offset point can rise above the aircraft's own
-      // ground clearance. Without this the camera ends up inside solid
-      // geometry, causing near-plane clipping that looks like a flickering
-      // duplicate scene from a slightly different perspective.
-      const cameraGroundElevation = map.queryTerrainElevation(camera.from) ?? lastTerrainElevation;
-      const fromAltitude = Math.max(
-        camera.fromAltitude,
-        cameraGroundElevation + FLIGHT_MIN_CLEARANCE_METERS,
-      );
-      const cameraOptions = map.calculateCameraOptionsFromTo(
-        new LngLat(camera.from[0], camera.from[1]),
-        fromAltitude,
-        new LngLat(camera.target[0], camera.target[1]),
-        camera.targetAltitude,
-      );
-      const nextZoom = cameraOptions.zoom ?? map.getZoom();
-      const nextPitch = cameraOptions.pitch ?? map.getPitch();
-      const nextCenter = cameraOptions.center
-        ? (Array.isArray(cameraOptions.center)
-          ? cameraOptions.center as [number, number]
-          : [(cameraOptions.center as { lng: number }).lng, (cameraOptions.center as { lat: number }).lat] as [number, number])
-        : [camera.from[0], camera.from[1]] as [number, number];
-      const centerJumpMeters = previousCameraOptions
-        ? haversineMeters(previousCameraOptions.center, nextCenter)
-        : 0;
-      const isAnomalousJump = previousCameraOptions !== null
-        && consecutiveRejectedFrames < MAX_CONSECUTIVE_REJECTIONS
-        && (Math.abs(nextZoom - previousCameraOptions.zoom) > MAX_ZOOM_CHANGE_PER_FRAME
-          || Math.abs(nextPitch - previousCameraOptions.pitch) > MAX_PITCH_CHANGE_PER_FRAME_DEGREES
-          || centerJumpMeters > MAX_CENTER_JUMP_METERS);
-      if (isAnomalousJump) {
-        consecutiveRejectedFrames += 1;
-      } else {
-        consecutiveRejectedFrames = 0;
-        previousCameraOptions = { zoom: nextZoom, pitch: nextPitch, center: nextCenter };
-        map.jumpTo({
-          ...cameraOptions,
-          roll: radiansToDegrees(next.roll) * 0.3,
-        }, { flightMode: true });
-      }
+        cameraRig = smoothFlightCameraRig(cameraRig, next, elapsedSeconds);
+        const camera = flightCameraPose(cameraRig);
+        // The chase camera trails behind the aircraft, so terrain or a
+        // building under that offset point can rise above the aircraft's own
+        // ground clearance. Without this the camera ends up inside solid
+        // geometry, causing near-plane clipping that looks like a flickering
+        // duplicate scene from a slightly different perspective.
+        const cameraGroundElevation = queryElevationSafe(map, camera.from, lastTerrainElevation);
+        const fromAltitude = Math.max(
+          camera.fromAltitude,
+          cameraGroundElevation + FLIGHT_MIN_CLEARANCE_METERS,
+        );
+        const cameraOptions = map.calculateCameraOptionsFromTo(
+          new LngLat(camera.from[0], camera.from[1]),
+          fromAltitude,
+          new LngLat(camera.target[0], camera.target[1]),
+          camera.targetAltitude,
+        );
+        const nextZoom = cameraOptions.zoom ?? map.getZoom();
+        const nextPitch = cameraOptions.pitch ?? map.getPitch();
+        const nextCenter = cameraOptions.center
+          ? (Array.isArray(cameraOptions.center)
+            ? cameraOptions.center as [number, number]
+            : [(cameraOptions.center as { lng: number }).lng, (cameraOptions.center as { lat: number }).lat] as [number, number])
+          : [camera.from[0], camera.from[1]] as [number, number];
+        const centerJumpMeters = previousCameraOptions
+          ? haversineMeters(previousCameraOptions.center, nextCenter)
+          : 0;
+        const isAnomalousJump = previousCameraOptions !== null
+          && consecutiveRejectedFrames < MAX_CONSECUTIVE_REJECTIONS
+          && (Math.abs(nextZoom - previousCameraOptions.zoom) > MAX_ZOOM_CHANGE_PER_FRAME
+            || Math.abs(nextPitch - previousCameraOptions.pitch) > MAX_PITCH_CHANGE_PER_FRAME_DEGREES
+            || centerJumpMeters > MAX_CENTER_JUMP_METERS);
+        if (isAnomalousJump) {
+          consecutiveRejectedFrames += 1;
+        } else {
+          consecutiveRejectedFrames = 0;
+          previousCameraOptions = { zoom: nextZoom, pitch: nextPitch, center: nextCenter };
+          jumpToFlightCamera(map, {
+            ...cameraOptions,
+            pitch: nextPitch,
+            zoom: Math.max(cameraOptions.zoom ?? map.getZoom(), 14),
+            roll: camera.roll,
+          });
+          keepDistantTerrainVisible(map);
+        }
 
-      if (now - previousTelemetryTime >= 150) {
-        previousTelemetryTime = now;
-        setTelemetry(telemetryForState(next, lastTerrainElevation));
+        if (now - previousTelemetryTime >= 150) {
+          previousTelemetryTime = now;
+          setTelemetry(telemetryForState(next, lastTerrainElevation));
+        }
+      } catch (error) {
+        console.error('Flight mode stopped after a rendering failure.', error);
+        stop();
       }
-      frame = window.requestAnimationFrame(update);
+      if (activeRef.current) frame = window.requestAnimationFrame(update);
     };
     frame = window.requestAnimationFrame(update);
 
@@ -308,22 +431,30 @@ export function useFlightSimulator({
       document.removeEventListener('visibilitychange', handleVisibility);
       pressedControlsRef.current.clear();
       modelLayer.setPose(null);
+      if (map.getLayer(modelLayer.id)) map.removeLayer(modelLayer.id);
+      modelLayerRef.current = null;
       map.stop();
+      mapTransform(map)?.clearNearFarZOverride?.();
       map.setTerrain(originalTerrain);
       terrainEnabledRef.current = originalTerrainEnabled;
+      map.setSky(originalSky);
       map.setProjection(originalProjection);
       map.setMaxPitch(originalMaxPitch);
+      map.setMaxZoom(originalMaxZoom);
       map.setCenterClampedToGround(originalCenterClampedToGround);
       map.jumpTo(originalCamera, { flightModeRestore: true });
       handlers.forEach((handler, index) => {
         if (enabledHandlers[index]) handler.enable();
       });
     };
-  }, [active, activeRef, mapLoaded, mapRef, modelLayerRef, stop, terrainEnabledRef, terrainSourceRef]);
+  }, [active, activeRef, mapLoaded, mapRef, stop, terrainEnabledRef, terrainSourceRef]);
 
-  useEffect(() => () => {
-    activeRef.current = false;
-  }, [activeRef]);
+  useEffect(() => {
+    activeRef.current = active;
+    return () => {
+      activeRef.current = false;
+    };
+  }, [active, activeRef]);
 
   return { active, start, stop, setControl, telemetry };
 }

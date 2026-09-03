@@ -13,6 +13,17 @@ const MAX_COORDINATED_TURN_BANK_RADIANS = degreesToRadians(70);
 const GRAVITY_METERS_PER_SECOND_SQUARED = 9.80665;
 const MAX_THRUST_ACCELERATION = 25;
 const THROTTLE_CHANGE_RATE = 0.5;
+const CAMERA_POSITION_FOLLOW_RATE = 12;
+const CAMERA_ORIENTATION_FOLLOW_RATE = 6.5;
+const CAMERA_CHASE_DISTANCE_METERS = 58;
+const CAMERA_LOOK_AHEAD_METERS = 30;
+const CAMERA_CLIMB_LOOK_AHEAD_METERS = 8;
+const CAMERA_CHASE_HEIGHT_METERS = 22;
+const CAMERA_LOOK_HEIGHT_METERS = 4;
+const CAMERA_BANK_OFFSET_METERS = 16;
+const CAMERA_MAX_TERRAIN_PITCH_RADIANS = degreesToRadians(85);
+const CAMERA_ADAPTIVE_CLIMB_START_RADIANS = degreesToRadians(5);
+const CAMERA_ADAPTIVE_CLIMB_END_RADIANS = degreesToRadians(20);
 
 export type FlightState = {
   longitude: number;
@@ -32,11 +43,22 @@ export type FlightInput = {
   throttle: number;
 };
 
+export type FlightCameraRig = {
+  longitude: number;
+  latitude: number;
+  altitude: number;
+  heading: number;
+  pitch: number;
+  roll: number;
+};
+
 export type FlightCameraPose = {
   from: [number, number];
   fromAltitude: number;
   target: [number, number];
   targetAltitude: number;
+  bearing: number;
+  roll: number;
 };
 
 export function degreesToRadians(degrees: number) {
@@ -124,7 +146,12 @@ export function advanceFlight(
   // Transform body rates into Euler angle rates (pitch, heading, roll)
   const cosRoll = Math.cos(state.roll);
   const sinRoll = Math.sin(state.roll);
-  const cosPitch = Math.max(0.05, Math.cos(state.pitch));
+  const rawCosPitch = Math.cos(state.pitch);
+  // Euler rates are singular at ±90°. Bound the denominator without
+  // discarding its sign so inverted flight turns in the correct direction.
+  const cosPitch = Math.abs(rawCosPitch) < 0.05
+    ? Math.sign(rawCosPitch || 1) * 0.05
+    : rawCosPitch;
   const tanPitch = clamp(Math.tan(state.pitch), -10, 10);
 
   const pitchRate = q * cosRoll - r * sinRoll;
@@ -188,26 +215,89 @@ export function advanceFlight(
   };
 }
 
-export function flightCameraPose(state: FlightState): FlightCameraPose {
+export function smoothFlightCameraRig(
+  previous: FlightCameraRig | null,
+  state: FlightCameraRig,
+  elapsedSeconds: number,
+): FlightCameraRig {
+  if (!previous) {
+    return {
+      longitude: state.longitude,
+      latitude: state.latitude,
+      altitude: state.altitude,
+      heading: state.heading,
+      pitch: state.pitch,
+      roll: state.roll,
+    };
+  }
+  const deltaSeconds = clamp(elapsedSeconds, 0, MAX_FRAME_SECONDS);
+  if (deltaSeconds === 0) return previous;
+  const follow = 1 - Math.exp(-CAMERA_POSITION_FOLLOW_RATE * deltaSeconds);
+  const turn = 1 - Math.exp(-CAMERA_ORIENTATION_FOLLOW_RATE * deltaSeconds);
+  return {
+    longitude: wrapLongitude(
+      previous.longitude + wrapLongitude(state.longitude - previous.longitude) * follow,
+    ),
+    latitude: previous.latitude + (state.latitude - previous.latitude) * follow,
+    altitude: previous.altitude + (state.altitude - previous.altitude) * follow,
+    heading: wrapRadians(previous.heading + wrapSignedRadians(state.heading - previous.heading) * turn),
+    pitch: wrapSignedRadians(previous.pitch + wrapSignedRadians(state.pitch - previous.pitch) * turn),
+    roll: wrapSignedRadians(previous.roll + wrapSignedRadians(state.roll - previous.roll) * turn),
+  };
+}
+
+export function flightCameraPose(state: FlightCameraRig): FlightCameraPose {
   const coordinate: [number, number] = [state.longitude, state.latitude];
   const forwardEast = Math.sin(state.heading);
   const forwardNorth = Math.cos(state.heading);
-  const chaseDistance = 105;
-  const pitchCos = Math.max(0.35, Math.cos(state.pitch));
-  const lookAheadDistance = 54 / pitchCos;
+  const rightEast = Math.cos(state.heading);
+  const rightNorth = -Math.sin(state.heading);
+  const sinPitch = Math.sin(state.pitch);
+  const cosPitch = Math.cos(state.pitch);
+  const bankOffset = Math.sin(state.roll) * CAMERA_BANK_OFFSET_METERS;
+  const climbAdaptation = clamp(
+    (sinPitch - Math.sin(CAMERA_ADAPTIVE_CLIMB_START_RADIANS))
+      / (
+        Math.sin(CAMERA_ADAPTIVE_CLIMB_END_RADIANS)
+        - Math.sin(CAMERA_ADAPTIVE_CLIMB_START_RADIANS)
+      ),
+    0,
+    1,
+  );
+  const lookAheadDistance = CAMERA_LOOK_AHEAD_METERS * (1 - climbAdaptation)
+    + CAMERA_CLIMB_LOOK_AHEAD_METERS * climbAdaptation;
+  const lookHeight = CAMERA_LOOK_HEIGHT_METERS * cosPitch * (1 - climbAdaptation);
+  const targetAltitude = state.altitude
+    + lookHeight
+    + lookAheadDistance * sinPitch;
+  const desiredFromAltitude = state.altitude
+    + CAMERA_CHASE_HEIGHT_METERS * cosPitch
+    - CAMERA_CHASE_DISTANCE_METERS * sinPitch;
+  const cameraHorizontalDistance = Math.hypot(
+    CAMERA_CHASE_DISTANCE_METERS + lookAheadDistance,
+    bankOffset * 0.8,
+  );
+  const minimumTerrainDrop = cameraHorizontalDistance
+    / Math.tan(CAMERA_MAX_TERRAIN_PITCH_RADIANS);
+  const fromAltitude = Math.max(
+    desiredFromAltitude,
+    targetAltitude + minimumTerrainDrop,
+  );
   return {
     from: offsetCoordinate(
       coordinate,
-      -forwardEast * chaseDistance,
-      -forwardNorth * chaseDistance,
+      -forwardEast * CAMERA_CHASE_DISTANCE_METERS + rightEast * bankOffset,
+      -forwardNorth * CAMERA_CHASE_DISTANCE_METERS + rightNorth * bankOffset,
     ),
-    fromAltitude: state.altitude + 38,
+    fromAltitude,
     target: offsetCoordinate(
       coordinate,
-      forwardEast * lookAheadDistance,
-      forwardNorth * lookAheadDistance,
+      forwardEast * lookAheadDistance + rightEast * bankOffset * 0.2,
+      forwardNorth * lookAheadDistance + rightNorth * bankOffset * 0.2,
     ),
-    targetAltitude: state.altitude + Math.sin(state.pitch) * 15,
+    targetAltitude,
+    bearing: radiansToDegrees(state.heading),
+    roll: radiansToDegrees(state.roll),
   };
 }
 

@@ -67,11 +67,11 @@ export function useMapLayerVisibility({
     transitRouteOverlayRef.current?.setVisibility(layerToggles.transitLines);
     if (layerToggles.transitLines) void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
     setVisibility(waterEffectLayerIds, true);
-    map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
     // Flight mode owns terrain/projection for the duration of the flight;
     // re-asserting the saved preference here would fight its own setTerrain
     // call every time this effect re-runs (e.g. from an unrelated toggle).
     if (!flightActiveRef.current) {
+      map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
       terrainEnabledRef.current = layerToggles.terrain;
       map.setTerrain(layerToggles.terrain ? { source: terrainSourceRef.current, exaggeration: 1.0 } : null);
       if (map.getLayer('terrain-hillshade')) {

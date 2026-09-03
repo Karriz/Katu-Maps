@@ -68,7 +68,7 @@ function createAircraft() {
     if (child instanceof THREE.Mesh) child.frustumCulled = false;
   });
   aircraft.rotation.order = 'YXZ';
-  return aircraft;
+  return { aircraft, propeller };
 }
 
 /** A small shared-context Three.js layer that renders the player aircraft. */
@@ -85,11 +85,15 @@ export class FlightModelLayer implements CustomLayerInterface {
   private readonly sceneTransform = new THREE.Matrix4();
   private readonly sceneScale = new THREE.Vector3();
   private aircraft?: THREE.Group;
+  private propeller?: THREE.Mesh;
+  private propellerAngle = 0;
+  private previousRenderTime?: number;
   private pose: FlightState | null = null;
 
   setPose(pose: FlightState | null) {
     this.pose = pose;
     if (this.aircraft) this.aircraft.visible = Boolean(pose);
+    if (!pose) this.previousRenderTime = undefined;
     this.map?.triggerRepaint();
   }
 
@@ -106,7 +110,9 @@ export class FlightModelLayer implements CustomLayerInterface {
     const sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.8);
     sunlight.position.set(-60, 110, -45);
     this.scene.add(sunlight);
-    this.aircraft = createAircraft();
+    const { aircraft, propeller } = createAircraft();
+    this.aircraft = aircraft;
+    this.propeller = propeller;
     this.aircraft.visible = false;
     this.scene.add(this.aircraft);
     this.renderer = new THREE.WebGLRenderer({
@@ -123,6 +129,16 @@ export class FlightModelLayer implements CustomLayerInterface {
     const aircraft = this.aircraft;
     const renderer = this.renderer;
     if (!pose || !aircraft || !renderer) return;
+
+    const now = performance.now();
+    const elapsedSeconds = this.previousRenderTime === undefined
+      ? 0
+      : Math.min((now - this.previousRenderTime) / 1_000, 0.05);
+    this.previousRenderTime = now;
+    this.propellerAngle = (
+      this.propellerAngle + elapsedSeconds * (35 + pose.throttle * 85)
+    ) % (Math.PI * 2);
+    if (this.propeller) this.propeller.rotation.z = this.propellerAngle;
 
     aircraft.rotation.set(-pose.pitch, pose.heading, -pose.roll, 'YXZ');
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
@@ -147,6 +163,8 @@ export class FlightModelLayer implements CustomLayerInterface {
     this.renderer?.dispose();
     this.renderer = undefined;
     this.aircraft = undefined;
+    this.propeller = undefined;
+    this.previousRenderTime = undefined;
     this.map = undefined;
   }
 }
