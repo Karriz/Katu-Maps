@@ -1,0 +1,11 @@
+{
+  "name": "Katu Maps",
+  "install": "cd apps/map-app && npm ci && npx playwright install --with-deps chromium",
+  "terminals": [
+    {
+      "name": "map-app dev server",
+      "command": "cd apps/map-app && npm run dev -- --host 127.0.0.1 --port 5173"
+    }
+  ],
+  "ports": [5173]
+}
