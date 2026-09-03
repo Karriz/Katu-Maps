@@ -3118,7 +3118,7 @@ export function MapView() {
             onZoomOut={zoomOut}
             onRouteOpen={openRoute}
             routeOpen={routeOpen}
-            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop)}
+            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
             themePreference={themePreference}
