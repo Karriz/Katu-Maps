@@ -820,7 +820,7 @@ async function browserDiagnostics(page: Page) {
         webglVendor: gl && debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl?.getParameter(gl.VENDOR),
         webglRenderer: gl && debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl?.getParameter(gl.RENDERER),
         devicePixelRatio: window.devicePixelRatio,
-        maplibre: document.querySelector('.maplibregl-map') ? '6.6.0' : 'not initialized',
+        maplibre: document.querySelector('.maplibregl-map') ? '6.7.0' : 'not initialized',
         mapStatus: mapStatus?.textContent?.trim() || 'hidden',
         documentReadyState: document.readyState,
         pageUrl: location.href,

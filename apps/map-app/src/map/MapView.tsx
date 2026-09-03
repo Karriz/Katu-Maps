@@ -1582,25 +1582,33 @@ export function MapView() {
 
     const deepLink = initialDeepLinkRef.current;
     const savedView = deepLink ? null : loadPersistedMapView();
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: GLOBAL_MAP_STYLE,
-      center: deepLink?.coordinates ?? savedView?.center ?? TAMPERE,
-      zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
-      pitch: savedView?.pitch ?? 0,
-      bearing: savedView?.bearing ?? 0,
-      // MapLibre line layers are screen-space strokes. At extreme pitch the
-      // perspective projection makes foreground roads look disproportionately
-      // wide; keep the line-based mode readable until polygon roads return.
-      maxPitch: 55,
-      // Keep the default view focused on an area a few hundred metres across;
-      // closer views make screen-space MapLibre roads dominate the scene.
-      maxZoom: 18,
-      attributionControl: {
-        compact: true,
-        customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
-      },
-    });
+    let map: Map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: GLOBAL_MAP_STYLE,
+        center: deepLink?.coordinates ?? savedView?.center ?? TAMPERE,
+        zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
+        pitch: savedView?.pitch ?? 0,
+        bearing: savedView?.bearing ?? 0,
+        // MapLibre line layers are screen-space strokes. At extreme pitch the
+        // perspective projection makes foreground roads look disproportionately
+        // wide; keep the line-based mode readable until polygon roads return.
+        maxPitch: 55,
+        // Keep the default view focused on an area a few hundred metres across;
+        // closer views make screen-space MapLibre roads dominate the scene.
+        maxZoom: 18,
+        attributionControl: {
+          compact: true,
+          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+        },
+      });
+    } catch (error) {
+      // MapLibre 6.7.0 throws GPUInitializationError from the constructor when
+      // WebGL2 is unavailable, instead of firing an error event after return.
+      setMapError(error instanceof Error ? error.message : 'The map could not be created.');
+      return;
+    }
     // Use the explicitly documented key bindings below rather than MapLibre's
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();

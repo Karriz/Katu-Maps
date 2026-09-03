@@ -9,7 +9,7 @@ export type AddressState =
   | { status: 'unavailable' };
 
 export type ElevationQueryMap = {
-  queryTerrainElevation: (coordinates: [number, number], options?: { exaggerated?: boolean }) => number | null;
+  queryTerrainElevation: (coordinates: [number, number]) => number | null;
   setTerrain: (terrain: { source: string; exaggeration: number } | null) => unknown;
   triggerRepaint: () => void;
 };
@@ -156,9 +156,10 @@ const delay = (milliseconds: number, signal: AbortSignal) => new Promise<void>((
 });
 
 /**
- * Samples the configured DEM without permanently enabling terrain. An
- * exaggeration of zero causes MapLibre to load the DEM but leaves the map
- * visually flat; `exaggerated: false` still returns the source elevation.
+ * Samples the configured DEM without permanently enabling terrain. MapLibre
+ * 6.7.0 always returns exaggeration-scaled elevation from
+ * `queryTerrainElevation`, so a temporary enable uses exaggeration 1 to keep
+ * the result in metres.
  */
 export async function queryTerrainElevation(
   map: ElevationQueryMap,
@@ -169,14 +170,14 @@ export async function queryTerrainElevation(
 ): Promise<number | null> {
   const alreadyEnabled = terrainIsEnabled();
   if (!alreadyEnabled) {
-    map.setTerrain({ source, exaggeration: 0 });
+    map.setTerrain({ source, exaggeration: 1 });
     map.triggerRepaint();
   }
 
   try {
     for (let attempt = 0; attempt < 16; attempt += 1) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-      const elevation = map.queryTerrainElevation(coordinates, { exaggerated: false });
+      const elevation = map.queryTerrainElevation(coordinates);
       if (typeof elevation === 'number' && Number.isFinite(elevation)) return elevation;
       await delay(250, signal);
     }

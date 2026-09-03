@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { defaultPositionName, elevationResult, formatCoordinates, formatElevation, formatNominatimAddress, hasDisplayableElevation, parseCoordinates } from './PositionInformation';
+import { describe, expect, it, vi } from 'vitest';
+import { defaultPositionName, elevationResult, formatCoordinates, formatElevation, formatNominatimAddress, hasDisplayableElevation, parseCoordinates, queryTerrainElevation } from './PositionInformation';
 
 describe('position information', () => {
   it('formats latitude and longitude with sensible precision', () => {
@@ -76,5 +76,39 @@ describe('position information', () => {
     apply(activeRequest, 25);
     expect(elevation).toEqual({ status: 'available', metres: 25 });
     activeRequest += 1;
+  });
+
+  it('samples exaggeration-scaled elevation from MapLibre 6.7.0 without the removed exaggerated option', async () => {
+    const map = {
+      queryTerrainElevation: vi.fn(() => 87.4),
+      setTerrain: vi.fn(),
+      triggerRepaint: vi.fn(),
+    };
+    await expect(queryTerrainElevation(
+      map,
+      [23.7609, 61.4981],
+      'terrain',
+      () => true,
+      new AbortController().signal,
+    )).resolves.toBe(87.4);
+    expect(map.queryTerrainElevation).toHaveBeenCalledWith([23.7609, 61.4981]);
+    expect(map.setTerrain).not.toHaveBeenCalled();
+  });
+
+  it('temporarily enables terrain at exaggeration 1 so a 6.7.0 sample stays in metres', async () => {
+    const map = {
+      queryTerrainElevation: vi.fn(() => 142),
+      setTerrain: vi.fn(),
+      triggerRepaint: vi.fn(),
+    };
+    await expect(queryTerrainElevation(
+      map,
+      [23.7609, 61.4981],
+      'terrain',
+      () => false,
+      new AbortController().signal,
+    )).resolves.toBe(142);
+    expect(map.setTerrain).toHaveBeenNthCalledWith(1, { source: 'terrain', exaggeration: 1 });
+    expect(map.setTerrain).toHaveBeenLastCalledWith(null);
   });
 });
