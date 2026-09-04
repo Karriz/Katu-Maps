@@ -113,6 +113,38 @@ async function editFavoriteFromPanel(page: Page, panelSelector: string, name: st
   await expect(dialog).toBeHidden();
 }
 
+async function expectLayerToggleDoesNotInflateSheet(page: Page) {
+  const panel = page.locator('#map-layer-panel');
+  const content = panel.locator('.layer-panel-content');
+  await panel.locator('.layer-advanced summary').click();
+  const before = await content.evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    documentHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+  }));
+  await content.evaluate((element) => {
+    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+  });
+  const globe = panel.getByRole('switch', { name: /Globe/i });
+  await expect(globe).toBeVisible();
+  const enabled = await globe.getAttribute('aria-checked');
+  await globe.click();
+  await expect(globe).toHaveAttribute('aria-checked', enabled === 'true' ? 'false' : 'true');
+  const after = await content.evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    documentHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+  }));
+  expect(after.scrollHeight - before.scrollHeight).toBeLessThan(24);
+  expect(after.clientHeight - before.clientHeight).toBeLessThan(24);
+  expect(after.documentHeight - before.documentHeight).toBeLessThan(24);
+  if (await globe.getAttribute('aria-checked') !== enabled) await globe.click();
+  await panel.locator('.layer-advanced summary').click();
+  await content.evaluate((element) => { element.scrollTop = 0; });
+}
+
 async function expectScrollablePanelBody(page: Page, panelSelector: string, headerSelector: string, bodySelector: string, requireOverflow = false) {
   const snapshot = await page.locator(panelSelector).evaluate((panel, selectors) => {
     const header = panel.querySelector<HTMLElement>(selectors.header);
@@ -819,6 +851,8 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.mobile-sheet-close')).toBeVisible();
       await expect(panel.locator('.layer-panel-close')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
+      await expect(panel.getByRole('switch')).toHaveCount(6);
+      await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
   },
