@@ -2,6 +2,8 @@ import type { MutableRefObject, RefObject } from 'react';
 import type { TransitStopsLayer, TransitStopSelection } from './TransitStopsLayer';
 import type { PositionInformationState } from './useInfoPanelState';
 import type { RouteResult } from './ValhallaRouting';
+import type { TrafficCameraSelection } from './TrafficCameras';
+import type { TrafficCamerasLayer } from './TrafficCamerasLayer';
 
 type PanelCoordinatorOptions = {
   routeVehicleViewRef: RefObject<boolean>;
@@ -16,6 +18,8 @@ type PanelCoordinatorOptions = {
   setPositionInformation: (information: PositionInformationState | null) => void;
   clearLocationSelection: () => void;
   setSelectedTransitStop: (stop: (TransitStopSelection & { favoriteId?: string }) | null) => void;
+  trafficCamerasLayerRef: RefObject<TrafficCamerasLayer | null>;
+  setSelectedTrafficCamera: (camera: TrafficCameraSelection | null) => void;
   cancelRoute: () => void;
   rememberRouteVehicle: (result: RouteResult, following: boolean) => void;
 };
@@ -37,12 +41,16 @@ export function usePanelCoordinator({
   setPositionInformation,
   clearLocationSelection,
   setSelectedTransitStop,
+  trafficCamerasLayerRef,
+  setSelectedTrafficCamera,
   cancelRoute,
   rememberRouteVehicle,
 }: PanelCoordinatorOptions) {
   function prepareInfoPanelOpen() {
     closePositionInformation();
     setContextMenuMarker(null);
+    trafficCamerasLayerRef.current?.clearSelection();
+    setSelectedTrafficCamera(null);
     if (window.innerWidth <= 760) cancelRoute();
   }
 

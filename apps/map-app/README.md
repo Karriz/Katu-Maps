@@ -13,7 +13,8 @@ npm run dev
 ```
 
 Transit data uses Transitous globally and Digitransit automatically inside
-Finland. To enable Finnish transit data, copy `.env.example` to `.env.local`
+Finland. Finnish road weather cameras from Fintraffic Digitraffic are optional
+in Map layers and do not require an API key. To enable Finnish transit data, copy `.env.example` to `.env.local`
 and set `VITE_DIGITRANSIT_SUBSCRIPTION_KEY` to a Digitransit developer API key.
 The Vite variable is public at runtime because this is a static browser
 application; use a backend proxy if the deployment requires a secret

@@ -78,6 +78,8 @@ import { MapCameraActions } from './MapCameraActions';
 import { RoutePlannerControls } from './RoutePlannerControls';
 import { PositionInformationPanel } from './PositionInformationPanel';
 import { LocationInformationPanel } from './LocationInformationPanel';
+import { TrafficCameraPanel } from './TrafficCameraPanel';
+import { TrafficCamerasLayer, trafficCameraFeatureAt } from './TrafficCamerasLayer';
 import { parseLocationMetadata, safeHttpUrl } from './LocationMedia';
 import { InfoActionRow } from '../components/InfoActionRow';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
@@ -644,6 +646,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
+  const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
   const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
@@ -661,10 +664,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSelectedTransitStop,
     selectedLocation,
     setSelectedLocation,
+    selectedTrafficCamera,
+    setSelectedTrafficCamera,
     positionInformation,
     setPositionInformation,
     closePositionInformation,
     closeLocationInformation,
+    closeTrafficCamera,
   } = useInfoPanelState();
   const [transitDepartureDetailOpen, setTransitDepartureDetailOpen] = useState(false);
   const [transitNavigationBackSignal, setTransitNavigationBackSignal] = useState(0);
@@ -718,6 +724,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   routeResultRef.current = routeResult;
   const locationSheet = useMobileBottomSheet('half');
   const positionSheet = useMobileBottomSheet('half');
+  const trafficCameraSheet = useMobileBottomSheet('half');
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const selectionCameraActiveRef = useRef(false);
   const lastUserInteractionRef = useRef(0);
@@ -812,6 +819,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transit: true,
       transitLines: false,
       transitModels: !mobileDefault2d,
+      trafficCameras: false,
     };
     try {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
@@ -826,6 +834,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     transitStopsLayerRef.current?.clearSelection();
     setSelectedTransitStop(null);
   }, []);
+  const handleTrafficCamerasDisabled = useCallback(() => {
+    trafficCamerasLayerRef.current?.clearSelection();
+    setSelectedTrafficCamera(null);
+  }, []);
+  const trafficCamerasEnabledRef = useRef(layerToggles.trafficCameras);
+  trafficCamerasEnabledRef.current = layerToggles.trafficCameras;
   const flight = useFlightSimulator({
     mapRef,
     mapLoaded,
@@ -855,6 +869,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     hikingLayerIds: GLOBAL_HIKING_LAYER_IDS,
     waterEffectLayerIds: WATER_EFFECT_LAYER_IDS,
     onTransitDisabled: handleTransitDisabled,
+    onTrafficCamerasDisabled: handleTrafficCamerasDisabled,
   });
   useFlightModePresentation({
     mapRef,
@@ -952,6 +967,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         mapToolNoticeTimerRef.current = undefined;
       }, duration);
   };
+  useEffect(() => {
+    const layer = trafficCamerasLayerRef.current;
+    if (!mapLoaded || !layer || !layerToggles.trafficCameras) return;
+    void layer.update().catch(() => {
+      showMapToolNotice('Traffic cameras could not be loaded.');
+    });
+  }, [mapLoaded, layerToggles.trafficCameras]);
 
   const {
     userLocationRef, userLocationAccuracyRef, userLocationWatchRef, locateUser,
@@ -1175,13 +1197,14 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     : measurement ? 'measurement'
     : transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
-      : transitDetailsOpen ? 'route-steps'
-        : routeSearchTarget ? 'route-search'
-          : routeResult && routeOpen ? 'route-result'
-            : routeOpen ? 'route'
-              : selectedLocation ? 'place'
-                : layersOpen ? 'layers'
-                  : searchOpen ? 'search' : null;
+      : selectedTrafficCamera ? 'traffic-camera'
+        : transitDetailsOpen ? 'route-steps'
+          : routeSearchTarget ? 'route-search'
+            : routeResult && routeOpen ? 'route-result'
+              : routeOpen ? 'route'
+                : selectedLocation ? 'place'
+                  : layersOpen ? 'layers'
+                    : searchOpen ? 'search' : null;
 
   useInAppNavigation(navigationView, (parentView) => {
     if (flight.active) { flight.stop(); return; }
@@ -1197,6 +1220,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transitStopsLayerRef.current?.clearSelection();
       setSelectedTransitStop(null);
       if (parentView === 'search') setSearchOpen(true);
+      return;
+    }
+    if (selectedTrafficCamera) {
+      trafficCamerasLayerRef.current?.clearSelection();
+      closeTrafficCamera();
       return;
     }
     if (transitDetailsOpen) { closeTransitDetails(); return; }
@@ -1660,6 +1688,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setPositionInformation,
     clearLocationSelection,
     setSelectedTransitStop,
+    trafficCamerasLayerRef,
+    setSelectedTrafficCamera,
     cancelRoute,
     rememberRouteVehicle,
   });
@@ -1678,6 +1708,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setPositionInformation(null);
     setSelectedLocation(null);
     setSelectedTransitStop(null);
+    setSelectedTrafficCamera(null);
+    trafficCamerasLayerRef.current?.clearSelection();
     setRouteContextMenu(null);
     setContextMenuMarker(null);
     measurementControllerRef.current = new DistanceMeasurementController(map, start, setMeasurement);
@@ -1706,7 +1738,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         maxZoom: 18,
         attributionControl: {
           compact: true,
-          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road cameras by Fintraffic / Digitraffic</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
         },
       });
     } catch (error) {
@@ -1746,6 +1778,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (map.getZoom() < 14.6) map.setZoom(14.6);
     });
     transitStopsLayerRef.current = transitStopsLayer;
+    const trafficCamerasLayer = new TrafficCamerasLayer();
+    trafficCamerasLayerRef.current = trafficCamerasLayer;
     const transitRouteOverlay = new TransitRouteOverlay();
     transitRouteOverlayRef.current = transitRouteOverlay;
     let treeUpdateTimer: number | undefined;
@@ -1876,9 +1910,22 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       setRouteContextMenu(null);
       if (!positionInformation && !pendingFavorite) setContextMenuMarker(null);
       const locationLayers = ['favorite-icons', 'search-result-icons', 'nearby-result-icons', 'global-hiking-pois', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
+      const cameraFeature = trafficCameraFeatureAt(map, event.point);
       const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
       if (routePickingRef.current) {
         const kind = routePickingRef.current;
+        if (cameraFeature && cameraFeature.geometry.type === 'Point') {
+          const cameraName = typeof cameraFeature.properties?.name === 'string' && cameraFeature.properties.name
+            ? cameraFeature.properties.name
+            : 'Traffic camera';
+          setRouteEndpoint(kind, {
+            name: cameraName,
+            category: 'Traffic camera',
+            coordinates: [Number(cameraFeature.geometry.coordinates[0]), Number(cameraFeature.geometry.coordinates[1])],
+            source: 'map',
+          });
+          return;
+        }
         const destination = feature && feature.layer.id !== 'selected-location-icon'
           ? locationSelectionFromFeature(feature).coordinates
           : [map.unproject(event.point).lng, map.unproject(event.point).lat] as [number, number];
@@ -1888,6 +1935,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         setRouteEndpoint(kind, selection);
         return;
       }
+      if (cameraFeature) return;
       if (!feature || feature.layer.id === 'selected-location-icon') return;
       const favoriteId = typeof feature.properties?.favoriteId === 'string' ? feature.properties.favoriteId : undefined;
       const favorite = favoriteId ? favoritesRef.current.find((item) => item.id === favoriteId) : undefined;
@@ -2351,10 +2399,35 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         offset: closeRangeCameraOffset(),
         duration: 900,
         });
-      }, () => measurementControllerRef.current !== null, preserveRouteVehicleForInfoPanel).then(() => {
+      }, () => measurementControllerRef.current !== null || Boolean(routePickingRef.current), preserveRouteVehicleForInfoPanel).then(() => {
         if (transitStopsLayerRef.current !== transitStopsLayer || !map.isStyleLoaded()) return;
         map.moveLayer(transitVehicleLayer.id, 'transit-estimated-vehicle-label');
         updateTransitStops();
+      });
+      void trafficCamerasLayer.install(map, (camera) => {
+        prepareInfoPanelOpen();
+        clearLocationSelection();
+        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
+          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
+          transitStopsLayer.clearStopSelection();
+        } else {
+          transitStopsLayer.clearSelection();
+        }
+        setSelectedTransitStop(null);
+        trafficCamerasLayer.selectCamera(camera);
+        setSelectedTrafficCamera(camera);
+        pendingSearchCameraRef.current = camera.coordinates;
+        map.easeTo({
+          center: camera.coordinates,
+          zoom: Math.max(map.getZoom(), 12),
+          offset: closeRangeCameraOffset(),
+          duration: 900,
+        });
+      }, () => measurementControllerRef.current !== null || Boolean(routePickingRef.current)).then(() => {
+        if (trafficCamerasLayerRef.current !== trafficCamerasLayer || !trafficCamerasEnabledRef.current) return;
+        void trafficCamerasLayer.update().catch(() => {
+          showMapToolNotice('Traffic cameras could not be loaded.');
+        });
       });
       transitRouteOverlay.install(map);
       ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels', 'global-poi-labels', 'poi-labels'].forEach((layerId) => {
@@ -2504,12 +2577,14 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.off('idle', handleIdleTreeUpdate);
       transitStopsLayer.dispose();
       transitRouteOverlay.dispose();
+      trafficCamerasLayer.dispose();
       map.remove();
       mapRef.current = null;
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
       flightTreeLayerRef.current = null;
       transitStopsLayerRef.current = null;
+      trafficCamerasLayerRef.current = null;
       transitVehicleLayerRef.current = null;
     };
   }, []);
@@ -2855,7 +2930,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         map.once('moveend', () => { selectionCameraActiveRef.current = false; });
         map.easeTo({
           center: coordinates,
-          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : 14),
+          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : selectedTrafficCamera ? 12 : 14),
           offset: selectionCameraOffset(map),
           duration: 900,
         });
@@ -2865,7 +2940,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       cancelled = true;
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [positionInformation?.coordinates, selectedLocation, selectedTransitStop]);
+  }, [positionInformation?.coordinates, selectedLocation, selectedTransitStop, selectedTrafficCamera]);
   useEffect(() => () => {
     routeAddressAbortRef.current.origin?.abort();
     routeAddressAbortRef.current.destination?.abort();
@@ -3078,6 +3153,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setHighlightedSearchResults([]);
     clearLocationSelection();
     setSelectedTransitStop(null);
+    trafficCamerasLayerRef.current?.clearSelection();
+    setSelectedTrafficCamera(null);
     window.requestAnimationFrame(() => {
       if (!places.length) return;
       const bounds = new maplibregl.LngLatBounds(anchor, anchor);
@@ -3236,7 +3313,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             onZoomOut={zoomOut}
             onRouteOpen={openRoute}
             routeOpen={routeOpen}
-            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
+            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(selectedTrafficCamera) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
             themePreference={themePreference}
@@ -3392,7 +3469,28 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               </form>
             </div>
           )}
-          {selectedTransitStop && (
+          {selectedTrafficCamera && (
+            <TrafficCameraPanel
+              key={selectedTrafficCamera.id}
+              selection={selectedTrafficCamera}
+              sheet={trafficCameraSheet}
+              onClose={() => {
+                trafficCamerasLayerRef.current?.clearSelection();
+                closeTrafficCamera();
+              }}
+              onShare={() => shareSelection({
+                type: 'position',
+                coordinates: selectedTrafficCamera.coordinates,
+                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 12),
+                name: selectedTrafficCamera.name,
+              }, selectedTrafficCamera.name)}
+              onDirections={(destination) => {
+                openRoute();
+                setRouteEndpoint('destination', destination);
+              }}
+            />
+          )}
+          {selectedTransitStop && !selectedTrafficCamera && (
             <Suspense fallback={null}><TransitDeparturesPanel
               stop={selectedTransitStop}
               onDetailOpenChange={setTransitDepartureDetailOpen}
@@ -3480,7 +3578,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
           {routeResult && routeOpen && (
             <MapCameraActions
               routeMode={routeMode}
-              infoPanelOpen={Boolean(selectedLocation || selectedTransitStop || positionInformation)}
+              infoPanelOpen={Boolean(selectedLocation || selectedTransitStop || selectedTrafficCamera || positionInformation)}
               vehicleFollowAvailable={vehicleFollowAvailable}
               vehicleFollowing={vehicleFollowing}
               vehiclePositionStatus={vehiclePositionStatus}
@@ -3489,7 +3587,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               onFitRoute={() => fitRouteNow(routeResult)}
             />
           )}
-          {selectedLocation && !selectedTransitStop && (
+          {selectedLocation && !selectedTransitStop && !selectedTrafficCamera && (
             <LocationInformationPanel
               selection={selectedLocation}
               sheet={locationSheet}

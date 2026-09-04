@@ -19,6 +19,7 @@ export const MAP_COLORS = {
   label: '#30495b',
   labelHalo: '#fbfcf5',
   transitBlue: '#1769e8',
+  trafficCamera: '#0f766e',
   sun: '#fff5dc',
   ambientSky: 0xfff7e8,
   ambientGround: 0x8a9b7f,

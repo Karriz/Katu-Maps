@@ -30,6 +30,8 @@ describe('position information marker lifecycle', () => {
       setPositionInformation: vi.fn(),
       clearLocationSelection: vi.fn(),
       setSelectedTransitStop: vi.fn(),
+      trafficCamerasLayerRef: { current: null },
+      setSelectedTrafficCamera: vi.fn(),
       cancelRoute: vi.fn(),
       rememberRouteVehicle: vi.fn(),
     });
