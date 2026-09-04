@@ -933,6 +933,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .mobile-sheet-handle .mobile-sheet-close:hover, .mobile-sheet-handle .mobile-sheet-close:focus-visible { background: #fff; color: var(--color-accent); }
   .mobile-sheet-handle .mobile-sheet-close svg { height: 17px; width: 17px; }
   .mobile-bottom-sheet > .location-info-close,
+  .mobile-bottom-sheet > .layer-panel-heading .layer-panel-close,
   .mobile-bottom-sheet > .route-panel-heading .route-panel-close,
   .mobile-bottom-sheet > .transit-panel-header .transit-panel-close { display: none; }
   @keyframes mobile-sheet-enter {
