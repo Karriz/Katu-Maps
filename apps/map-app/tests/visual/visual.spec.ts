@@ -809,12 +809,30 @@ const scenarios: Scenario[] = [
     state: 'sheet midpoint',
   },
   {
+    name: 'phone-layers-panel',
+    description: 'Phone layers sheet uses only the mobile handle close',
+    viewport: 'phone',
+    setup: async page => {
+      await page.getByRole('button', { name: 'Map layers' }).click();
+      const panel = page.locator('#map-layer-panel');
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('.mobile-sheet-close')).toBeVisible();
+      await expect(panel.locator('.layer-panel-close')).toBeHidden();
+      await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
+    },
+    state: 'layers open',
+  },
+  {
     name: 'desktop-layers-panel',
     description: 'Map layers and deterministic CI enabled state',
     viewport: 'desktop',
     setup: async page => {
       await page.getByRole('button', { name: 'Map layers' }).click();
-      await expect(page.locator('#map-layer-panel')).toBeVisible();
+      const panel = page.locator('#map-layer-panel');
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('.layer-panel-close')).toBeVisible();
+      await expect(panel.locator('.mobile-sheet-handle')).toBeHidden();
+      await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
     },
     state: 'layers open',
   },
