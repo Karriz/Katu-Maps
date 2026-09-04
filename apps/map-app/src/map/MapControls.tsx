@@ -5,6 +5,7 @@ import {
   Bike,
   Building2,
   Box,
+  Camera,
   Compass,
   Crosshair,
   Footprints,
@@ -39,7 +40,8 @@ export type MapLayerKey =
   | 'hiking'
   | 'transit'
   | 'transitLines'
-  | 'transitModels';
+  | 'transitModels'
+  | 'trafficCameras';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -63,6 +65,7 @@ const primaryLayers: LayerDefinition[] = [
   { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
   { key: 'transitLines', label: 'Transit lines', description: 'Colored metro, tram & rail', icon: TrainTrack },
   { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
+  { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish road weather cameras', icon: Camera },
 ];
 
 const advancedLayers: LayerDefinition[] = [

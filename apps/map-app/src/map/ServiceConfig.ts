@@ -27,5 +27,7 @@ export const serviceConfig = Object.freeze({
   transitousApiRoot: configuredEndpoint(import.meta.env.VITE_TRANSITOUS_API_ROOT, 'https://api.transitous.org/api/v6'),
   transitousRoutesEndpoint: configuredEndpoint(import.meta.env.VITE_TRANSITOUS_ROUTES_ENDPOINT, 'https://api.transitous.org/api/experimental/map/routes'),
   digitransitEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRANSIT_ENDPOINT, 'https://api.digitransit.fi/routing/v2/finland/gtfs/v1'),
+  digitrafficRoadEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRAFFIC_ROAD_ENDPOINT, 'https://tie.digitraffic.fi'),
+  digitrafficWeathercamEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRAFFIC_WEATHERCAM_ENDPOINT, 'https://weathercam.digitraffic.fi'),
   transitTripRefreshMs: configuredInterval(import.meta.env.VITE_TRANSIT_TRIP_REFRESH_MS, 15_000, 15_000),
 });

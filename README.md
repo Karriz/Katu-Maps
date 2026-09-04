@@ -12,6 +12,7 @@ An open 3D map for exploring places, public transport, and routes—directly in 
 
 - 🏙️ Explore 3D buildings, terrain, trees, and a globe view
 - 🚋 Browse transit stops, departures, routes, and live vehicles
+- 📷 View Finnish road weather cameras from Fintraffic Digitraffic
 - 🚶 Plan walking and cycling routes
 - 🔎 Search for addresses, businesses, and points of interest
 - 📱 Install it as a PWA on mobile or desktop
@@ -32,7 +33,7 @@ Finnish Digitransit features require a subscription key in `.env.local`. The glo
 
 ## Data and technology
 
-Built with React, TypeScript, MapLibre GL JS, OpenFreeMap, OpenStreetMap, Mapterhorn, Transitous, Digitransit, and Valhalla.
+Built with React, TypeScript, MapLibre GL JS, OpenFreeMap, OpenStreetMap, Mapterhorn, Transitous, Digitransit, Digitraffic, and Valhalla.
 
 Map data and external services remain subject to their own licences, attribution requirements, availability, and usage policies.
 
