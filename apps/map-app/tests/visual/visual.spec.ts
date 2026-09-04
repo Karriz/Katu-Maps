@@ -131,15 +131,23 @@ async function expectLayerToggleDoesNotInflateSheet(page: Page) {
   const enabled = await globe.getAttribute('aria-checked');
   await globe.click();
   await expect(globe).toHaveAttribute('aria-checked', enabled === 'true' ? 'false' : 'true');
-  const after = await content.evaluate((element) => ({
-    scrollHeight: element.scrollHeight,
-    clientHeight: element.clientHeight,
-    documentHeight: document.documentElement.scrollHeight,
-    innerHeight: window.innerHeight,
-  }));
+  const after = await content.evaluate((element) => {
+    const last = [...element.querySelectorAll('.layer-toggle')].at(-1);
+    const lastRect = last?.getBoundingClientRect();
+    const contentRect = element.getBoundingClientRect();
+    return {
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      documentHeight: document.documentElement.scrollHeight,
+      innerHeight: window.innerHeight,
+      gapBelowLast: lastRect ? contentRect.bottom - lastRect.bottom : Number.POSITIVE_INFINITY,
+    };
+  });
   expect(after.scrollHeight - before.scrollHeight).toBeLessThan(24);
   expect(after.clientHeight - before.clientHeight).toBeLessThan(24);
   expect(after.documentHeight - before.documentHeight).toBeLessThan(24);
+  expect(after.gapBelowLast).toBeGreaterThanOrEqual(0);
+  expect(after.gapBelowLast).toBeLessThan(48);
   if (await globe.getAttribute('aria-checked') !== enabled) await globe.click();
   await panel.locator('.layer-advanced summary').click();
   await content.evaluate((element) => { element.scrollTop = 0; });
