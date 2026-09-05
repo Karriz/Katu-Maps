@@ -6,26 +6,6 @@ import type { TransitProviderId } from './transit';
 import { TransitRouteOptions } from './TransitRouteOptions';
 import { useAutocompleteNavigation } from '../lib/useAutocompleteNavigation';
 
-function dismissSearchInput(input: HTMLInputElement | null) {
-  if (!input) {
-    const active = document.activeElement;
-    if (active instanceof HTMLElement) active.blur();
-    return;
-  }
-  // preventDefault on option mousedown tells the browser to keep field focus.
-  // Some engines restore that focus on mouseup, which leaves the OS keyboard
-  // open. Hold readonly until the pointer is released, then blur again.
-  input.setAttribute('readonly', 'true');
-  input.blur();
-  const release = () => {
-    input.removeAttribute('readonly');
-    if (document.activeElement === input) input.blur();
-  };
-  window.addEventListener('pointerup', release, { once: true });
-  window.addEventListener('mouseup', release, { once: true });
-  window.setTimeout(release, 50);
-}
-
 type PhotonFeature = {
   geometry: { coordinates: [number, number] };
   properties: {
@@ -103,6 +83,28 @@ export function RoutePlannerControls({
     origin: null,
     destination: null,
   });
+  const suppressSearchFocusRef = useRef(false);
+  const dismissSearchInput = (input: HTMLInputElement | null) => {
+    suppressSearchFocusRef.current = true;
+    window.setTimeout(() => { suppressSearchFocusRef.current = false; }, 150);
+    if (!input) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+      return;
+    }
+    // preventDefault on option mousedown tells the browser to keep field focus.
+    // Restored focus would call beginRouteSearch and reopen the list. Ignore it
+    // and hold readonly until the pointer is released so the OS keyboard closes.
+    input.setAttribute('readonly', 'true');
+    input.blur();
+    const release = () => {
+      input.removeAttribute('readonly');
+      if (document.activeElement === input) input.blur();
+    };
+    window.addEventListener('pointerup', release, { once: true });
+    window.addEventListener('mouseup', release, { once: true });
+    window.setTimeout(release, 100);
+  };
   useEffect(() => {
     if (routeSearchTarget !== null) return;
     routeSearchInputRefs.current.origin?.blur();
@@ -156,7 +158,13 @@ export function RoutePlannerControls({
                   aria-activedescendant={routeSearchTarget === kind && routeNavigation.highlightedIndex >= 0 ? `route-${kind}-option-${routeNavigation.highlightedIndex}` : undefined}
                   placeholder={`Search ${label.toLowerCase()}`}
                   value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
-                  onFocus={() => beginRouteSearch(kind)}
+                  onFocus={(event) => {
+                    if (suppressSearchFocusRef.current) {
+                      event.currentTarget.blur();
+                      return;
+                    }
+                    beginRouteSearch(kind);
+                  }}
                   onKeyDown={routeNavigation.onKeyDown}
                   onChange={(event) => {
                     setRouteSearchTarget(kind);
