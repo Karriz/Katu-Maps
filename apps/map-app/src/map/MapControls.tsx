@@ -86,16 +86,24 @@ function LayerRow({
   onChange: (enabled: boolean) => void;
 }) {
   const Icon = definition.icon;
+  // Mobile browsers scroll focused form controls into view and can inflate the
+  // sheet with empty space. Keep focus on the visible row instead.
   return (
-    <label className="layer-toggle">
+    <button
+      className="layer-toggle"
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      onPointerDown={(event) => event.currentTarget.focus({ preventScroll: true })}
+      onClick={() => onChange(!enabled)}
+    >
       <span className="layer-toggle-icon" aria-hidden="true"><Icon /></span>
       <span className="layer-toggle-copy">
         <strong>{definition.label}</strong>
         <small>{definition.description}</small>
       </span>
-      <input type="checkbox" checked={enabled} onChange={(event) => onChange(event.target.checked)} />
       <span className="layer-switch" aria-hidden="true"><span /></span>
-    </label>
+    </button>
   );
 }
 
