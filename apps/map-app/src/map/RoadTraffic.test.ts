@@ -2,13 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchRoadTrafficStations,
   mergeRoadTrafficStations,
-  offsetPoint,
   parseRoadTrafficObservations,
   parseRoadTrafficStations,
   resetRoadTrafficCaches,
   stationCongestion,
   trafficCongestion,
-  trafficSegmentCoordinates,
 } from './RoadTraffic';
 
 const stationsPayload = {
@@ -88,15 +86,6 @@ describe('road traffic parsing', () => {
     expect(trafficCongestion(40, 100)).toBe('heavy');
     expect(trafficCongestion(20, 100)).toBe('severe');
     expect(trafficCongestion(undefined, undefined, 1500)).toBe('severe');
-  });
-
-  it('draws a short directional segment from a station point', () => {
-    const north = offsetPoint(24, 60, 0, 1000);
-    expect(north[0]).toBeCloseTo(24, 4);
-    expect(north[1]).toBeGreaterThan(60);
-    const segment = trafficSegmentCoordinates(25.689529, 60.417002, 60, 1);
-    expect(segment).toHaveLength(2);
-    expect(segment[0][0]).not.toBeCloseTo(segment[1][0], 5);
   });
 
   it('reads the road number from a Finnish station id when metadata omits roadAddress', () => {

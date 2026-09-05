@@ -39,7 +39,6 @@ export type RoadTrafficStation = RoadTrafficSelection & {
 
 const STATIONS_TTL_MS = 30 * 60_000;
 const OBSERVATIONS_TTL_MS = 90_000;
-const EARTH_RADIUS_M = 6_371_000;
 
 let stationsCache: { stations: RoadTrafficStation[]; fetchedAt: number } | null = null;
 let observationsCache: { byId: Map<string, Partial<RoadTrafficStation>>; fetchedAt: number } | null = null;
@@ -81,39 +80,6 @@ export function trafficCongestion(speedKmh?: number, freeFlowKmh?: number, volum
     return 'free';
   }
   return 'unknown';
-}
-
-export function offsetPoint(longitude: number, latitude: number, bearingDegrees: number, distanceMeters: number): [number, number] {
-  const angularDistance = distanceMeters / EARTH_RADIUS_M;
-  const bearing = bearingDegrees * Math.PI / 180;
-  const fromLat = latitude * Math.PI / 180;
-  const fromLng = longitude * Math.PI / 180;
-  const toLat = Math.asin(
-    Math.sin(fromLat) * Math.cos(angularDistance)
-    + Math.cos(fromLat) * Math.sin(angularDistance) * Math.cos(bearing),
-  );
-  const toLng = fromLng + Math.atan2(
-    Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(fromLat),
-    Math.cos(angularDistance) - Math.sin(fromLat) * Math.sin(toLat),
-  );
-  return [(toLng * 180 / Math.PI + 540) % 360 - 180, toLat * 180 / Math.PI];
-}
-
-export function trafficSegmentCoordinates(
-  longitude: number,
-  latitude: number,
-  bearing: number | undefined,
-  direction: 1 | 2,
-  lengthMeters = 520,
-  offsetMeters = 9,
-): [number, number][] {
-  const travel = ((bearing ?? 90) + (direction === 2 ? 180 : 0) + 360) % 360;
-  const side = (travel + 90) % 360;
-  const origin = offsetPoint(longitude, latitude, side, offsetMeters);
-  return [
-    offsetPoint(origin[0], origin[1], travel, -lengthMeters / 2),
-    offsetPoint(origin[0], origin[1], travel, lengthMeters / 2),
-  ];
 }
 
 function sensorMap(raw: unknown) {

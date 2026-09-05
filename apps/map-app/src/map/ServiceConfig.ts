@@ -29,7 +29,6 @@ export const serviceConfig = Object.freeze({
   digitransitEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRANSIT_ENDPOINT, 'https://api.digitransit.fi/routing/v2/finland/gtfs/v1'),
   digitrafficRoadEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRAFFIC_ROAD_ENDPOINT, 'https://tie.digitraffic.fi'),
   digitrafficWeathercamEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRAFFIC_WEATHERCAM_ENDPOINT, 'https://weathercam.digitraffic.fi'),
-  overpassEndpoint: configuredEndpoint(import.meta.env.VITE_OVERPASS_ENDPOINT, 'https://overpass-api.de/api/interpreter'),
   openChargeMapEndpoint: configuredEndpoint(import.meta.env.VITE_OPENCHARGEMAP_ENDPOINT, 'https://api.openchargemap.io/v3'),
   openChargeMapApiKey: import.meta.env.VITE_OPENCHARGEMAP_API_KEY?.trim() || '',
   openMeteoEndpoint: configuredEndpoint(import.meta.env.VITE_OPENMETEO_ENDPOINT, 'https://api.open-meteo.com'),
