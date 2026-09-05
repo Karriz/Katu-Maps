@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { ArrowRightLeft, Clock3, MapPin, X } from 'lucide-react';
-import type { MutableRefObject, RefObject } from 'react';
+import { useEffect, useRef, type MouseEvent, type MutableRefObject, type RefObject } from 'react';
 import type { useRoutePlanning } from './useRoutePlanning';
 import type { TransitProviderId } from './transit';
 import { TransitRouteOptions } from './TransitRouteOptions';
@@ -79,11 +79,57 @@ export function RoutePlannerControls({
     transitTimeMode, setTransitTimeMode, transitDateTime, setTransitDateTime,
     routeOriginRef, routeDestinationRef, routeAbortRef,
   } = route;
+  const routeSearchInputRefs = useRef<Record<'origin' | 'destination', HTMLInputElement | null>>({
+    origin: null,
+    destination: null,
+  });
+  const suppressSearchFocusRef = useRef<'origin' | 'destination' | null>(null);
+  const dismissSearchInput = (kind: 'origin' | 'destination', input: HTMLInputElement | null) => {
+    suppressSearchFocusRef.current = kind;
+    window.setTimeout(() => {
+      if (suppressSearchFocusRef.current === kind) suppressSearchFocusRef.current = null;
+    }, 150);
+    if (!input) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+      return;
+    }
+    // preventDefault on option mousedown tells the browser to keep field focus.
+    // Restored focus would call beginRouteSearch and reopen this field's list.
+    // Ignore only this field so the other endpoint can still be focused.
+    input.setAttribute('readonly', 'true');
+    input.blur();
+    const release = () => {
+      input.removeAttribute('readonly');
+      if (document.activeElement === input) input.blur();
+    };
+    window.addEventListener('pointerup', release, { once: true });
+    window.addEventListener('mouseup', release, { once: true });
+    window.setTimeout(release, 100);
+  };
+  useEffect(() => {
+    if (routeSearchTarget !== null) return;
+    routeSearchInputRefs.current.origin?.blur();
+    routeSearchInputRefs.current.destination?.blur();
+  }, [routeSearchTarget]);
+  const chooseRouteSearchOption = (kind: 'origin' | 'destination', select: () => void) => ({
+    onMouseDown: (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      dismissSearchInput(kind, routeSearchInputRefs.current[kind]);
+      select();
+    },
+    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      if (event.detail !== 0) return;
+      dismissSearchInput(kind, routeSearchInputRefs.current[kind]);
+      select();
+    },
+  });
   const routeNavigation = useAutocompleteNavigation({
     count: displayedSearchResults.length + 1,
     open: routeSearchTarget !== null,
     onSelect: (index) => {
       if (routeSearchTarget === null) return;
+      dismissSearchInput(routeSearchTarget, routeSearchInputRefs.current[routeSearchTarget]);
       if (index === 0) selectYourLocation(routeSearchTarget);
       else selectSearchResult(displayedSearchResults[index - 1]);
     },
@@ -105,6 +151,7 @@ export function RoutePlannerControls({
               >
                 <MapPin aria-hidden="true" />
                 <input
+                  ref={(element) => { routeSearchInputRefs.current[kind] = element; }}
                   role="combobox"
                   aria-label={`Search ${label.toLowerCase()}`}
                   aria-autocomplete="list"
@@ -113,7 +160,13 @@ export function RoutePlannerControls({
                   aria-activedescendant={routeSearchTarget === kind && routeNavigation.highlightedIndex >= 0 ? `route-${kind}-option-${routeNavigation.highlightedIndex}` : undefined}
                   placeholder={`Search ${label.toLowerCase()}`}
                   value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
-                  onFocus={() => beginRouteSearch(kind)}
+                  onFocus={(event) => {
+                    if (suppressSearchFocusRef.current === kind) {
+                      event.currentTarget.blur();
+                      return;
+                    }
+                    beginRouteSearch(kind);
+                  }}
                   onKeyDown={routeNavigation.onKeyDown}
                   onChange={(event) => {
                     setRouteSearchTarget(kind);
@@ -147,7 +200,7 @@ export function RoutePlannerControls({
               </div>
               {routeSearchTarget === kind && createPortal(
                 <div className="route-search-results route-search-results-floating" id={`route-${kind}-search-results`} ref={routeSearchResultsRef} role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
-                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectYourLocation(kind)}>
+                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" {...chooseRouteSearchOption(kind, () => selectYourLocation(kind))}>
                     <strong>Your location</strong>
                     <span>{userLocationRef.current ? 'Use current GPS position' : 'Request location access'}</span>
                   </button>
@@ -157,7 +210,7 @@ export function RoutePlannerControls({
                   {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
                     const { primary, secondary } = photonResultLabel(feature);
                     const optionIndex = index + 1;
-                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(feature)}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
+                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" {...chooseRouteSearchOption(kind, () => selectSearchResult(feature))}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
                   })}
                 </div>,
                 document.body,

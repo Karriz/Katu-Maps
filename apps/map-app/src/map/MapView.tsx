@@ -1458,6 +1458,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   };
 
   const selectYourLocation = (kind: 'origin' | 'destination') => {
+    (document.activeElement as HTMLElement | null)?.blur();
     setRouteError(null);
     const updateLocationMarker = (coordinates: [number, number]) => {
       userLocationRef.current = coordinates;
