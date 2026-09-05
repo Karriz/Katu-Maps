@@ -8,7 +8,7 @@ import type {
   Point,
   SymbolLayerSpecification,
 } from 'maplibre-gl';
-import { Construction, TriangleAlert, type LucideIcon } from 'lucide-react';
+import { CarFront, Construction, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
@@ -18,13 +18,12 @@ import {
   TRAFFIC_CONGESTION_COLORS,
   type RoadTrafficSelection,
   type RoadTrafficStation,
+  type TrafficCongestion,
 } from './RoadTraffic';
 import {
   fetchRoadTrafficMessages,
   type RoadTrafficMessage,
 } from './RoadTrafficMessages';
-import { fetchViewportRoads, TRAFFIC_ROAD_SNAP_MIN_ZOOM, trafficRoadsRequestKey } from './RoadTrafficRoads';
-import { mergeRoadNetwork, stationSegmentCoordinates, type RoadTrafficWay } from './RoadTrafficSnap';
 
 const SOURCE_ID = 'road-traffic';
 const SELECTED_SOURCE_ID = 'road-traffic-selected';
@@ -32,14 +31,14 @@ const MESSAGE_SOURCE_ID = 'road-traffic-messages';
 const MESSAGE_SELECTED_SOURCE_ID = 'road-traffic-messages-selected';
 const ROADWORK_ICON_ID = 'road-traffic-roadwork-icon';
 const INCIDENT_ICON_ID = 'road-traffic-incident-icon';
+const CONGESTION_KINDS = Object.keys(TRAFFIC_CONGESTION_COLORS) as TrafficCongestion[];
 
 export const ROAD_TRAFFIC_LAYER_IDS = [
   'road-traffic-dots',
-  'road-traffic-casings',
-  'road-traffic-lines',
   'road-traffic-hit-targets',
   'road-traffic-selected-halo',
-  'road-traffic-selected-line',
+  'road-traffic-icons',
+  'road-traffic-selected-icon',
   'road-traffic-message-lines',
   'road-traffic-message-hit-targets',
   'road-traffic-message-dots',
@@ -56,9 +55,9 @@ export const ROAD_TRAFFIC_INTERACTIVE_LAYER_IDS = [
   'road-traffic-message-icons',
   'road-traffic-message-selected-icon',
   'road-traffic-hit-targets',
-  'road-traffic-lines',
+  'road-traffic-icons',
+  'road-traffic-selected-icon',
   'road-traffic-dots',
-  'road-traffic-selected-line',
 ] as const;
 
 const MESSAGE_INTERACTIVE_LAYER_IDS = [
@@ -74,6 +73,10 @@ export type RoadTrafficClickTarget =
 
 function emptyCollection() {
   return { type: 'FeatureCollection' as const, features: [] };
+}
+
+function congestionIconId(kind: TrafficCongestion) {
+  return `road-traffic-congestion-${kind}`;
 }
 
 const congestionColor: ExpressionSpecification = [
@@ -113,34 +116,8 @@ async function addTrafficIcon(map: Map, imageId: string, Icon: LucideIcon, fill:
   if (!map.hasImage(imageId)) map.addImage(imageId, image, { pixelRatio: 2 });
 }
 
-function lineFeatures(station: RoadTrafficStation, network: RoadTrafficWay[] = []) {
-  return ([1, 2] as const).flatMap((direction) => {
-    const reading = direction === 1 ? station.direction1 : station.direction2;
-    if (reading.speedKmh === undefined && reading.volumePerHour === undefined) return [];
-    const volume = reading.volumePerHour ?? 0;
-    return [{
-      type: 'Feature' as const,
-      id: Number.parseInt(`${station.id}${direction}`, 10) || undefined,
-      geometry: {
-        type: 'LineString' as const,
-        coordinates: stationSegmentCoordinates(station, direction, network),
-      },
-      properties: {
-        id: station.id,
-        kind: 'station',
-        name: station.name,
-        direction,
-        congestion: reading.congestion,
-        volume,
-        lineWidth: Math.min(7.5, 2.2 + volume / 420),
-        lon: station.coordinates[0],
-        lat: station.coordinates[1],
-      },
-    }];
-  });
-}
-
 function pointFeature(station: RoadTrafficStation) {
+  const congestion = stationCongestion(station);
   return {
     type: 'Feature' as const,
     id: Number.parseInt(station.id, 10) || undefined,
@@ -149,7 +126,8 @@ function pointFeature(station: RoadTrafficStation) {
       id: station.id,
       kind: 'station',
       name: station.name,
-      congestion: stationCongestion(station),
+      congestion,
+      icon: congestionIconId(congestion),
       lon: station.coordinates[0],
       lat: station.coordinates[1],
     },
@@ -223,23 +201,11 @@ function selectionFromFeature(feature: MapGeoJSONFeature, point: Point, map: Map
 export class RoadTrafficLayer {
   private map: Map | null = null;
   private requestController: AbortController | null = null;
-  private roadsController: AbortController | null = null;
   private selected: RoadTrafficSelection | null = null;
   private selectedMessageId: string | null = null;
   private stations = new globalThis.Map<string, RoadTrafficStation>();
   private messages = new globalThis.Map<string, RoadTrafficMessage>();
-  private ways: RoadTrafficWay[] = [];
-  private lastRoadsKey = '';
   private ready = false;
-  private roadsMoveTimer = 0;
-  private handleMoveEnd = () => {
-    window.clearTimeout(this.roadsMoveTimer);
-    this.roadsMoveTimer = window.setTimeout(() => {
-      const map = this.map;
-      if (!map || !this.ready) return;
-      void this.syncViewport(map.getBounds(), map.getZoom());
-    }, 280);
-  };
 
   async install(
     map: Map,
@@ -252,6 +218,7 @@ export class RoadTrafficLayer {
     map.addSource(MESSAGE_SOURCE_ID, { type: 'geojson', data: emptyCollection() });
     map.addSource(MESSAGE_SELECTED_SOURCE_ID, { type: 'geojson', data: emptyCollection() });
     await Promise.all([
+      ...CONGESTION_KINDS.map((kind) => addTrafficIcon(map, congestionIconId(kind), CarFront, TRAFFIC_CONGESTION_COLORS[kind])),
       addTrafficIcon(map, ROADWORK_ICON_ID, Construction, MAP_COLORS.roadWork),
       addTrafficIcon(map, INCIDENT_ICON_ID, TriangleAlert, MAP_COLORS.roadIncident),
     ]);
@@ -261,9 +228,8 @@ export class RoadTrafficLayer {
       id: 'road-traffic-dots',
       type: 'circle',
       source: SOURCE_ID,
-      filter: ['==', ['geometry-type'], 'Point'],
       minzoom: 5,
-      maxzoom: 11,
+      maxzoom: 8,
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.2, 8, 5.2],
         'circle-color': congestionColor,
@@ -272,63 +238,52 @@ export class RoadTrafficLayer {
         'circle-opacity': 0.94,
       },
     };
-    const casings: LineLayerSpecification = {
-      id: 'road-traffic-casings',
-      type: 'line',
-      source: SOURCE_ID,
-      filter: ['==', ['geometry-type'], 'LineString'],
-      minzoom: 7,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': '#ffffff',
-        'line-width': ['+', ['coalesce', ['get', 'lineWidth'], 3], 2.4],
-        'line-opacity': 0.9,
-      },
-    };
-    const lines: LineLayerSpecification = {
-      id: 'road-traffic-lines',
-      type: 'line',
-      source: SOURCE_ID,
-      filter: ['==', ['geometry-type'], 'LineString'],
-      minzoom: 7,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': congestionColor,
-        'line-width': ['coalesce', ['get', 'lineWidth'], 3],
-        'line-opacity': 0.96,
-      },
-    };
-    const hitTargets: LineLayerSpecification = {
+    const hitTargets: CircleLayerSpecification = {
       id: 'road-traffic-hit-targets',
-      type: 'line',
+      type: 'circle',
       source: SOURCE_ID,
-      filter: ['==', ['geometry-type'], 'LineString'],
-      minzoom: 7,
+      minzoom: 5,
       paint: {
-        'line-color': '#ffffff',
-        'line-width': 22,
-        'line-opacity': 0.01,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 12, 16, 18],
+        'circle-color': '#ffffff',
+        'circle-opacity': 0.01,
       },
     };
-    const selectedHalo: LineLayerSpecification = {
+    const selectedHalo: CircleLayerSpecification = {
       id: 'road-traffic-selected-halo',
-      type: 'line',
+      type: 'circle',
       source: SELECTED_SOURCE_ID,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#ffffff',
-        'line-width': 10,
-        'line-opacity': 0.95,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 12, 18, 20],
+        'circle-color': '#ffffff',
+        'circle-opacity': 0.98,
+        'circle-stroke-color': congestionColor,
+        'circle-stroke-width': 3,
       },
     };
-    const selectedLine: LineLayerSpecification = {
-      id: 'road-traffic-selected-line',
-      type: 'line',
+    const icons: SymbolLayerSpecification = {
+      id: 'road-traffic-icons',
+      type: 'symbol',
+      source: SOURCE_ID,
+      minzoom: 7,
+      layout: {
+        'icon-image': ['get', 'icon'],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.15, 14, 1.45, 18, 1.7],
+        'icon-padding': 8,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    };
+    const selectedIcon: SymbolLayerSpecification = {
+      id: 'road-traffic-selected-icon',
+      type: 'symbol',
       source: SELECTED_SOURCE_ID,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': congestionColor,
-        'line-width': 5,
+      layout: {
+        'icon-image': ['get', 'icon'],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.28, 14, 1.58, 18, 1.82],
+        'icon-padding': 8,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
       },
     };
     const messageLines: LineLayerSpecification = {
@@ -438,11 +393,10 @@ export class RoadTrafficLayer {
     };
 
     map.addLayer(dots, beforeLayerId);
-    map.addLayer(casings, beforeLayerId);
-    map.addLayer(lines, beforeLayerId);
     map.addLayer(hitTargets, beforeLayerId);
     map.addLayer(selectedHalo, beforeLayerId);
-    map.addLayer(selectedLine, beforeLayerId);
+    map.addLayer(icons, beforeLayerId);
+    map.addLayer(selectedIcon, beforeLayerId);
     map.addLayer(messageLines, beforeLayerId);
     map.addLayer(messageHits, beforeLayerId);
     map.addLayer(messageDots, beforeLayerId);
@@ -482,7 +436,6 @@ export class RoadTrafficLayer {
       map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
     });
-    map.on('moveend', this.handleMoveEnd);
   }
 
   async update(options?: { bypassCache?: boolean }) {
@@ -503,12 +456,15 @@ export class RoadTrafficLayer {
       if (stationsResult.status === 'fulfilled') {
         const stations = stationsResult.value;
         this.stations = new globalThis.Map(stations.map((station) => [station.id, station]));
-        this.applyGeometry();
+        const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
+        source?.setData({
+          type: 'FeatureCollection',
+          features: stations.map(pointFeature),
+        });
         if (this.selected) {
           const next = this.stations.get(this.selected.id);
           if (next) this.selectStation(next);
         }
-        void this.syncViewport(map.getBounds(), map.getZoom());
       }
       if (messagesResult.status === 'fulfilled') {
         const messages = messagesResult.value;
@@ -529,63 +485,13 @@ export class RoadTrafficLayer {
     }
   }
 
-  private network() {
-    return this.ways.length ? mergeRoadNetwork(this.ways) : [];
-  }
-
-  private applyGeometry() {
-    const map = this.map;
-    if (!map || !this.ready) return;
-    const network = this.network();
-    const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-    source?.setData({
-      type: 'FeatureCollection',
-      features: [...this.stations.values()].flatMap((station) => [pointFeature(station), ...lineFeatures(station, network)]),
-    });
-  }
-
-  async syncViewport(bounds: { getWest(): number; getSouth(): number; getEast(): number; getNorth(): number }, zoom: number) {
-    const map = this.map;
-    if (!map || !this.ready) return;
-    if (!this.stations.size) return;
-    if (map.getLayoutProperty('road-traffic-lines', 'visibility') === 'none') return;
-    const pad = 0.012;
-    const bbox: [number, number, number, number] = [
-      bounds.getWest() - pad,
-      bounds.getSouth() - pad,
-      bounds.getEast() + pad,
-      bounds.getNorth() + pad,
-    ];
-    const key = trafficRoadsRequestKey(bbox, zoom);
-    if (key === this.lastRoadsKey) return;
-    this.lastRoadsKey = key;
-    this.roadsController?.abort();
-    const controller = new AbortController();
-    this.roadsController = controller;
-    try {
-      const ways = zoom < TRAFFIC_ROAD_SNAP_MIN_ZOOM ? [] : await fetchViewportRoads(bbox, controller.signal);
-      if (this.roadsController !== controller || this.map !== map) return;
-      this.ways = ways;
-      this.applyGeometry();
-      if (this.selected) {
-        const next = this.stations.get(this.selected.id);
-        if (next) this.selectStation(next);
-      }
-    } catch {
-      if (controller.signal.aborted) return;
-      if (this.lastRoadsKey === key) this.lastRoadsKey = '';
-      this.ways = [];
-      this.applyGeometry();
-    }
-  }
-
   selectStation(station: RoadTrafficStation) {
     this.selected = station;
     this.selectedMessageId = null;
     const selectedSource = this.map?.getSource(SELECTED_SOURCE_ID) as GeoJSONSource | undefined;
     selectedSource?.setData({
       type: 'FeatureCollection',
-      features: lineFeatures(station, this.network()),
+      features: [pointFeature(station)],
     });
     const messageSelected = this.map?.getSource(MESSAGE_SELECTED_SOURCE_ID) as GeoJSONSource | undefined;
     messageSelected?.setData(emptyCollection());
@@ -621,20 +527,13 @@ export class RoadTrafficLayer {
   }
 
   dispose() {
-    window.clearTimeout(this.roadsMoveTimer);
-    this.roadsMoveTimer = 0;
-    this.map?.off('moveend', this.handleMoveEnd);
     this.requestController?.abort();
     this.requestController = null;
-    this.roadsController?.abort();
-    this.roadsController = null;
     this.map = null;
     this.selected = null;
     this.selectedMessageId = null;
     this.stations.clear();
     this.messages.clear();
-    this.ways = [];
-    this.lastRoadsKey = '';
     this.ready = false;
   }
 }
