@@ -1,28 +1,22 @@
 import { createPortal } from 'react-dom';
 import { ArrowRightLeft, Clock3, MapPin, X } from 'lucide-react';
-import type { MouseEvent, MutableRefObject, RefObject } from 'react';
+import { useRef, type MouseEvent, type MutableRefObject, type RefObject } from 'react';
 import type { useRoutePlanning } from './useRoutePlanning';
 import type { TransitProviderId } from './transit';
 import { TransitRouteOptions } from './TransitRouteOptions';
 import { useAutocompleteNavigation } from '../lib/useAutocompleteNavigation';
 
-function dismissActiveKeyboard() {
-  const active = document.activeElement;
-  if (active instanceof HTMLElement) active.blur();
-}
-
-/** Blur on mousedown so mobile OS keyboards dismiss in the tap gesture. */
-function routeSearchOptionHandlers(select: () => void) {
-  return {
-    onMouseDown: (event: MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      dismissActiveKeyboard();
-    },
-    onClick: () => {
-      dismissActiveKeyboard();
-      select();
-    },
-  };
+function dismissSearchInput(input: HTMLInputElement | null) {
+  if (!input) {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+    return;
+  }
+  // Readonly-then-blur is required after mousedown preventDefault: otherwise
+  // mobile browsers keep the OS keyboard open even if the input loses focus.
+  input.setAttribute('readonly', 'true');
+  input.blur();
+  window.setTimeout(() => input.removeAttribute('readonly'), 0);
 }
 
 type PhotonFeature = {
@@ -98,12 +92,28 @@ export function RoutePlannerControls({
     transitTimeMode, setTransitTimeMode, transitDateTime, setTransitDateTime,
     routeOriginRef, routeDestinationRef, routeAbortRef,
   } = route;
+  const routeSearchInputRefs = useRef<Record<'origin' | 'destination', HTMLInputElement | null>>({
+    origin: null,
+    destination: null,
+  });
+  const chooseRouteSearchOption = (kind: 'origin' | 'destination', select: () => void) => ({
+    onMouseDown: (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      dismissSearchInput(routeSearchInputRefs.current[kind]);
+      select();
+    },
+    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      if (event.detail !== 0) return;
+      dismissSearchInput(routeSearchInputRefs.current[kind]);
+      select();
+    },
+  });
   const routeNavigation = useAutocompleteNavigation({
     count: displayedSearchResults.length + 1,
     open: routeSearchTarget !== null,
     onSelect: (index) => {
       if (routeSearchTarget === null) return;
-      dismissActiveKeyboard();
+      dismissSearchInput(routeSearchInputRefs.current[routeSearchTarget]);
       if (index === 0) selectYourLocation(routeSearchTarget);
       else selectSearchResult(displayedSearchResults[index - 1]);
     },
@@ -125,6 +135,7 @@ export function RoutePlannerControls({
               >
                 <MapPin aria-hidden="true" />
                 <input
+                  ref={(element) => { routeSearchInputRefs.current[kind] = element; }}
                   role="combobox"
                   aria-label={`Search ${label.toLowerCase()}`}
                   aria-autocomplete="list"
@@ -167,7 +178,7 @@ export function RoutePlannerControls({
               </div>
               {routeSearchTarget === kind && createPortal(
                 <div className="route-search-results route-search-results-floating" id={`route-${kind}-search-results`} ref={routeSearchResultsRef} role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
-                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" {...routeSearchOptionHandlers(() => selectYourLocation(kind))}>
+                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" {...chooseRouteSearchOption(kind, () => selectYourLocation(kind))}>
                     <strong>Your location</strong>
                     <span>{userLocationRef.current ? 'Use current GPS position' : 'Request location access'}</span>
                   </button>
@@ -177,7 +188,7 @@ export function RoutePlannerControls({
                   {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
                     const { primary, secondary } = photonResultLabel(feature);
                     const optionIndex = index + 1;
-                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" {...routeSearchOptionHandlers(() => selectSearchResult(feature))}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
+                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" {...chooseRouteSearchOption(kind, () => selectSearchResult(feature))}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
                   })}
                 </div>,
                 document.body,
