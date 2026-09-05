@@ -4,6 +4,8 @@ import type { LocationSelection } from './useRoutePlanning';
 import type { AddressState, ElevationState } from './PositionInformation';
 import type { TrafficCameraSelection } from './TrafficCameras';
 import type { ChargingStation } from './ChargingStations';
+import type { RoadWeatherStation } from './RoadWeather';
+import type { RoadTrafficStation } from './RoadTraffic';
 
 export type PositionInformationState = {
   coordinates: [number, number];
@@ -19,6 +21,8 @@ export function useInfoPanelState() {
   const [selectedTransitStop, setSelectedTransitStop] = useState<SelectedTransitStop | null>(null);
   const [selectedTrafficCamera, setSelectedTrafficCamera] = useState<TrafficCameraSelection | null>(null);
   const [selectedChargingStation, setSelectedChargingStation] = useState<ChargingStation | null>(null);
+  const [selectedRoadWeather, setSelectedRoadWeather] = useState<RoadWeatherStation | null>(null);
+  const [selectedRoadTraffic, setSelectedRoadTraffic] = useState<RoadTrafficStation | null>(null);
   const [positionInformation, setPositionInformation] = useState<PositionInformationState | null>(null);
 
   const closePositionInformation = useCallback(() => setPositionInformation(null), []);
@@ -26,12 +30,16 @@ export function useInfoPanelState() {
   const closeTransitInformation = useCallback(() => setSelectedTransitStop(null), []);
   const closeTrafficCamera = useCallback(() => setSelectedTrafficCamera(null), []);
   const closeChargingStation = useCallback(() => setSelectedChargingStation(null), []);
+  const closeRoadWeather = useCallback(() => setSelectedRoadWeather(null), []);
+  const closeRoadTraffic = useCallback(() => setSelectedRoadTraffic(null), []);
   const closeAllInformation = useCallback(() => {
     setPositionInformation(null);
     setSelectedLocation(null);
     setSelectedTransitStop(null);
     setSelectedTrafficCamera(null);
     setSelectedChargingStation(null);
+    setSelectedRoadWeather(null);
+    setSelectedRoadTraffic(null);
   }, []);
 
   return {
@@ -43,6 +51,10 @@ export function useInfoPanelState() {
     setSelectedTrafficCamera,
     selectedChargingStation,
     setSelectedChargingStation,
+    selectedRoadWeather,
+    setSelectedRoadWeather,
+    selectedRoadTraffic,
+    setSelectedRoadTraffic,
     positionInformation,
     setPositionInformation,
     closePositionInformation,
@@ -50,6 +62,8 @@ export function useInfoPanelState() {
     closeTransitInformation,
     closeTrafficCamera,
     closeChargingStation,
+    closeRoadWeather,
+    closeRoadTraffic,
     closeAllInformation,
   };
 }
