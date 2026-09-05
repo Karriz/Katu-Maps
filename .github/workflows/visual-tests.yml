@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: '0 2 * * *'
 
+concurrency:
+  group: visual-ui-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

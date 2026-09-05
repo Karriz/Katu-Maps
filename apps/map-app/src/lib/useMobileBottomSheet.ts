@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 
 export type SheetSnap = 'collapsed' | 'half' | 'expanded';
 const SNAP_ORDER: SheetSnap[] = ['collapsed', 'half', 'expanded'];
@@ -83,11 +83,18 @@ export function useMobileBottomSheet(initialSnap: SheetSnap = 'half', onHeightCh
   }, [dragHeight]);
 
   const cycle = useCallback(() => setSnap(snap === 'collapsed' ? 'half' : snap === 'half' ? 'expanded' : 'collapsed'), [setSnap, snap]);
-  const style = { '--mobile-sheet-height': `${dragHeight ?? heightFor(snap)}px` } as CSSProperties;
+  const sheetHeight = dragHeight ?? heightFor(snap);
+  // Keep a stable style identity across unrelated rerenders. Effects that
+  // follow the sheet (route autocomplete positioning) must not tear down on
+  // every search keystroke.
+  const style = useMemo(() => (
+    { '--mobile-sheet-height': `${sheetHeight}px` } as CSSProperties
+  ), [sheetHeight]);
   return {
     snap,
     setSnap,
     style,
+    height: sheetHeight,
     dragging: dragHeight !== null,
     handleProps: { onPointerDown, onPointerMove, onPointerUp: finish, onPointerCancel: finish, onDoubleClick: cycle },
   };

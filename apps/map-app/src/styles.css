@@ -356,7 +356,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .route-map-button:hover { background: #dceaff; }
 .route-endpoint-current { color: #64748b; font-size: 0.68rem; overflow: hidden; padding: 4px 12px 0 39px; text-overflow: ellipsis; white-space: nowrap; }
 .route-search-results { background: #fff; border: 1px solid #dbe4ee; border-radius: 11px; box-shadow: 0 12px 28px rgb(37 55 79 / 18%); left: 0; max-height: 210px; overflow-y: auto; position: absolute; right: 0; top: calc(100% + 6px); z-index: 120; }
-.route-search-results-floating { overscroll-behavior: contain; position: fixed; right: auto; z-index: 220; }
+.route-search-results-floating { overscroll-behavior: contain; pointer-events: none; position: fixed; right: auto; top: 0; visibility: hidden; z-index: 220; }
+.route-search-results-floating[data-placement] { pointer-events: auto; visibility: visible; }
 .route-search-result { background: transparent; border: 0; border-bottom: 1px solid #edf0f3; color: inherit; cursor: pointer; display: flex; flex-direction: column; font: inherit; gap: 3px; padding: 10px 12px; text-align: left; width: 100%; }
 .route-search-result:last-child { border-bottom: 0; }
 .route-search-result:hover, .route-search-result:focus-visible { background: var(--surface-hover); outline: 0; }

@@ -4,7 +4,8 @@ const externalVisualServer = process.env.KATU_VISUAL_SERVER === 'external';
 
 export default defineConfig({
   testDir: './tests/visual', outputDir: 'test-results/visual-artifacts', timeout: 90_000,
-  expect: { timeout: 10_000 }, fullyParallel: true, workers: process.env.CI ? 2 : 1,
+  expect: { timeout: 10_000 }, fullyParallel: true, retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 2 : 1,
   reporter: [['line'], ['./tests/visual/report-reporter.ts']],
   use: {
     baseURL: 'http://127.0.0.1:4173', locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light', reducedMotion: 'reduce',

@@ -1,6 +1,8 @@
 import type { Page, Route } from '@playwright/test';
 
 const DIGITRANSIT_ENDPOINT = 'https://api.digitransit.fi/routing/v2/finland/gtfs/v1';
+const TRANSITOUS_API = 'https://api.transitous.org/api/v6';
+const TRANSITOUS_ROUTES = 'https://api.transitous.org/api/experimental/map/routes';
 const VALHALLA_ENDPOINT = 'https://valhalla1.openstreetmap.de/route';
 
 export const visualFixture = {
@@ -305,6 +307,12 @@ export async function installVisualProviderFixtures(page: Page) {
   });
 
   await page.route(`${DIGITRANSIT_ENDPOINT}**`, route => handleDigitransit(route, clock));
+  await page.route(`${TRANSITOUS_API}**`, route => {
+    const url = route.request().url();
+    if (url.includes('/map/stops')) return json(route, []);
+    return json(route, { stopTimes: [], legs: [] });
+  });
+  await page.route(`${TRANSITOUS_ROUTES}**`, route => json(route, []));
 
   await page.route('https://nominatim.openstreetmap.org/**', route => json(route, {
     display_name: 'Tampere-talo, Yliopistonkatu 55, Tampere',

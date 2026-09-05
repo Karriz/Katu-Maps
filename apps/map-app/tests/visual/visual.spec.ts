@@ -8,6 +8,8 @@ const viewports = {
   landscape: { width: 740, height: 390, deviceScaleFactor: 1 },
 } as const;
 
+const tampereCityView = { center: [23.7609, 61.4981] as [number, number], zoom: 14, bearing: 0, pitch: 0 };
+
 type Scenario = {
   name: string;
   description: string;
@@ -220,18 +222,19 @@ async function openRouteAutocomplete(page: Page) {
   await page.getByLabel('Search starting point').fill('Tampere');
   const results = page.getByRole('listbox', { name: 'Search starting point results' });
   await expect(results).toBeVisible();
+  await expect(results).toHaveAttribute('data-placement', /^(top|bottom)$/);
   await expect(results.getByRole('option')).toHaveCount(3);
   expect(await results.evaluate((element) => element.closest('.route-panel'))).toBeNull();
 
-  const bounds = await results.boundingBox();
-  const lastOptionBounds = await results.getByRole('option').last().boundingBox();
   const viewport = page.viewportSize();
-  expect(bounds).not.toBeNull();
-  expect(lastOptionBounds).not.toBeNull();
   expect(viewport).not.toBeNull();
-  expect(bounds!.height).toBeGreaterThan(120);
-  expect(bounds!.y).toBeGreaterThanOrEqual(0);
-  expect(lastOptionBounds!.y + lastOptionBounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
+  await expect.poll(async () => {
+    const bounds = await results.boundingBox();
+    const lastOptionBounds = await results.getByRole('option').last().boundingBox();
+    if (!bounds || !lastOptionBounds || !viewport) return Number.POSITIVE_INFINITY;
+    if (bounds.height <= 120 || bounds.y < 0) return Number.POSITIVE_INFINITY;
+    return lastOptionBounds.y + lastOptionBounds.height;
+  }).toBeLessThanOrEqual(viewport!.height + 1);
 }
 
 async function verifyRouteKeyboard(page: Page) {
@@ -683,6 +686,7 @@ const scenarios: Scenario[] = [
     name: 'phone-position-closes-transit-information',
     description: 'Opening transit-stop information replaces position information on mobile',
     viewport: 'phone',
+    initialView: tampereCityView,
     setup: async page => {
       await openPositionInformation(page);
       await openTransitStop(page);
@@ -859,7 +863,7 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.mobile-sheet-close')).toBeVisible();
       await expect(panel.locator('.layer-panel-close')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
-      await expect(panel.getByRole('switch')).toHaveCount(6);
+      await expect(panel.getByRole('switch')).toHaveCount(7);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
