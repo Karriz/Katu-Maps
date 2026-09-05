@@ -22,6 +22,7 @@ export const MAP_COLORS = {
   trafficCamera: '#0f766e',
   roadWeather: '#0369a1',
   roadWeatherIce: '#0284c7',
+  weather: '#0ea5e9',
   roadTraffic: '#dc2626',
   roadWork: '#ea580c',
   roadIncident: '#e11d48',

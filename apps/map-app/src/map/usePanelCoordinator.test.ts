@@ -17,6 +17,7 @@ describe('position information marker lifecycle', () => {
   it('keeps the marker at the coordinates owned by the open position panel', () => {
     vi.stubGlobal('window', { innerWidth: 1280 });
     const setContextMenuMarker = vi.fn();
+    const closeWeatherPanel = vi.fn();
     const coordinator = usePanelCoordinator({
       routeVehicleViewRef: { current: false },
       routeResultRef: { current: null },
@@ -39,6 +40,7 @@ describe('position information marker lifecycle', () => {
       roadTrafficLayerRef: { current: null },
       setSelectedRoadTraffic: vi.fn(),
       setSelectedRoadTrafficMessage: vi.fn(),
+      closeWeatherPanel,
       cancelRoute: vi.fn(),
       rememberRouteVehicle: vi.fn(),
     });
@@ -56,5 +58,6 @@ describe('position information marker lifecycle', () => {
       address: { status: 'loading' },
     });
     expect(setContextMenuMarker).toHaveBeenLastCalledWith([24.3, 62.4]);
+    expect(closeWeatherPanel).toHaveBeenCalled();
   });
 });

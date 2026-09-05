@@ -32,5 +32,6 @@ export const serviceConfig = Object.freeze({
   overpassEndpoint: configuredEndpoint(import.meta.env.VITE_OVERPASS_ENDPOINT, 'https://overpass-api.de/api/interpreter'),
   openChargeMapEndpoint: configuredEndpoint(import.meta.env.VITE_OPENCHARGEMAP_ENDPOINT, 'https://api.openchargemap.io/v3'),
   openChargeMapApiKey: import.meta.env.VITE_OPENCHARGEMAP_API_KEY?.trim() || '',
+  openMeteoEndpoint: configuredEndpoint(import.meta.env.VITE_OPENMETEO_ENDPOINT, 'https://api.open-meteo.com'),
   transitTripRefreshMs: configuredInterval(import.meta.env.VITE_TRANSIT_TRIP_REFRESH_MS, 15_000, 15_000),
 });

@@ -297,6 +297,56 @@ async function handleDigitransit(route: Route, clock: ReturnType<typeof fixtureC
   return json(route, { data: {} });
 }
 
+function openMeteoFixture(url: URL, clock: ReturnType<typeof fixtureClock>) {
+  const latitudes = (url.searchParams.get('latitude') ?? '61.5').split(',').filter(Boolean);
+  const times = Array.from({ length: 12 }, (_, index) => clock.iso(index * 60).slice(0, 16));
+  const dates = [times[0].slice(0, 10), clock.iso(24 * 60).slice(0, 10)];
+  if (latitudes.length > 1) {
+    return latitudes.map((_, index) => ({
+      hourly: {
+        time: times,
+        cloud_cover: times.map(() => 35 + (index % 5) * 8),
+        precipitation: times.map((__, hour) => (hour > 5 ? 0.3 + (index % 4) * 0.2 : 0)),
+      },
+    }));
+  }
+  return {
+    timezone: 'Europe/Helsinki',
+    current: {
+      time: times[0],
+      temperature_2m: 16,
+      weather_code: 2,
+      cloud_cover: 44,
+      precipitation: 0,
+      wind_speed_10m: 9,
+      wind_direction_10m: 210,
+      relative_humidity_2m: 62,
+      snowfall: 0,
+      snow_depth: 0,
+    },
+    hourly: {
+      time: times,
+      temperature_2m: times.map((_, index) => 16 - index * 0.3),
+      weather_code: times.map((_, index) => (index > 6 ? 61 : 2)),
+      cloud_cover: times.map((_, index) => 40 + index),
+      precipitation: times.map((_, index) => (index > 6 ? 0.4 : 0)),
+      precipitation_probability: times.map((_, index) => (index > 6 ? 55 : 12)),
+      snowfall: times.map(() => 0),
+      snow_depth: times.map(() => 0),
+      wind_speed_10m: times.map(() => 9),
+    },
+    daily: {
+      time: dates,
+      weather_code: [2, 61],
+      temperature_2m_max: [17, 14],
+      temperature_2m_min: [11, 9],
+      precipitation_sum: [0.2, 3.4],
+      precipitation_probability_max: [20, 70],
+      snowfall_sum: [0, 0],
+    },
+  };
+}
+
 export async function installVisualProviderFixtures(page: Page) {
   const clock = fixtureClock();
 
@@ -363,4 +413,8 @@ export async function installVisualProviderFixtures(page: Page) {
       { ID: 2, ConnectionType: { Title: 'Type 2' }, PowerKW: 22, Quantity: 2, StatusType: { Title: 'Operational', IsOperational: true } },
     ],
   }]));
+
+  await page.route('https://api.open-meteo.com/**', route => {
+    return json(route, openMeteoFixture(new URL(route.request().url()), clock));
+  });
 }

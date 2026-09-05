@@ -17,6 +17,8 @@ The application uses one hosted map-data path:
   roadworks, and traffic incidents for optional driving layers.
 - Open Charge Map for optional electric-vehicle charging stations, including
   operator, status, and connector types.
+- Open-Meteo for viewed-location weather and optional cloud/precipitation
+  forecast overlays.
 - A provider-neutral transit service: Digitransit for locations in Finland and
   Transitous elsewhere, for stops, departures, route geometry, and vehicle
   progress.
@@ -41,6 +43,8 @@ pipeline. Transit provider selection is geographic and centralized in
 - `RoadTrafficLayer.ts` shows TMS traffic as coloured road segments plus
   Fintraffic roadworks and incidents.
 - `ChargingStationsLayer.ts` shows Open Charge Map charging stations.
+- `Weather.ts` fetches Open-Meteo point forecasts and a coarse cloud/precip
+  grid. `WeatherForecastLayer.ts` paints that grid as a MapLibre image overlay.
 - `TransitVehicleModelLayer.ts` renders the close-zoom Three.js vehicle model.
 - `MapView.tsx` coordinates map state, data services, and custom layers.
 - React UI components remain independent of source-layer parsing.
@@ -52,6 +56,8 @@ apps/
   map-app/                 # Browser application
 docs/
   ARCHITECTURE.md          # Runtime and rendering boundaries
+  API_SERVICE_ASSESSMENT.md
+  WEATHER_DATA.md          # Open-data study for a weather panel and overlays
   MVP.md                   # Current product checklist
 ```
 
