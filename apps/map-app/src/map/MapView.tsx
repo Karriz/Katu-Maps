@@ -3626,7 +3626,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             themePreference={themePreference}
             onThemeChange={setThemePreference}
           />}
-          {!flight.active && layerToggles.weather && !routeOpen && (
+          {!flight.active && layerToggles.weather && !routeOpen && !layersOpen && (
             <WeatherChip
               weather={viewedWeather.weather}
               loading={viewedWeather.loading}
