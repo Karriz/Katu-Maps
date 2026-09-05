@@ -220,18 +220,19 @@ async function openRouteAutocomplete(page: Page) {
   await page.getByLabel('Search starting point').fill('Tampere');
   const results = page.getByRole('listbox', { name: 'Search starting point results' });
   await expect(results).toBeVisible();
+  await expect(results).toHaveAttribute('data-placement', /^(top|bottom)$/);
   await expect(results.getByRole('option')).toHaveCount(3);
   expect(await results.evaluate((element) => element.closest('.route-panel'))).toBeNull();
 
-  const bounds = await results.boundingBox();
-  const lastOptionBounds = await results.getByRole('option').last().boundingBox();
   const viewport = page.viewportSize();
-  expect(bounds).not.toBeNull();
-  expect(lastOptionBounds).not.toBeNull();
   expect(viewport).not.toBeNull();
-  expect(bounds!.height).toBeGreaterThan(120);
-  expect(bounds!.y).toBeGreaterThanOrEqual(0);
-  expect(lastOptionBounds!.y + lastOptionBounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
+  await expect.poll(async () => {
+    const bounds = await results.boundingBox();
+    const lastOptionBounds = await results.getByRole('option').last().boundingBox();
+    if (!bounds || !lastOptionBounds || !viewport) return Number.POSITIVE_INFINITY;
+    if (bounds.height <= 120 || bounds.y < 0) return Number.POSITIVE_INFINITY;
+    return lastOptionBounds.y + lastOptionBounds.height;
+  }).toBeLessThanOrEqual(viewport!.height + 1);
 }
 
 async function verifyRouteKeyboard(page: Page) {

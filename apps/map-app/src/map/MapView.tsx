@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import {
   type ExpressionSpecification,
@@ -748,7 +748,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setNearbyPlaces(null);
     setContextMenuMarker(null);
   }, []);
-  useEffect(() => {
+  const routeSheetHeightVar = routeSheet.style['--mobile-sheet-height'];
+  useLayoutEffect(() => {
     if (!routeSearchTarget) return;
 
     const updatePosition = () => {
@@ -788,7 +789,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       results.dataset.placement = openAbove ? 'top' : 'bottom';
     };
 
-    const frame = window.requestAnimationFrame(updatePosition);
+    updatePosition();
     const observer = new ResizeObserver(updatePosition);
     const anchor = routeSearchAnchorRefs.current[routeSearchTarget];
     if (anchor) observer.observe(anchor);
@@ -799,14 +800,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     window.visualViewport?.addEventListener('scroll', updatePosition);
 
     return () => {
-      window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
       window.visualViewport?.removeEventListener('resize', updatePosition);
       window.visualViewport?.removeEventListener('scroll', updatePosition);
     };
-  }, [routeSearchTarget, routeSheet.style]);
+  }, [routeSearchTarget, routeSheetHeightVar]);
   const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
     const mobileDefault2d = typeof window !== 'undefined' && window.innerWidth <= 760;
     const defaults: MapLayerState = {
