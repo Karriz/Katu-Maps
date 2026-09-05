@@ -38,3 +38,10 @@ the current and next transit leg, each refresh may issue two provider requests.
   operators, measure 429/timeouts, and arrange replacement search/geocoding.
 - Before sustained traffic above 1,000 daily active users: use production-grade
   geocoding and routing endpoints and consider a cache/proxy where terms allow.
+
+## Road data outside Finland
+
+Digitraffic remains the only default road-weather, TMS, camera, and
+traffic-message provider. A survey of other open national feeds, and why
+most DATEX II NAPs are not browser-viable, is in
+[`docs/OPEN_TRAFFIC_DATA.md`](./OPEN_TRAFFIC_DATA.md).

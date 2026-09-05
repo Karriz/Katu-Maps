@@ -16,7 +16,8 @@ Transit data uses Transitous globally and Digitransit automatically inside
 Finland. Finnish road weather cameras, weather stations, traffic measurements,
 roadworks, and incidents from Fintraffic Digitraffic are optional in Map layers
 and do not
-require an API key. Open Charge Map charging stations
+require an API key. Coverage outside Finland is surveyed in
+[`docs/OPEN_TRAFFIC_DATA.md`](../../docs/OPEN_TRAFFIC_DATA.md). Open Charge Map charging stations
 are optional and need `VITE_OPENCHARGEMAP_API_KEY` from
 [Open Charge Map My apps](https://openchargemap.org/site/profile/applications).
 To enable Finnish transit data, copy `.env.example` to `.env.local`
