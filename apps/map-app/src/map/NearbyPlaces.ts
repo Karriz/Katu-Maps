@@ -1,3 +1,5 @@
+import { NEARBY_SPORT_POI_TYPES } from './PoiClasses';
+
 export const NEARBY_MAX_RADIUS_METRES = 2_000;
 export const NEARBY_RESULT_LIMIT = 10;
 
@@ -20,7 +22,7 @@ const CATEGORY_TYPES: Record<NearbyCategory, Set<string>> = {
   sights: new Set(['attraction', 'museum', 'gallery', 'artwork', 'historic', 'viewpoint', 'place_of_worship', 'tourism']),
   food: new Set(['restaurant', 'cafe', 'bar', 'pub', 'fast_food', 'food_court', 'bakery']),
   services: new Set(['shop', 'supermarket', 'marketplace', 'pharmacy', 'hospital', 'clinic', 'bank', 'atm', 'post_office', 'fuel', 'toilets']),
-  recreation: new Set(['park', 'playground', 'stadium', 'sports_centre', 'picnic_site', 'zoo', 'cinema', 'theatre']),
+  recreation: new Set(['park', 'picnic_site', 'zoo', 'cinema', 'theatre', 'dog_park', ...NEARBY_SPORT_POI_TYPES]),
   transit: new Set(['bus_stop', 'platform', 'station', 'tram_stop', 'subway_entrance']),
 };
 

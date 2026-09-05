@@ -22,4 +22,13 @@ describe('rankNearbyPlaces', () => {
     expect(rankNearbyPlaces(anchor, candidates)).toHaveLength(5);
     expect(rankNearbyPlaces(anchor, candidates).at(-1)?.id).toBe('park');
   });
+
+  it('ranks named playgrounds and sport facilities as recreation', () => {
+    const result = rankNearbyPlaces(anchor, [
+      { id: 'pool', name: 'Pyynikki outdoor pool', type: 'swimming', coordinates: [24.001, 60], properties: {} },
+      { id: 'play', name: 'Sorsapuisto playground', type: 'playground', coordinates: [24.002, 60], properties: {} },
+      { id: 'court', name: 'Koulukatu tennis', type: 'tennis', coordinates: [24.003, 60], properties: {} },
+    ]);
+    expect(result.map((place) => place.id)).toEqual(['pool', 'play']);
+  });
 });

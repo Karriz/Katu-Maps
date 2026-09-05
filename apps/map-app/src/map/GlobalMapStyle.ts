@@ -9,6 +9,7 @@ import {
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
 import { MAP_COLORS } from './MapPalette';
+import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 
 export const OPENFREEMAP_SOURCE_ID = 'openfreemap';
@@ -1978,8 +1979,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       maxzoom: 13.5,
       filter: [
         'any',
-        ['in', ['get', 'class'], ['literal', ['shelter', 'wilderness_hut', 'alpine_hut', 'viewpoint', 'information', 'guidepost', 'picnic_site', 'campsite', 'camp_site', 'drinking_water', 'toilets']]],
-        ['in', ['get', 'subclass'], ['literal', ['shelter', 'wilderness_hut', 'alpine_hut', 'viewpoint', 'information', 'guidepost', 'picnic_site', 'campsite', 'camp_site', 'drinking_water', 'toilets']]],
+        ['in', ['get', 'class'], ['literal', [...HIKING_POI_CLASSES]]],
+        ['in', ['get', 'subclass'], ['literal', [...HIKING_POI_CLASSES]]],
       ],
       layout: {
         visibility: 'none',
@@ -1993,6 +1994,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'camp_site', 'location-campsite-icon',
           'drinking_water', 'location-drinking_water-icon',
           'toilets', 'location-toilets-icon',
+          'dog_park', 'location-dog_park-icon',
+          'bbq', 'location-bbq-icon',
+          'winter_sports', 'location-winter_sports-icon',
           [
             'match', ['get', 'subclass'],
             'viewpoint', 'location-viewpoint-icon',
@@ -2003,6 +2007,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
             'camp_site', 'location-campsite-icon',
             'drinking_water', 'location-drinking_water-icon',
             'toilets', 'location-toilets-icon',
+            'dog_park', 'location-dog_park-icon',
+            'bbq', 'location-bbq-icon',
+            'winter_sports', 'location-winter_sports-icon',
             'location-shelter-icon',
           ],
         ],

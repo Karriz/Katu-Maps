@@ -7,6 +7,7 @@ import {
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
 } from './GlobalMapStyle';
+import { HIKING_POI_CLASSES } from './PoiClasses';
 
 describe('global map overlay styles', () => {
   it('is accepted by the MapLibre style specification', () => {
@@ -106,5 +107,22 @@ describe('global map overlay styles', () => {
 
     expect(aerodromeLayer?.['source-layer']).toBe('aerodrome_label');
     expect(layout?.['icon-image']).toBe('location-airport-icon');
+  });
+
+  it('includes leftover outdoor amenities on the hiking POI overlay', () => {
+    const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-hiking-pois') as {
+      filter?: unknown;
+      layout?: Record<string, unknown>;
+    } | undefined;
+    const serializedFilter = JSON.stringify(layer?.filter);
+    const serializedIcons = JSON.stringify(layer?.layout?.['icon-image']);
+
+    expect(HIKING_POI_CLASSES).toEqual(expect.arrayContaining(['dog_park', 'bbq', 'winter_sports']));
+    ['dog_park', 'bbq', 'winter_sports'].forEach((className) => {
+      expect(serializedFilter).toContain(className);
+      expect(serializedIcons).toContain(`location-${className}-icon`);
+    });
+    expect(serializedFilter).not.toContain('playground');
+    expect(serializedFilter).not.toContain('sports_centre');
   });
 });

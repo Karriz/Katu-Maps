@@ -28,17 +28,22 @@ import {
   Mail,
   Palette,
   MapPin,
-  PawPrint,
   Pencil,
   Plane,
   Shield,
   Star,
   X,
   Droplets,
+  Dumbbell,
+  Flag,
   Mountain,
   Navigation,
+  PawPrint,
+  Sailboat,
   ShoppingBag,
   Share2,
+  Smile,
+  Snowflake,
   SquareParking,
   Store,
   Ticket,
@@ -47,6 +52,7 @@ import {
   Trash2,
   TreePine,
   Utensils,
+  Waves,
   type LucideIcon,
 } from 'lucide-react';
 import { createElement } from 'react';
@@ -74,6 +80,11 @@ const TransitJourneyHeader = lazy(() => import('./TransitJourneyDetails').then((
 import { MapContextMenu } from './MapContextMenu';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 import { rankNearbyPlaces, type NearbyPlace } from './NearbyPlaces';
+import {
+  HIKING_POI_CLASSES,
+  SPORT_FACILITY_POI_CLASSES,
+  sportFacilityIconId,
+} from './PoiClasses';
 import { MapCameraActions } from './MapCameraActions';
 import { RoutePlannerControls } from './RoutePlannerControls';
 import { PositionInformationPanel } from './PositionInformationPanel';
@@ -380,6 +391,8 @@ const LOCATION_POI_CLASSES = [
   'grave_yard', 'lodging', 'motel', 'bed_and_breakfast', 'guest_house', 'hostel',
   'chalet', 'alpine_hut', 'dormitory', 'shelter', 'wilderness_hut', 'viewpoint',
   'information', 'guidepost', 'picnic_site', 'drinking_water', 'airport', 'aerodrome', 'terminal',
+  ...SPORT_FACILITY_POI_CLASSES,
+  ...HIKING_POI_CLASSES,
 ];
 
 const LOCATION_ICON_DEFINITIONS: Array<[string, LucideIcon]> = [
@@ -398,6 +411,9 @@ const LOCATION_ICON_DEFINITIONS: Array<[string, LucideIcon]> = [
   ['shelter', TentTree], ['viewpoint', Mountain], ['guidepost', MapPin],
   ['picnic_site', TreePine], ['drinking_water', Droplets],
   ['airport', Plane],
+  ['playground', Smile], ['sports_centre', Dumbbell], ['golf', Flag],
+  ['swimming', Waves], ['ice_rink', Snowflake], ['marina', Sailboat],
+  ['dog_park', PawPrint], ['bbq', Flame], ['winter_sports', Snowflake],
 ];
 
 const LOCATION_ICON_COLORS: Record<string, string> = {
@@ -414,6 +430,9 @@ const LOCATION_ICON_COLORS: Record<string, string> = {
   shelter: '#8a704c', viewpoint: '#806bb0', guidepost: '#ad743b', picnic_site: '#5f8a65',
   drinking_water: '#4383ad',
   airport: '#557f91',
+  playground: '#d4a24c', sports_centre: '#5f8a65', golf: '#6d9a71',
+  swimming: '#4383ad', ice_rink: '#5b7ea6', marina: '#557f91',
+  dog_park: '#8a704c', bbq: '#ba625e', winter_sports: '#5b7ea6',
 };
 
 const LOCATION_ICON_ALIASES: Array<[string, string]> = [
@@ -430,6 +449,9 @@ const LOCATION_ICON_ALIASES: Array<[string, string]> = [
   ['alpine_hut', 'lodging'], ['dormitory', 'lodging'],
   ['wilderness_hut', 'shelter'], ['information', 'guidepost'],
   ['aerodrome', 'airport'], ['terminal', 'airport'],
+  ...SPORT_FACILITY_POI_CLASSES
+    .map((className): [string, string] => [className, sportFacilityIconId(className)])
+    .filter(([className, iconId]) => className !== iconId),
 ];
 
 const FAVORITE_ICON_DEFINITIONS: Array<[string, LucideIcon]> = [
@@ -453,6 +475,12 @@ const LOCATION_PRIORITY: Array<[string, number]> = [
   ['chalet', 9], ['alpine_hut', 9], ['dormitory', 9],
   ['shelter', 8], ['wilderness_hut', 8], ['viewpoint', 7], ['information', 10],
   ['guidepost', 9], ['picnic_site', 9], ['drinking_water', 9],
+  ['sports_centre', 8], ['golf', 9], ['golf_course', 9], ['miniature_golf', 10],
+  ['swimming', 9], ['swimming_area', 9], ['water_park', 9], ['marina', 9], ['harbor', 9],
+  ['ice_rink', 9], ['playground', 10], ['swimming_pool', 11], ['pitch', 12],
+  ['dog_park', 10], ['bbq', 11], ['winter_sports', 9],
+  ['tennis', 12], ['basketball', 12], ['volleyball', 12], ['athletics', 12],
+  ['skiing', 10], ['climbing', 11], ['skateboard', 12],
   ['airport', 4], ['aerodrome', 4], ['terminal', 5],
   ['shop', 15], ['supermarket', 16], ['marketplace', 16], ['bakery', 10],
 ];
