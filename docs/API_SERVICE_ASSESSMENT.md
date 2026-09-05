@@ -13,6 +13,7 @@ unless explicitly stated otherwise.
 | Transitous | Global transit stops, departures, trips and plans | Cancellation, timeouts, visibility-aware polling, identifying client header | Volunteer best-effort service; failures must remain recoverable. |
 | Digitransit | Finnish transit and live positions | Subscription key, cancellation, timeout, polling only for selected journeys | Respect rate-limit responses and do not poll faster than useful source updates. |
 | Digitraffic weather cameras | Finnish road camera stills | `Digitraffic-User` header, 30-minute station cache, details fetched on selection, 10-minute image refresh while the panel is open | Public road API; keep station list cached and do not poll images faster than the ~10-minute source interval. |
+| Open Charge Map | Optional EV charging stations | Identifying API key, viewport bounding-box queries, 5-minute cache, 280 ms debounce, max 250 results, zoom 9+ | Public registry with no SLA; register an application key and do not poll faster than useful map movement. |
 | OpenFreeMap | Vector map tiles | MapLibre caching and attribution | Public instance currently permits unlimited map views but has no SLA. |
 | Mapterhorn | Terrain tiles | Terrain disabled by default and capped at z12 | Tile volume and availability, rather than request-policy limits. |
 | Wikimedia | Optional descriptions and images | Per-location caches, cancellation and partial-failure handling | Global API rate limits; keep requests interaction-driven and cacheable. |

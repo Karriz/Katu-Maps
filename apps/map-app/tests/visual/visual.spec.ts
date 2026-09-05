@@ -199,6 +199,33 @@ async function startFlightMode(page: Page) {
   await expect(page.locator('.maplibregl-ctrl-attrib')).toBeVisible();
 }
 
+async function openChargingStation(page: Page) {
+  await page.getByRole('button', { name: 'Map layers' }).click();
+  const panel = page.locator('#map-layer-panel');
+  await expect(panel).toBeVisible();
+  const toggle = panel.getByRole('switch', { name: /Charging stations/i });
+  const pending = page.waitForResponse(
+    (response) => response.url().includes('api.openchargemap.io/v3/poi') && response.ok(),
+    { timeout: 15_000 },
+  );
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await pending;
+  await panel.getByRole('button', { name: 'Close map layers' }).click();
+  await expect(panel).toBeHidden();
+  const canvas = page.locator('.map-canvas');
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  await canvas.click({ position: { x: Math.round(box!.width / 2), y: Math.round(box!.height / 2) } });
+  const info = page.getByRole('complementary', { name: 'Charging station' });
+  await expect(info).toBeVisible({ timeout: 10_000 });
+  await expect(info).toContainText('Koskipuisto charging');
+  await expect(info.getByRole('region', { name: 'General information' })).toContainText('Virta');
+  await expect(info.getByRole('region', { name: 'Status' })).toContainText('Operational');
+  await expect(info.getByRole('region', { name: 'Charger types' })).toContainText('CCS (Type 2)');
+  await expect(info.getByRole('region', { name: 'Charger types' })).toContainText('150 kW');
+}
+
 async function verifyThemeSettings(page: Page) {
   await page.getByRole('button', { name: 'Map layers' }).click();
   await expect(page.getByRole('group', { name: 'Appearance' })).toBeVisible();
@@ -867,7 +894,11 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.mobile-sheet-close')).toBeVisible();
       await expect(panel.locator('.layer-panel-close')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
-      await expect(panel.getByRole('switch')).toHaveCount(7);
+      await expect(panel.getByRole('heading', { name: 'Map' })).toBeVisible();
+      await expect(panel.getByRole('heading', { name: 'Routes' })).toBeVisible();
+      await expect(panel.getByRole('heading', { name: 'Places' })).toBeVisible();
+      await expect(panel.getByRole('switch', { name: /Charging stations/i })).toBeVisible();
+      await expect(panel.getByRole('switch')).toHaveCount(8);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
@@ -885,6 +916,14 @@ const scenarios: Scenario[] = [
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
     },
     state: 'layers open',
+  },
+  {
+    name: 'desktop-charging-station-panel',
+    description: 'Charging station panel shows general info, status and charger types',
+    viewport: 'desktop',
+    initialView: tampereCityView,
+    setup: openChargingStation,
+    state: 'charging station selected',
   },
   {
     name: 'desktop-flight-mode',

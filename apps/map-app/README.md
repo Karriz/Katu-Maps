@@ -14,7 +14,10 @@ npm run dev
 
 Transit data uses Transitous globally and Digitransit automatically inside
 Finland. Finnish road weather cameras from Fintraffic Digitraffic are optional
-in Map layers and do not require an API key. To enable Finnish transit data, copy `.env.example` to `.env.local`
+in Map layers and do not require an API key. Open Charge Map charging stations
+are optional and need `VITE_OPENCHARGEMAP_API_KEY` from
+[Open Charge Map My apps](https://openchargemap.org/site/profile/applications).
+To enable Finnish transit data, copy `.env.example` to `.env.local`
 and set `VITE_DIGITRANSIT_SUBSCRIPTION_KEY` to a Digitransit developer API key.
 The Vite variable is public at runtime because this is a static browser
 application; use a backend proxy if the deployment requires a secret

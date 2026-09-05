@@ -7,6 +7,7 @@ import {
   Box,
   Camera,
   Compass,
+  PlugZap,
   Crosshair,
   Footprints,
   Globe2,
@@ -41,7 +42,8 @@ export type MapLayerKey =
   | 'transit'
   | 'transitLines'
   | 'transitModels'
-  | 'trafficCameras';
+  | 'trafficCameras'
+  | 'chargingStations';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -58,14 +60,39 @@ type LayerDefinition = {
   icon: LucideIcon;
 };
 
-const primaryLayers: LayerDefinition[] = [
-  { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
-  { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
-  { key: 'cycling', label: 'Cycling routes', description: 'Emphasized cycle networks', icon: Bike },
-  { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
-  { key: 'transitLines', label: 'Transit lines', description: 'Colored metro, tram & rail', icon: TrainTrack },
-  { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
-  { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish road weather cameras', icon: Camera },
+type LayerGroup = {
+  id: string;
+  label: string;
+  layers: LayerDefinition[];
+};
+
+const layerGroups: LayerGroup[] = [
+  {
+    id: 'map',
+    label: 'Map',
+    layers: [
+      { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
+      { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
+    ],
+  },
+  {
+    id: 'routes',
+    label: 'Routes',
+    layers: [
+      { key: 'cycling', label: 'Cycling routes', description: 'Emphasized cycle networks', icon: Bike },
+      { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
+      { key: 'transitLines', label: 'Transit lines', description: 'Colored metro, tram & rail', icon: TrainTrack },
+    ],
+  },
+  {
+    id: 'places',
+    label: 'Places',
+    layers: [
+      { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
+      { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish road weather cameras', icon: Camera },
+      { key: 'chargingStations', label: 'Charging stations', description: 'Open Charge Map locations', icon: PlugZap },
+    ],
+  },
 ];
 
 const advancedLayers: LayerDefinition[] = [
@@ -455,16 +482,21 @@ export function MapControls({
                   ))}
                 </div>
               </div>
-              <div className="layer-list">
-                {primaryLayers.map((definition) => (
-                  <LayerRow
-                    key={definition.key}
-                    definition={definition}
-                    enabled={layers[definition.key]}
-                    onChange={(enabled) => onLayerChange(definition.key, enabled)}
-                  />
-                ))}
-              </div>
+              {layerGroups.map((group) => (
+                <section className="layer-group" key={group.id} aria-labelledby={`layer-group-${group.id}`}>
+                  <h3 className="layer-group-label" id={`layer-group-${group.id}`}>{group.label}</h3>
+                  <div className="layer-list">
+                    {group.layers.map((definition) => (
+                      <LayerRow
+                        key={definition.key}
+                        definition={definition}
+                        enabled={layers[definition.key]}
+                        onChange={(enabled) => onLayerChange(definition.key, enabled)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
               <details className="layer-advanced">
                 <summary>Advanced details</summary>
                 <div className="layer-list">
