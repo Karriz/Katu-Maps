@@ -33,7 +33,6 @@ export function pointCoordinates(value: unknown): [number, number] | undefined {
   const latitude = finiteNumber(value[1]);
   if (longitude === undefined || latitude === undefined) return undefined;
   if (latitude < -90 || latitude > 90) return undefined;
-  if (latitude < -90 || latitude > 90) return undefined;
   return [longitude, latitude];
 }
 
