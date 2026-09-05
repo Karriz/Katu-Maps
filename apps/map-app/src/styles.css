@@ -590,7 +590,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   cursor: pointer;
   display: flex;
   gap: 10px;
-  left: calc(var(--map-control-edge) + min(348px, calc(100% - 56px)) + 12px);
+  left: calc(var(--map-control-edge) + 364px + 56px + 12px);
   min-height: 64px;
   padding: 0 16px 0 14px;
   position: absolute;
