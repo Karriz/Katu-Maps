@@ -14,7 +14,8 @@ The application uses one hosted map-data path:
 - Photon for place search and Nominatim for optional place details.
 - Fintraffic Digitraffic weather cameras for Finnish road camera stills.
 - Fintraffic Digitraffic road weather stations, traffic measurement data,
-  roadworks, and traffic incidents for optional driving layers.
+  roadworks, and traffic incidents for optional driving layers. Open
+  equivalents abroad are surveyed in `docs/OPEN_TRAFFIC_DATA.md`.
 - Open Charge Map for optional electric-vehicle charging stations, including
   operator, status, and connector types.
 - A provider-neutral transit service: Digitransit for locations in Finland and
@@ -52,6 +53,8 @@ apps/
   map-app/                 # Browser application
 docs/
   ARCHITECTURE.md          # Runtime and rendering boundaries
+  API_SERVICE_ASSESSMENT.md
+  OPEN_TRAFFIC_DATA.md     # Open traffic sources outside Finland
   MVP.md                   # Current product checklist
 ```
 
