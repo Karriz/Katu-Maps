@@ -8,6 +8,8 @@ const viewports = {
   landscape: { width: 740, height: 390, deviceScaleFactor: 1 },
 } as const;
 
+const tampereCityView = { center: [23.7609, 61.4981] as [number, number], zoom: 14, bearing: 0, pitch: 0 };
+
 type Scenario = {
   name: string;
   description: string;
@@ -684,6 +686,7 @@ const scenarios: Scenario[] = [
     name: 'phone-position-closes-transit-information',
     description: 'Opening transit-stop information replaces position information on mobile',
     viewport: 'phone',
+    initialView: tampereCityView,
     setup: async page => {
       await openPositionInformation(page);
       await openTransitStop(page);
@@ -860,7 +863,7 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.mobile-sheet-close')).toBeVisible();
       await expect(panel.locator('.layer-panel-close')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
-      await expect(panel.getByRole('switch')).toHaveCount(6);
+      await expect(panel.getByRole('switch')).toHaveCount(7);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
@@ -1025,15 +1028,12 @@ for (const scenario of scenarios) {
         if (favorites.length) {
           localStorage.setItem('maps-favorites-v1', JSON.stringify(favorites));
           localStorage.setItem('maps-viewport-v1', JSON.stringify({ center: [0, 0], zoom: 2.2, bearing: 0, pitch: 0 }));
-        } else {
-          // The app default is Tampere at zoom 2.2. At that globe scale a phone
-          // context-menu click can land outside Finland, so transit search uses
-          // Transitous instead of the Digitransit fixtures.
+        } else if (initialView) {
           localStorage.setItem('maps-viewport-v1', JSON.stringify({
-            center: initialView?.center ?? [23.7609, 61.4981],
-            zoom: initialView?.zoom ?? 14,
-            bearing: initialView?.bearing ?? 0,
-            pitch: initialView?.pitch ?? 0,
+            center: initialView.center,
+            zoom: initialView.zoom,
+            bearing: initialView.bearing ?? 0,
+            pitch: initialView.pitch ?? 0,
           }));
         }
       }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView });
