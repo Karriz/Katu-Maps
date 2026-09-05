@@ -83,18 +83,20 @@ export function RoutePlannerControls({
     origin: null,
     destination: null,
   });
-  const suppressSearchFocusRef = useRef(false);
-  const dismissSearchInput = (input: HTMLInputElement | null) => {
-    suppressSearchFocusRef.current = true;
-    window.setTimeout(() => { suppressSearchFocusRef.current = false; }, 150);
+  const suppressSearchFocusRef = useRef<'origin' | 'destination' | null>(null);
+  const dismissSearchInput = (kind: 'origin' | 'destination', input: HTMLInputElement | null) => {
+    suppressSearchFocusRef.current = kind;
+    window.setTimeout(() => {
+      if (suppressSearchFocusRef.current === kind) suppressSearchFocusRef.current = null;
+    }, 150);
     if (!input) {
       const active = document.activeElement;
       if (active instanceof HTMLElement) active.blur();
       return;
     }
     // preventDefault on option mousedown tells the browser to keep field focus.
-    // Restored focus would call beginRouteSearch and reopen the list. Ignore it
-    // and hold readonly until the pointer is released so the OS keyboard closes.
+    // Restored focus would call beginRouteSearch and reopen this field's list.
+    // Ignore only this field so the other endpoint can still be focused.
     input.setAttribute('readonly', 'true');
     input.blur();
     const release = () => {
@@ -113,12 +115,12 @@ export function RoutePlannerControls({
   const chooseRouteSearchOption = (kind: 'origin' | 'destination', select: () => void) => ({
     onMouseDown: (event: MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
-      dismissSearchInput(routeSearchInputRefs.current[kind]);
+      dismissSearchInput(kind, routeSearchInputRefs.current[kind]);
       select();
     },
     onClick: (event: MouseEvent<HTMLButtonElement>) => {
       if (event.detail !== 0) return;
-      dismissSearchInput(routeSearchInputRefs.current[kind]);
+      dismissSearchInput(kind, routeSearchInputRefs.current[kind]);
       select();
     },
   });
@@ -127,7 +129,7 @@ export function RoutePlannerControls({
     open: routeSearchTarget !== null,
     onSelect: (index) => {
       if (routeSearchTarget === null) return;
-      dismissSearchInput(routeSearchInputRefs.current[routeSearchTarget]);
+      dismissSearchInput(routeSearchTarget, routeSearchInputRefs.current[routeSearchTarget]);
       if (index === 0) selectYourLocation(routeSearchTarget);
       else selectSearchResult(displayedSearchResults[index - 1]);
     },
@@ -159,7 +161,7 @@ export function RoutePlannerControls({
                   placeholder={`Search ${label.toLowerCase()}`}
                   value={routeSearchTarget === kind ? searchQuery : (selection?.name ?? '')}
                   onFocus={(event) => {
-                    if (suppressSearchFocusRef.current) {
+                    if (suppressSearchFocusRef.current === kind) {
                       event.currentTarget.blur();
                       return;
                     }
