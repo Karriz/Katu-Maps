@@ -34,6 +34,7 @@ type PanelCoordinatorOptions = {
   roadTrafficLayerRef: RefObject<RoadTrafficLayer | null>;
   setSelectedRoadTraffic: (station: RoadTrafficStation | null) => void;
   setSelectedRoadTrafficMessage: (message: RoadTrafficMessage | null) => void;
+  closeWeatherPanel: () => void;
   cancelRoute: () => void;
   rememberRouteVehicle: (result: RouteResult, following: boolean) => void;
 };
@@ -64,6 +65,7 @@ export function usePanelCoordinator({
   roadTrafficLayerRef,
   setSelectedRoadTraffic,
   setSelectedRoadTrafficMessage,
+  closeWeatherPanel,
   cancelRoute,
   rememberRouteVehicle,
 }: PanelCoordinatorOptions) {
@@ -79,6 +81,7 @@ export function usePanelCoordinator({
     roadTrafficLayerRef.current?.clearSelection();
     setSelectedRoadTraffic(null);
     setSelectedRoadTrafficMessage(null);
+    closeWeatherPanel();
     if (window.innerWidth <= 760) cancelRoute();
   }
 

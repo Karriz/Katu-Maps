@@ -27,6 +27,7 @@ import {
   X,
   Moon,
   Sun,
+  CloudSun,
   Monitor,
   CircleHelp,
   type LucideIcon,
@@ -47,7 +48,8 @@ export type MapLayerKey =
   | 'trafficCameras'
   | 'chargingStations'
   | 'roadWeather'
-  | 'roadTraffic';
+  | 'roadTraffic'
+  | 'weather';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -104,6 +106,13 @@ const layerGroups: LayerGroup[] = [
     layers: [
       { key: 'cycling', label: 'Cycling routes', description: 'Emphasized cycle networks', icon: Bike },
       { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
+    ],
+  },
+  {
+    id: 'weather',
+    label: 'Weather',
+    layers: [
+      { key: 'weather', label: 'Weather', description: 'Forecast for the viewed location', icon: CloudSun },
     ],
   },
 ];

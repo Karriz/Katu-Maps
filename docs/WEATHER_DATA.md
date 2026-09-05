@@ -382,3 +382,10 @@ describe it as a radar nowcast. Prefer Open-Meteo’s already-ingested ECMWF
 - Open-Meteo S3 `ecmwf_ifs025`, `ecmwf_ifs`, and `ecmwf_aifs025_single` `latest.json` 200, with precipitation and cloud_cover.
 - NASA GIBS sample tile 200, CORS `*`.
 - SYKE EO WMS GetCapabilities 200, CORS `*`.
+
+## Implementation note (v1)
+
+Shipped as an optional **Weather** layer (on by default): a chip for the
+**map centre**, a dedicated forecast panel, and a cloud/precip **model**
+time slider. Open-Meteo only; overlay is a 5×5 in-app canvas, not FMI WMS
+or radar. Fetch is debounced on `moveend` with rounded coordinates.

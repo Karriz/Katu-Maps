@@ -107,6 +107,10 @@ import { useRouteExecution } from './useRouteExecution';
 import { useMapTools } from './useMapTools';
 import { usePanelCoordinator } from './usePanelCoordinator';
 import { useMapLayerVisibility } from './useMapLayerVisibility';
+import { useViewedWeather } from './useViewedWeather';
+import { WeatherChip } from './WeatherChip';
+import { WeatherPanel } from './WeatherPanel';
+import { WeatherTimeSlider, weatherSliderTimes } from './WeatherTimeSlider';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, isMeaningfullyBetterLocation, locationZoomForAccuracy, markerFeatureCollection, normalizedLocationAccuracy } from './LocationMarkers';
 import { installPersistedMapViewFlush, loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
@@ -145,7 +149,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-contact-shadow',
 ];
 const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
-const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel';
+const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider';
 
 function closeRangeCameraOffset(): [number, number] {
   if (window.innerWidth > 760) return [0, 0];
@@ -752,6 +756,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const roadWeatherSheet = useMobileBottomSheet('half');
   const roadTrafficSheet = useMobileBottomSheet('half');
   const roadTrafficMessageSheet = useMobileBottomSheet('half');
+  const weatherSheet = useMobileBottomSheet('half');
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const selectionCameraActiveRef = useRef(false);
   const lastUserInteractionRef = useRef(0);
@@ -850,6 +855,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       chargingStations: false,
       roadWeather: false,
       roadTraffic: false,
+      weather: true,
     };
     try {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
@@ -922,6 +928,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     onChargingStationsDisabled: handleChargingStationsDisabled,
     onRoadWeatherDisabled: handleRoadWeatherDisabled,
     onRoadTrafficDisabled: handleRoadTrafficDisabled,
+  });
+  const viewedWeather = useViewedWeather({
+    mapRef,
+    mapLoaded,
+    enabled: layerToggles.weather,
+    flightActive: flight.active,
   });
   useFlightModePresentation({
     mapRef,
@@ -1307,8 +1319,10 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             : routeResult && routeOpen ? 'route-result'
               : routeOpen ? 'route'
                 : selectedLocation ? 'place'
-                  : layersOpen ? 'layers'
-                    : searchOpen ? 'search' : null;
+                  : viewedWeather.overlayOpen ? 'weather-overlay'
+                    : viewedWeather.panelOpen ? 'weather'
+                      : layersOpen ? 'layers'
+                        : searchOpen ? 'search' : null;
 
   useInAppNavigation(navigationView, (parentView) => {
     if (flight.active) { flight.stop(); return; }
@@ -1367,6 +1381,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       });
       return;
     }
+    if (viewedWeather.overlayOpen) { viewedWeather.closeOverlay(); return; }
+    if (viewedWeather.panelOpen) { viewedWeather.closePanel(); return; }
     if (layersOpen) { setLayersOpen(false); return; }
     if (searchOpen) { setSearchOpen(false); }
   });
@@ -1537,6 +1553,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSearchQuery('');
     setHighlightedSearchResults([]);
     if (isMobile) {
+      viewedWeather.closePanel();
       transitStopsLayerRef.current?.clearSelection();
       setSelectedTransitStop(null);
     }
@@ -1741,6 +1758,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (event.key !== 'Escape') return;
       if (routeContextMenu) { setRouteContextMenu(null); setContextMenuMarker(null); }
       else if (routeSearchTarget) closeAutocomplete();
+      else if (viewedWeather.overlayOpen) viewedWeather.closeOverlay();
+      else if (viewedWeather.panelOpen) viewedWeather.closePanel();
       else if (searchOpen) setSearchOpen(false);
       else if (layersOpen) setLayersOpen(false);
     };
@@ -1759,7 +1778,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('pointerdown', handlePointerDown);
     };
-  }, [layersOpen, routeContextMenu, routeSearchTarget, searchOpen]);
+  }, [layersOpen, routeContextMenu, routeSearchTarget, searchOpen, viewedWeather.overlayOpen, viewedWeather.panelOpen, viewedWeather.closeOverlay, viewedWeather.closePanel]);
 
   const cancelRoute = () => {
     routeAbortRef.current?.abort();
@@ -1822,6 +1841,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     roadTrafficLayerRef,
     setSelectedRoadTraffic,
     setSelectedRoadTrafficMessage,
+    closeWeatherPanel: viewedWeather.closePanel,
     cancelRoute,
     rememberRouteVehicle,
   });
@@ -1849,6 +1869,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSelectedRoadTraffic(null);
     setSelectedRoadTrafficMessage(null);
     roadTrafficLayerRef.current?.clearSelection();
+    viewedWeather.closePanel();
     setRouteContextMenu(null);
     setContextMenuMarker(null);
     measurementControllerRef.current = new DistanceMeasurementController(map, start, setMeasurement);
@@ -1877,7 +1898,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         maxZoom: 18,
         attributionControl: {
           compact: true,
-          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
         },
       });
     } catch (error) {
@@ -3440,6 +3461,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     roadTrafficLayerRef.current?.clearSelection();
     setSelectedRoadTraffic(null);
     setSelectedRoadTrafficMessage(null);
+    viewedWeather.closePanel();
     window.requestAnimationFrame(() => {
       if (!places.length) return;
       const bounds = new maplibregl.LngLatBounds(anchor, anchor);
@@ -3598,12 +3620,59 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             onZoomOut={zoomOut}
             onRouteOpen={openRoute}
             routeOpen={routeOpen}
-            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(selectedTrafficCamera) || Boolean(selectedChargingStation) || Boolean(selectedRoadWeather) || Boolean(selectedRoadTraffic) || Boolean(selectedRoadTrafficMessage) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
+            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(selectedTrafficCamera) || Boolean(selectedChargingStation) || Boolean(selectedRoadWeather) || Boolean(selectedRoadTraffic) || Boolean(selectedRoadTrafficMessage) || Boolean(positionInformation) || Boolean(nearbyPlaces) || viewedWeather.panelOpen}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
           />}
+          {!flight.active && layerToggles.weather && !routeOpen && (
+            <WeatherChip
+              weather={viewedWeather.weather}
+              loading={viewedWeather.loading}
+              unavailable={viewedWeather.unavailable}
+              expanded={viewedWeather.panelOpen}
+              onOpen={() => {
+                if (viewedWeather.panelOpen) {
+                  viewedWeather.closePanel();
+                  return;
+                }
+                prepareInfoPanelOpen();
+                clearTransitInfoSelection();
+                setSelectedTransitStop(null);
+                clearLocationSelection();
+                closeNearby();
+                setLayersOpen(false);
+                setSearchOpen(false);
+                viewedWeather.openPanel();
+              }}
+            />
+          )}
+          {viewedWeather.panelOpen && (
+            <WeatherPanel
+              weather={viewedWeather.weather}
+              loading={viewedWeather.loading}
+              unavailable={viewedWeather.unavailable}
+              sheet={weatherSheet}
+              onClose={viewedWeather.closePanel}
+              onOpenOverlay={viewedWeather.openOverlay}
+            />
+          )}
+          {viewedWeather.overlayOpen && (
+            <WeatherTimeSlider
+              variable={viewedWeather.overlayVariable}
+              times={weatherSliderTimes(
+                viewedWeather.overlayGrid,
+                viewedWeather.weather?.hourly.map((hour) => hour.time) ?? [],
+              )}
+              selectedTime={viewedWeather.overlayTime}
+              loading={viewedWeather.overlayLoading}
+              unavailable={viewedWeather.overlayUnavailable}
+              onVariableChange={viewedWeather.setOverlayVariable}
+              onTimeChange={viewedWeather.setOverlayTime}
+              onClose={viewedWeather.closeOverlay}
+            />
+          )}
           {routeContextMenu && (
             <MapContextMenu
               position={{ x: routeContextMenu.x, y: routeContextMenu.y }}
@@ -3628,6 +3697,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
                 setContextMenuMarker(null);
                 setPositionInformation(null);
                 setNearbyPlaces(null);
+                viewedWeather.closeWeatherUi();
                 pendingSearchCameraRef.current = null;
                 routeCameraRequestRef.current += 1;
                 vehicleFollowEnabledRef.current = false;
