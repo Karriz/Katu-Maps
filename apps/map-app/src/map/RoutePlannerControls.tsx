@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { ArrowRightLeft, Clock3, MapPin, X } from 'lucide-react';
-import { useRef, type MouseEvent, type MutableRefObject, type RefObject } from 'react';
+import { useEffect, useRef, type MouseEvent, type MutableRefObject, type RefObject } from 'react';
 import type { useRoutePlanning } from './useRoutePlanning';
 import type { TransitProviderId } from './transit';
 import { TransitRouteOptions } from './TransitRouteOptions';
@@ -12,11 +12,18 @@ function dismissSearchInput(input: HTMLInputElement | null) {
     if (active instanceof HTMLElement) active.blur();
     return;
   }
-  // Readonly-then-blur is required after mousedown preventDefault: otherwise
-  // mobile browsers keep the OS keyboard open even if the input loses focus.
+  // preventDefault on option mousedown tells the browser to keep field focus.
+  // Some engines restore that focus on mouseup, which leaves the OS keyboard
+  // open. Hold readonly until the pointer is released, then blur again.
   input.setAttribute('readonly', 'true');
   input.blur();
-  window.setTimeout(() => input.removeAttribute('readonly'), 0);
+  const release = () => {
+    input.removeAttribute('readonly');
+    if (document.activeElement === input) input.blur();
+  };
+  window.addEventListener('pointerup', release, { once: true });
+  window.addEventListener('mouseup', release, { once: true });
+  window.setTimeout(release, 50);
 }
 
 type PhotonFeature = {
@@ -96,6 +103,11 @@ export function RoutePlannerControls({
     origin: null,
     destination: null,
   });
+  useEffect(() => {
+    if (routeSearchTarget !== null) return;
+    routeSearchInputRefs.current.origin?.blur();
+    routeSearchInputRefs.current.destination?.blur();
+  }, [routeSearchTarget]);
   const chooseRouteSearchOption = (kind: 'origin' | 'destination', select: () => void) => ({
     onMouseDown: (event: MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
