@@ -28,6 +28,7 @@ function formatDayLabel(date: string) {
 
 export function WeatherPanel({
   weather,
+  placeName,
   loading,
   unavailable,
   sheet,
@@ -35,6 +36,7 @@ export function WeatherPanel({
   onOpenOverlay,
 }: {
   weather: ViewedWeather | null;
+  placeName?: string;
   loading: boolean;
   unavailable: boolean;
   sheet: ReturnType<typeof useMobileBottomSheet>;
@@ -42,6 +44,9 @@ export function WeatherPanel({
   onOpenOverlay: (variable: WeatherOverlayVariable) => void;
 }) {
   const current = weather?.current;
+  const title = current
+    ? `${formatWeatherTemperature(current.temperature)} ${current.summary}`
+    : placeName ?? 'Map centre';
   return (
     <aside
       className={`location-info-panel weather-panel mobile-bottom-sheet${sheet.dragging ? ' is-dragging' : ''}`}
@@ -49,7 +54,7 @@ export function WeatherPanel({
       data-snap={sheet.snap}
       role="dialog"
       aria-modal="true"
-      aria-label="Weather forecast"
+      aria-label={placeName ? `Weather forecast for ${placeName}` : 'Weather forecast'}
     >
       <MobileSheetHandle {...sheet} closeLabel="Close weather" onClose={onClose} />
       <div className="location-info-header">
@@ -58,8 +63,8 @@ export function WeatherPanel({
         </div>
         <div>
           <span className="location-info-category">Weather</span>
-          <h2>{current ? `${formatWeatherTemperature(current.temperature)} ${current.summary}` : 'Map centre'}</h2>
-          <p>Forecast for the place currently in view.</p>
+          <h2>{title}</h2>
+          {placeName && current && <p>{placeName}</p>}
         </div>
       </div>
       <div className="location-info-content" tabIndex={0}>
@@ -105,7 +110,7 @@ export function WeatherPanel({
             </ol>
           </section>
         )}
-        <span className="location-info-source">Model forecast from Open-Meteo. Rain chance is for this point, not a radar nowcast.</span>
+        <span className="location-info-source">Model forecast from Open-Meteo</span>
         <a className="location-info-attribution" href="https://open-meteo.com/" target="_blank" rel="noreferrer">
           Weather data by Open-Meteo.com · CC BY 4.0
         </a>

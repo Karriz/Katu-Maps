@@ -3654,7 +3654,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             themePreference={themePreference}
             onThemeChange={setThemePreference}
           />}
-          {!flight.active && layerToggles.weather && !routeOpen && !layersOpen && (
+          {!flight.active && layerToggles.weather && !routeOpen && !layersOpen && viewedWeather.viewUsable && (
             <WeatherChip
               weather={viewedWeather.weather}
               loading={viewedWeather.loading}
@@ -3676,9 +3676,10 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               }}
             />
           )}
-          {viewedWeather.panelOpen && (
+          {viewedWeather.panelOpen && viewedWeather.viewUsable && (
             <WeatherPanel
               weather={viewedWeather.weather}
+              placeName={viewedWeather.placeName}
               loading={viewedWeather.loading}
               unavailable={viewedWeather.unavailable}
               sheet={weatherSheet}
@@ -3686,7 +3687,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               onOpenOverlay={viewedWeather.openOverlay}
             />
           )}
-          {viewedWeather.overlayOpen && (
+          {viewedWeather.overlayOpen && viewedWeather.viewUsable && (
             <WeatherTimeSlider
               variable={viewedWeather.overlayVariable}
               times={weatherSliderTimes(
