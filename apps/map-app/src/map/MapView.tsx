@@ -118,6 +118,7 @@ import { useRouteExecution } from './useRouteExecution';
 import { useMapTools } from './useMapTools';
 import { usePanelCoordinator } from './usePanelCoordinator';
 import { useMapLayerVisibility } from './useMapLayerVisibility';
+import { syncTerrain3d } from './MapTerrain';
 import { useViewedWeather } from './useViewedWeather';
 import { WeatherChip } from './WeatherChip';
 import { WeatherPanel } from './WeatherPanel';
@@ -663,12 +664,14 @@ function globalWaterPatternLayer(): FillLayerSpecification {
     type: 'fill',
     source: OPENFREEMAP_SOURCE_ID,
     'source-layer': 'water',
+    // Pattern sampling over every ocean polygon is wasted at globe zooms
+    // where the opacity is still 0. Keep this for close-range water texture.
+    minzoom: 6,
     paint: {
       'fill-pattern': WATER_PATTERN_ID,
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
-        0, 0,
-        5, 0,
+        6, 0,
         7, 0.025,
         10, 0.08,
         14, 0.12,
@@ -2024,6 +2027,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         ['global-transit-line-labels', [1, 1, 1]],
         ['global-cycleway-labels', [1, 1, 1]],
         ['global-road-labels', [regionalLabelFade, 0.78 * regionalLabelFade, 0.5 * regionalLabelFade]],
+        ['global-road-labels-regional', [regionalLabelFade, 0.78 * regionalLabelFade, 0.5 * regionalLabelFade]],
+        ['global-town-labels', [1, 1, 1]],
+        ['global-locality-labels', [1, 1, 1]],
         ['global-water-labels', [regionalLabelFade, regionalLabelFade, regionalLabelFade]],
         ['global-park-labels', [1, 1, 1]],
         ['global-railway-station-labels', [1, 1, 1]],
@@ -2834,6 +2840,10 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (nextLabelSignature !== globalLabelDensitySignature) {
         updateGlobalLabelDensity();
       }
+      syncTerrain3d(map, {
+        userEnabled: terrainEnabledRef.current,
+        source: terrainSourceRef.current,
+      });
     };
       map.on('move', handleCameraMove);
       map.on('moveend', handleMoveEnd);

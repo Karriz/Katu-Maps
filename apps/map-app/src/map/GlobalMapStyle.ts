@@ -41,8 +41,14 @@ const ROAD_FILTER: ExpressionSpecification = [
 
 const OVERVIEW_ROAD_FILTER: ExpressionSpecification = [
   'all',
-  ROAD_FILTER,
-  ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary']]],
+  ['==', ['geometry-type'], 'LineString'],
+  ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
+] as ExpressionSpecification;
+
+const OVERVIEW_REGIONAL_ROAD_FILTER: ExpressionSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  ['in', ['get', 'class'], ['literal', ['primary', 'secondary', 'tertiary']]],
 ] as ExpressionSpecification;
 
 const OVERVIEW_RAIL_FILTER: ExpressionSpecification = [
@@ -615,6 +621,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'landuse',
+      minzoom: 5,
       paint: {
         'fill-color': [
           'match', ['get', 'class'],
@@ -659,6 +666,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
+      minzoom: 5,
       filter: [
         '!',
         ['in', ['get', 'class'], ['literal', [
@@ -760,6 +768,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'waterway',
+      minzoom: 7,
       paint: {
         'line-color': WATER_COLOR,
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 16, 3],
@@ -770,6 +779,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'water',
+      minzoom: 6,
       paint: {
         'fill-color': MAP_COLORS.waterEdge,
         'fill-translate': [
@@ -962,7 +972,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
-      minzoom: 1.5,
+      minzoom: 2.2,
       maxzoom: 14,
       filter: OVERVIEW_ROAD_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -970,15 +980,14 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': MAP_COLORS.roadCasing,
         'line-width': [
           'interpolate', ['exponential', 2], ['zoom'],
-          1.5, ['match', ['get', 'class'], 'motorway', 3.2, 'trunk', 2.7, 'primary', 1.7, 1.15],
-          4, ['match', ['get', 'class'], 'motorway', 3.9, 'trunk', 3.3, 'primary', 2.1, 1.45],
-          7, ['match', ['get', 'class'], 'motorway', 5, 'trunk', 4.3, 'primary', 3, 2.2],
-          10, ['match', ['get', 'class'], 'motorway', 6.3, 'trunk', 5.7, 'primary', 4.5, 3.8],
-          13.5, ['match', ['get', 'class'], 'motorway', 6.7, 'trunk', 6.2, 'primary', 5.3, 4.7],
+          2.2, ['match', ['get', 'class'], 'motorway', 3.2, 2.7],
+          4, ['match', ['get', 'class'], 'motorway', 3.9, 3.3],
+          7, ['match', ['get', 'class'], 'motorway', 5, 4.3],
+          10, ['match', ['get', 'class'], 'motorway', 6.3, 5.7],
+          13.5, ['match', ['get', 'class'], 'motorway', 6.7, 6.2],
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          1.5, 0,
           2.2, 0.78,
           11, 0.74,
           13.75, 0,
@@ -990,7 +999,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
-      minzoom: 1.5,
+      minzoom: 2.2,
       maxzoom: 14,
       filter: OVERVIEW_ROAD_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -998,16 +1007,65 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': ROAD_COLOR,
         'line-width': [
           'interpolate', ['exponential', 2], ['zoom'],
-          1.5, ['match', ['get', 'class'], 'motorway', 2.3, 'trunk', 1.8, 'primary', 1.1, 0.65],
-          4, ['match', ['get', 'class'], 'motorway', 3, 'trunk', 2.5, 'primary', 1.45, 0.9],
-          7, ['match', ['get', 'class'], 'motorway', 4, 'trunk', 3.4, 'primary', 2.15, 1.5],
-          10, ['match', ['get', 'class'], 'motorway', 5.2, 'trunk', 4.7, 'primary', 3.4, 2.8],
-          13.5, ['match', ['get', 'class'], 'motorway', 5.6, 'trunk', 5.2, 'primary', 4.3, 3.8],
+          2.2, ['match', ['get', 'class'], 'motorway', 2.3, 1.8],
+          4, ['match', ['get', 'class'], 'motorway', 3, 2.5],
+          7, ['match', ['get', 'class'], 'motorway', 4, 3.4],
+          10, ['match', ['get', 'class'], 'motorway', 5.2, 4.7],
+          13.5, ['match', ['get', 'class'], 'motorway', 5.6, 5.2],
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          1.5, 0,
           2.2, 0.94,
+          11, 1,
+          13.75, 0,
+        ],
+      },
+    },
+    {
+      id: 'global-overview-regional-road-casing',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 8,
+      maxzoom: 14,
+      filter: OVERVIEW_REGIONAL_ROAD_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': MAP_COLORS.roadCasing,
+        'line-width': [
+          'interpolate', ['exponential', 2], ['zoom'],
+          8, ['match', ['get', 'class'], 'primary', 3.4, 'secondary', 2.6, 2.1],
+          10, ['match', ['get', 'class'], 'primary', 4.5, 'secondary', 3.8, 3.2],
+          13.5, ['match', ['get', 'class'], 'primary', 5.3, 'secondary', 4.7, 4.2],
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          8, 0.7,
+          11, 0.74,
+          13.75, 0,
+        ],
+      },
+    },
+    {
+      id: 'global-overview-regional-roads',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 8,
+      maxzoom: 14,
+      filter: OVERVIEW_REGIONAL_ROAD_FILTER,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': ROAD_COLOR,
+        'line-width': [
+          'interpolate', ['exponential', 2], ['zoom'],
+          8, ['match', ['get', 'class'], 'primary', 2.4, 'secondary', 1.7, 1.2],
+          10, ['match', ['get', 'class'], 'primary', 3.4, 'secondary', 2.8, 2.3],
+          13.5, ['match', ['get', 'class'], 'primary', 4.3, 'secondary', 3.8, 3.4],
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          8, 0.9,
           11, 1,
           13.75, 0,
         ],
@@ -1383,7 +1441,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
-      minzoom: 2,
+      minzoom: 6,
       maxzoom: 11,
       filter: OVERVIEW_RAIL_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -1391,15 +1449,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': '#7f898b',
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          2, 0.8,
-          3, 1,
           6, 1.35,
           9, 1.8,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          2, 0,
-          3, 0.72,
           6, 0.86,
           9, 0.9,
           10.75, 0,
@@ -1548,21 +1602,46 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'boundary',
-      filter: ['!', ['==', ['get', 'maritime'], 1]],
+      filter: [
+        'all',
+        ['!', ['==', ['get', 'maritime'], 1]],
+        ['==', ['get', 'admin_level'], 2],
+      ],
       paint: {
         'line-color': '#8ea097',
-        'line-width': [
-          'match', ['get', 'admin_level'],
-          2, 1.2,
-          4, 0.8,
-          0.5,
-        ],
+        'line-width': 1.2,
         'line-dasharray': [3, 2],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           0, 0.18,
           2, 0.42,
           5, 0.62,
+          8, 0.7,
+        ],
+      },
+    },
+    {
+      id: 'global-boundaries-regional',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'boundary',
+      minzoom: 5,
+      filter: [
+        'all',
+        ['!', ['==', ['get', 'maritime'], 1]],
+        ['!=', ['get', 'admin_level'], 2],
+      ],
+      paint: {
+        'line-color': '#8ea097',
+        'line-width': [
+          'match', ['get', 'admin_level'],
+          4, 0.8,
+          0.5,
+        ],
+        'line-dasharray': [3, 2],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          5, 0.42,
           8, 0.7,
         ],
       },
@@ -2167,14 +2246,47 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: [
         'all',
         ['has', 'name'],
-        ['in', ['get', 'class'], ['literal', ROAD_CLASSES]],
+        ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
       ],
       layout: {
         'symbol-placement': 'line',
         'symbol-sort-key': [
           'match', ['get', 'class'],
           'motorway', 1,
-          'trunk', 2,
+          2,
+        ],
+        'text-field': LOCALIZED_NAME,
+        'text-size': [
+          'interpolate', ['linear'], ['zoom'],
+          8, ['match', ['get', 'class'], 'motorway', 10, 9],
+          12, ['match', ['get', 'class'], 'motorway', 12, 11],
+          16, ['match', ['get', 'class'], 'motorway', 14, 13],
+        ],
+        'text-font': ['Noto Sans Regular'],
+        'text-max-angle': 30,
+        'text-padding': 20,
+      },
+      paint: {
+        'text-color': MAP_COLORS.label,
+        'text-halo-color': MAP_COLORS.labelHalo,
+        'text-halo-width': 1.75,
+      },
+    },
+    {
+      id: 'global-road-labels-regional',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation_name',
+      minzoom: 11,
+      filter: [
+        'all',
+        ['has', 'name'],
+        ['in', ['get', 'class'], ['literal', ['primary', 'secondary', 'tertiary', 'minor', 'service']]],
+      ],
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-sort-key': [
+          'match', ['get', 'class'],
           'primary', 3,
           'secondary', 4,
           'tertiary', 5,
@@ -2183,9 +2295,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-field': LOCALIZED_NAME,
         'text-size': [
           'interpolate', ['linear'], ['zoom'],
-          8, ['match', ['get', 'class'], 'motorway', 10, 'trunk', 9, 0],
-          12, ['match', ['get', 'class'], 'motorway', 12, 'trunk', 11, 'primary', 10, 9],
-          16, ['match', ['get', 'class'], 'motorway', 14, 'trunk', 13, 'primary', 13, 12],
+          12, ['match', ['get', 'class'], 'primary', 10, 9],
+          16, ['match', ['get', 'class'], 'primary', 13, 12],
         ],
         'text-font': ['Noto Sans Regular'],
         'text-max-angle': 30,
@@ -2297,15 +2408,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'place',
       minzoom: 3,
-      filter: ['!=', ['get', 'class'], 'country'],
+      filter: ['in', ['get', 'class'], ['literal', ['city', 'continent']]],
       layout: {
         'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
         'text-field': LOCALIZED_NAME,
         'text-size': [
           'interpolate', ['linear'], ['zoom'],
-          3, ['match', ['get', 'class'], 'city', 12, 0],
-          8, ['match', ['get', 'class'], 'city', 16, 'town', 13, 10],
-          14, ['match', ['get', 'class'], 'city', 19, 'town', 16, 'village', 14, 12],
+          3, 12,
+          8, 16,
+          14, 19,
         ],
         'text-font': ['Noto Sans Regular'],
         'text-padding': 12,
@@ -2319,6 +2430,68 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           3, 0,
           4, 1,
         ],
+      },
+    },
+    {
+      id: 'global-state-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'place',
+      minzoom: 4,
+      maxzoom: 8,
+      filter: ['==', ['get', 'class'], 'state'],
+      layout: {
+        'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
+        'text-field': LOCALIZED_NAME,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 7, 13],
+        'text-font': ['Noto Sans Regular'],
+        'text-padding': 16,
+        'text-letter-spacing': 0.04,
+      },
+      paint: {
+        'text-color': MAP_COLORS.label,
+        'text-halo-color': MAP_COLORS.labelHalo,
+        'text-halo-width': 1.6,
+      },
+    },
+    {
+      id: 'global-town-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'place',
+      minzoom: 8,
+      filter: ['==', ['get', 'class'], 'town'],
+      layout: {
+        'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
+        'text-field': LOCALIZED_NAME,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 13, 14, 16],
+        'text-font': ['Noto Sans Regular'],
+        'text-padding': 12,
+      },
+      paint: {
+        'text-color': MAP_COLORS.label,
+        'text-halo-color': MAP_COLORS.labelHalo,
+        'text-halo-width': 1.8,
+      },
+    },
+    {
+      id: 'global-locality-labels',
+      type: 'symbol',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'place',
+      minzoom: 11,
+      filter: ['in', ['get', 'class'], ['literal', ['village', 'hamlet', 'suburb', 'neighbourhood', 'isolated_dwelling']]],
+      layout: {
+        'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
+        'text-field': LOCALIZED_NAME,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 12, 14, 14],
+        'text-font': ['Noto Sans Regular'],
+        'text-padding': 12,
+      },
+      paint: {
+        'text-color': MAP_COLORS.label,
+        'text-halo-color': MAP_COLORS.labelHalo,
+        'text-halo-width': 1.8,
       },
     },
     {
@@ -2510,8 +2683,8 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
-  ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
-  ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads'].forEach((id) => set(id, 'line-color', colors.road));
+  ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
+  ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', colors.building); set(id, 'fill-outline-color', colors.boundary); });
@@ -2520,7 +2693,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
   set('global-building-ground-storeys', 'fill-extrusion-vertical-gradient', false);
   set('global-buildings', 'fill-extrusion-vertical-gradient', false);
   ['global-building-shadow', 'global-building-contact-shadow'].forEach((id) => set(id, 'line-color', colors.shadow));
-  ['global-boundaries'].forEach((id) => set(id, 'line-color', colors.boundary));
+  ['global-boundaries', 'global-boundaries-regional'].forEach((id) => set(id, 'line-color', colors.boundary));
   (map.getStyle().layers ?? []).filter((layer) => layer.id.startsWith('global-') && layer.id.includes('label')).forEach((layer) => {
     set(layer.id, 'text-color', colors.label);
     set(layer.id, 'text-halo-color', colors.halo);
