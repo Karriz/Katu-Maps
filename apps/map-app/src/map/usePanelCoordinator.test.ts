@@ -38,6 +38,7 @@ describe('position information marker lifecycle', () => {
       setSelectedRoadWeather: vi.fn(),
       roadTrafficLayerRef: { current: null },
       setSelectedRoadTraffic: vi.fn(),
+      setSelectedRoadTrafficMessage: vi.fn(),
       cancelRoute: vi.fn(),
       rememberRouteVehicle: vi.fn(),
     });

@@ -6,6 +6,7 @@ import type { TrafficCameraSelection } from './TrafficCameras';
 import type { ChargingStation } from './ChargingStations';
 import type { RoadWeatherStation } from './RoadWeather';
 import type { RoadTrafficStation } from './RoadTraffic';
+import type { RoadTrafficMessage } from './RoadTrafficMessages';
 
 export type PositionInformationState = {
   coordinates: [number, number];
@@ -23,6 +24,7 @@ export function useInfoPanelState() {
   const [selectedChargingStation, setSelectedChargingStation] = useState<ChargingStation | null>(null);
   const [selectedRoadWeather, setSelectedRoadWeather] = useState<RoadWeatherStation | null>(null);
   const [selectedRoadTraffic, setSelectedRoadTraffic] = useState<RoadTrafficStation | null>(null);
+  const [selectedRoadTrafficMessage, setSelectedRoadTrafficMessage] = useState<RoadTrafficMessage | null>(null);
   const [positionInformation, setPositionInformation] = useState<PositionInformationState | null>(null);
 
   const closePositionInformation = useCallback(() => setPositionInformation(null), []);
@@ -32,6 +34,7 @@ export function useInfoPanelState() {
   const closeChargingStation = useCallback(() => setSelectedChargingStation(null), []);
   const closeRoadWeather = useCallback(() => setSelectedRoadWeather(null), []);
   const closeRoadTraffic = useCallback(() => setSelectedRoadTraffic(null), []);
+  const closeRoadTrafficMessage = useCallback(() => setSelectedRoadTrafficMessage(null), []);
   const closeAllInformation = useCallback(() => {
     setPositionInformation(null);
     setSelectedLocation(null);
@@ -40,6 +43,7 @@ export function useInfoPanelState() {
     setSelectedChargingStation(null);
     setSelectedRoadWeather(null);
     setSelectedRoadTraffic(null);
+    setSelectedRoadTrafficMessage(null);
   }, []);
 
   return {
@@ -55,6 +59,8 @@ export function useInfoPanelState() {
     setSelectedRoadWeather,
     selectedRoadTraffic,
     setSelectedRoadTraffic,
+    selectedRoadTrafficMessage,
+    setSelectedRoadTrafficMessage,
     positionInformation,
     setPositionInformation,
     closePositionInformation,
@@ -64,6 +70,7 @@ export function useInfoPanelState() {
     closeChargingStation,
     closeRoadWeather,
     closeRoadTraffic,
+    closeRoadTrafficMessage,
     closeAllInformation,
   };
 }

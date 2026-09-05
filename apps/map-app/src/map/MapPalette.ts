@@ -23,6 +23,8 @@ export const MAP_COLORS = {
   roadWeather: '#0369a1',
   roadWeatherIce: '#0284c7',
   roadTraffic: '#dc2626',
+  roadWork: '#ea580c',
+  roadIncident: '#e11d48',
   chargingStation: '#059669',
   chargingOperational: '#059669',
   chargingLimited: '#d97706',

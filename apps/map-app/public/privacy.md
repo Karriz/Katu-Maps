@@ -21,7 +21,7 @@ Katu Maps fetches map tiles and data from third-party providers:
 - **Map tiles** – served by Maptiler and OpenStreetMap-based services.
 - **Place search** – powered by [Photon](https://photon.komoot.io/) (Komoot). Search queries you type are sent to this service to return results.
 - **Transit data** – provided by the Digitransit platform (HSL / Fintraffic) for real-time departure and vehicle information.
-- **Finnish road data** – weather cameras, weather stations, and traffic measurements from Fintraffic Digitraffic when those layers are enabled.
+- **Finnish road data** – weather cameras, weather stations, traffic measurements, roadworks, and incidents from Fintraffic Digitraffic when those layers are enabled.
 
 Each of these providers has its own privacy policy. Please refer to their respective documentation for details on how they handle request data.
 

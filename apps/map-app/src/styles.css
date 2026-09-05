@@ -285,6 +285,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .road-traffic-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; list-style: none; margin: 0 0 12px; padding: 0; }
 .road-traffic-legend li { align-items: center; color: var(--color-muted); display: flex; font-size: 0.68rem; gap: 6px; }
 .road-traffic-legend span { border-radius: 999px; display: block; height: 4px; width: 16px; }
+.traffic-message-comment { color: var(--color-ink); font-size: 0.86rem; line-height: 1.45; margin: 0 0 12px; white-space: pre-wrap; }
 .charging-connector-list { display: grid; gap: 8px; list-style: none; margin: 4px 0 0; padding: 0; }
 .charging-connector-list li { display: flex; flex-direction: column; gap: 3px; }
 .location-info-details .charging-connector-type { color: #31465f; font-size: 0.8rem; font-weight: 700; }
