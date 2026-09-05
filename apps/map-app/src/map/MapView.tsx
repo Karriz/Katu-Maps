@@ -748,7 +748,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setNearbyPlaces(null);
     setContextMenuMarker(null);
   }, []);
-  const routeSheetHeightVar = routeSheet.style['--mobile-sheet-height'];
+  const routeSheetHeight = routeSheet.height;
   useLayoutEffect(() => {
     if (!routeSearchTarget) return;
 
@@ -806,7 +806,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       window.visualViewport?.removeEventListener('resize', updatePosition);
       window.visualViewport?.removeEventListener('scroll', updatePosition);
     };
-  }, [routeSearchTarget, routeSheetHeightVar]);
+  }, [routeSearchTarget, routeSheetHeight]);
   const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
     const mobileDefault2d = typeof window !== 'undefined' && window.innerWidth <= 760;
     const defaults: MapLayerState = {

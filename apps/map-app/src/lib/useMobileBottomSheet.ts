@@ -94,6 +94,7 @@ export function useMobileBottomSheet(initialSnap: SheetSnap = 'half', onHeightCh
     snap,
     setSnap,
     style,
+    height: sheetHeight,
     dragging: dragHeight !== null,
     handleProps: { onPointerDown, onPointerMove, onPointerUp: finish, onPointerCancel: finish, onDoubleClick: cycle },
   };
