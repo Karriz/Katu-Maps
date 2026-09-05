@@ -1025,12 +1025,15 @@ for (const scenario of scenarios) {
         if (favorites.length) {
           localStorage.setItem('maps-favorites-v1', JSON.stringify(favorites));
           localStorage.setItem('maps-viewport-v1', JSON.stringify({ center: [0, 0], zoom: 2.2, bearing: 0, pitch: 0 }));
-        } else if (initialView) {
+        } else {
+          // The app default is Tampere at zoom 2.2. At that globe scale a phone
+          // context-menu click can land outside Finland, so transit search uses
+          // Transitous instead of the Digitransit fixtures.
           localStorage.setItem('maps-viewport-v1', JSON.stringify({
-            center: initialView.center,
-            zoom: initialView.zoom,
-            bearing: initialView.bearing ?? 0,
-            pitch: initialView.pitch ?? 0,
+            center: initialView?.center ?? [23.7609, 61.4981],
+            zoom: initialView?.zoom ?? 14,
+            bearing: initialView?.bearing ?? 0,
+            pitch: initialView?.pitch ?? 0,
           }));
         }
       }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView });
