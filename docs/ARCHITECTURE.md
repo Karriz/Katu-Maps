@@ -13,6 +13,8 @@ The application uses one hosted map-data path:
 - Mapterhorn Terrarium DEM tiles capped at zoom 12 and overzoomed at close range.
 - Photon for place search and Nominatim for optional place details.
 - Fintraffic Digitraffic weather cameras for Finnish road camera stills.
+- Open Charge Map for optional electric-vehicle charging stations, including
+  operator, status, and connector types.
 - A provider-neutral transit service: Digitransit for locations in Finland and
   Transitous elsewhere, for stops, departures, route geometry, and vehicle
   progress.
@@ -32,6 +34,7 @@ pipeline. Transit provider selection is geographic and centralized in
 - `TransitStopsLayer.ts` manages stop markers, selected routes, and estimated
   vehicle markers.
 - `TrafficCamerasLayer.ts` shows Fintraffic Digitraffic road weather cameras.
+- `ChargingStationsLayer.ts` shows Open Charge Map charging stations.
 - `TransitVehicleModelLayer.ts` renders the close-zoom Three.js vehicle model.
 - `MapView.tsx` coordinates map state, data services, and custom layers.
 - React UI components remain independent of source-layer parsing.

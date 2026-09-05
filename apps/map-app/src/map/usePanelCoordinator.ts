@@ -4,6 +4,8 @@ import type { PositionInformationState } from './useInfoPanelState';
 import type { RouteResult } from './ValhallaRouting';
 import type { TrafficCameraSelection } from './TrafficCameras';
 import type { TrafficCamerasLayer } from './TrafficCamerasLayer';
+import type { ChargingStation } from './ChargingStations';
+import type { ChargingStationsLayer } from './ChargingStationsLayer';
 
 type PanelCoordinatorOptions = {
   routeVehicleViewRef: RefObject<boolean>;
@@ -20,6 +22,8 @@ type PanelCoordinatorOptions = {
   setSelectedTransitStop: (stop: (TransitStopSelection & { favoriteId?: string }) | null) => void;
   trafficCamerasLayerRef: RefObject<TrafficCamerasLayer | null>;
   setSelectedTrafficCamera: (camera: TrafficCameraSelection | null) => void;
+  chargingStationsLayerRef: RefObject<ChargingStationsLayer | null>;
+  setSelectedChargingStation: (station: ChargingStation | null) => void;
   cancelRoute: () => void;
   rememberRouteVehicle: (result: RouteResult, following: boolean) => void;
 };
@@ -43,6 +47,8 @@ export function usePanelCoordinator({
   setSelectedTransitStop,
   trafficCamerasLayerRef,
   setSelectedTrafficCamera,
+  chargingStationsLayerRef,
+  setSelectedChargingStation,
   cancelRoute,
   rememberRouteVehicle,
 }: PanelCoordinatorOptions) {
@@ -51,6 +57,8 @@ export function usePanelCoordinator({
     setContextMenuMarker(null);
     trafficCamerasLayerRef.current?.clearSelection();
     setSelectedTrafficCamera(null);
+    chargingStationsLayerRef.current?.clearSelection();
+    setSelectedChargingStation(null);
     if (window.innerWidth <= 760) cancelRoute();
   }
 

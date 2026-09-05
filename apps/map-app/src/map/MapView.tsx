@@ -80,6 +80,9 @@ import { PositionInformationPanel } from './PositionInformationPanel';
 import { LocationInformationPanel } from './LocationInformationPanel';
 import { TrafficCameraPanel } from './TrafficCameraPanel';
 import { TrafficCamerasLayer, trafficCameraFeatureAt } from './TrafficCamerasLayer';
+import { ChargingStationPanel } from './ChargingStationPanel';
+import { ChargingStationsLayer, chargingStationFeatureAt } from './ChargingStationsLayer';
+import { ChargingStationsConfigError } from './ChargingStations';
 import { parseLocationMetadata, safeHttpUrl } from './LocationMedia';
 import { InfoActionRow } from '../components/InfoActionRow';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
@@ -647,6 +650,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
+  const chargingStationsLayerRef = useRef<ChargingStationsLayer | null>(null);
   const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
@@ -666,11 +670,14 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSelectedLocation,
     selectedTrafficCamera,
     setSelectedTrafficCamera,
+    selectedChargingStation,
+    setSelectedChargingStation,
     positionInformation,
     setPositionInformation,
     closePositionInformation,
     closeLocationInformation,
     closeTrafficCamera,
+    closeChargingStation,
   } = useInfoPanelState();
   const [transitDepartureDetailOpen, setTransitDepartureDetailOpen] = useState(false);
   const [transitNavigationBackSignal, setTransitNavigationBackSignal] = useState(0);
@@ -725,6 +732,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const locationSheet = useMobileBottomSheet('half');
   const positionSheet = useMobileBottomSheet('half');
   const trafficCameraSheet = useMobileBottomSheet('half');
+  const chargingStationSheet = useMobileBottomSheet('half');
   const pendingSearchCameraRef = useRef<[number, number] | null>(null);
   const selectionCameraActiveRef = useRef(false);
   const lastUserInteractionRef = useRef(0);
@@ -820,6 +828,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transitLines: false,
       transitModels: !mobileDefault2d,
       trafficCameras: false,
+      chargingStations: false,
     };
     try {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
@@ -838,8 +847,14 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     trafficCamerasLayerRef.current?.clearSelection();
     setSelectedTrafficCamera(null);
   }, []);
+  const handleChargingStationsDisabled = useCallback(() => {
+    chargingStationsLayerRef.current?.clearSelection();
+    setSelectedChargingStation(null);
+  }, []);
   const trafficCamerasEnabledRef = useRef(layerToggles.trafficCameras);
   trafficCamerasEnabledRef.current = layerToggles.trafficCameras;
+  const chargingStationsEnabledRef = useRef(layerToggles.chargingStations);
+  chargingStationsEnabledRef.current = layerToggles.chargingStations;
   const flight = useFlightSimulator({
     mapRef,
     mapLoaded,
@@ -870,6 +885,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     waterEffectLayerIds: WATER_EFFECT_LAYER_IDS,
     onTransitDisabled: handleTransitDisabled,
     onTrafficCamerasDisabled: handleTrafficCamerasDisabled,
+    onChargingStationsDisabled: handleChargingStationsDisabled,
   });
   useFlightModePresentation({
     mapRef,
@@ -974,6 +990,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       showMapToolNotice('Traffic cameras could not be loaded.');
     });
   }, [mapLoaded, layerToggles.trafficCameras]);
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = chargingStationsLayerRef.current;
+    if (!mapLoaded || !map || !layer || !layerToggles.chargingStations) return;
+    void layer.update(map.getBounds(), map.getZoom()).catch((error) => {
+      showMapToolNotice(error instanceof ChargingStationsConfigError
+        ? 'Add an Open Charge Map API key to show charging stations.'
+        : 'Charging stations could not be loaded.');
+    });
+  }, [mapLoaded, layerToggles.chargingStations]);
 
   const {
     userLocationRef, userLocationAccuracyRef, userLocationWatchRef, locateUser,
@@ -1198,6 +1224,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     : transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
       : selectedTrafficCamera ? 'traffic-camera'
+        : selectedChargingStation ? 'charging-station'
         : transitDetailsOpen ? 'route-steps'
           : routeSearchTarget ? 'route-search'
             : routeResult && routeOpen ? 'route-result'
@@ -1225,6 +1252,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     if (selectedTrafficCamera) {
       trafficCamerasLayerRef.current?.clearSelection();
       closeTrafficCamera();
+      return;
+    }
+    if (selectedChargingStation) {
+      chargingStationsLayerRef.current?.clearSelection();
+      closeChargingStation();
       return;
     }
     if (transitDetailsOpen) { closeTransitDetails(); return; }
@@ -1691,6 +1723,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSelectedTransitStop,
     trafficCamerasLayerRef,
     setSelectedTrafficCamera,
+    chargingStationsLayerRef,
+    setSelectedChargingStation,
     cancelRoute,
     rememberRouteVehicle,
   });
@@ -1711,6 +1745,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSelectedTransitStop(null);
     setSelectedTrafficCamera(null);
     trafficCamerasLayerRef.current?.clearSelection();
+    setSelectedChargingStation(null);
+    chargingStationsLayerRef.current?.clearSelection();
     setRouteContextMenu(null);
     setContextMenuMarker(null);
     measurementControllerRef.current = new DistanceMeasurementController(map, start, setMeasurement);
@@ -1739,7 +1775,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         maxZoom: 18,
         attributionControl: {
           compact: true,
-          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road cameras by Fintraffic / Digitraffic</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
         },
       });
     } catch (error) {
@@ -1781,10 +1817,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     transitStopsLayerRef.current = transitStopsLayer;
     const trafficCamerasLayer = new TrafficCamerasLayer();
     trafficCamerasLayerRef.current = trafficCamerasLayer;
+    const chargingStationsLayer = new ChargingStationsLayer();
+    chargingStationsLayerRef.current = chargingStationsLayer;
     const transitRouteOverlay = new TransitRouteOverlay();
     transitRouteOverlayRef.current = transitRouteOverlay;
     let treeUpdateTimer: number | undefined;
     let transitStopsTimer: number | undefined;
+    let chargingStationsTimer: number | undefined;
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
     let globalLabelDensitySignature: string | undefined;
@@ -1892,6 +1931,18 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       transitStopsTimer = window.setTimeout(updateTransitStops, 220);
     };
+    const updateChargingStations = () => {
+      chargingStationsTimer = undefined;
+      if (!map.isStyleLoaded() || !chargingStationsEnabledRef.current) return;
+      void chargingStationsLayer.update(map.getBounds(), map.getZoom()).catch((error) => {
+        if ((error as Error).name === 'AbortError' || error instanceof ChargingStationsConfigError) return;
+        console.warn('Charging station request failed.', error);
+      });
+    };
+    const scheduleChargingStationsUpdate = () => {
+      if (chargingStationsTimer !== undefined) window.clearTimeout(chargingStationsTimer);
+      chargingStationsTimer = window.setTimeout(updateChargingStations, 280);
+    };
     const updateTransitRouteOverlay = () => {
       transitRouteOverlay.update(map.getBounds(), map.getZoom());
     };
@@ -1912,6 +1963,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (!positionInformation && !pendingFavorite) setContextMenuMarker(null);
       const locationLayers = ['favorite-icons', 'search-result-icons', 'nearby-result-icons', 'global-hiking-pois', 'location-poi-icons', 'location-poi-labels', 'selected-location-icon'];
       const cameraFeature = trafficCameraFeatureAt(map, event.point);
+      const chargingFeature = chargingStationFeatureAt(map, event.point);
       const feature = map.queryRenderedFeatures(event.point, { layers: locationLayers })[0];
       if (routePickingRef.current) {
         const kind = routePickingRef.current;
@@ -1927,6 +1979,18 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
           });
           return;
         }
+        if (chargingFeature && chargingFeature.geometry.type === 'Point') {
+          const chargingName = typeof chargingFeature.properties?.name === 'string' && chargingFeature.properties.name
+            ? chargingFeature.properties.name
+            : 'Charging station';
+          setRouteEndpoint(kind, {
+            name: chargingName,
+            category: 'Charging station',
+            coordinates: [Number(chargingFeature.geometry.coordinates[0]), Number(chargingFeature.geometry.coordinates[1])],
+            source: 'map',
+          });
+          return;
+        }
         const destination = feature && feature.layer.id !== 'selected-location-icon'
           ? locationSelectionFromFeature(feature).coordinates
           : [map.unproject(event.point).lng, map.unproject(event.point).lat] as [number, number];
@@ -1937,6 +2001,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         return;
       }
       if (cameraFeature) return;
+      if (chargingFeature) return;
       if (!feature || feature.layer.id === 'selected-location-icon') return;
       const favoriteId = typeof feature.properties?.favoriteId === 'string' ? feature.properties.favoriteId : undefined;
       const favorite = favoriteId ? favoritesRef.current.find((item) => item.id === favoriteId) : undefined;
@@ -2430,6 +2495,29 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
           showMapToolNotice('Traffic cameras could not be loaded.');
         });
       });
+      void chargingStationsLayer.install(map, (station) => {
+        prepareInfoPanelOpen();
+        clearLocationSelection();
+        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
+          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
+          transitStopsLayer.clearStopSelection();
+        } else {
+          transitStopsLayer.clearSelection();
+        }
+        setSelectedTransitStop(null);
+        chargingStationsLayer.selectStation(station);
+        setSelectedChargingStation(station);
+        pendingSearchCameraRef.current = station.coordinates;
+        map.easeTo({
+          center: station.coordinates,
+          zoom: Math.max(map.getZoom(), 14),
+          offset: closeRangeCameraOffset(),
+          duration: 900,
+        });
+      }, () => measurementControllerRef.current !== null || Boolean(routePickingRef.current)).then(() => {
+        if (chargingStationsLayerRef.current !== chargingStationsLayer || !chargingStationsEnabledRef.current) return;
+        updateChargingStations();
+      });
       transitRouteOverlay.install(map);
       ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels', 'global-poi-labels', 'poi-labels'].forEach((layerId) => {
         if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
@@ -2492,6 +2580,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // camera-only moves must not trigger a fresh stop query on every moveend.
       if (!vehicleFollowEnabledRef.current) scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
+      if (chargingStationsEnabledRef.current) scheduleChargingStationsUpdate();
     };
     const removePersistedMapViewFlush = installPersistedMapViewFlush(document, window, persistCamera);
     const removeForegroundRecovery = installForegroundRecovery({
@@ -2554,6 +2643,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       measurementControllerRef.current = null;
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
+      if (chargingStationsTimer !== undefined) window.clearTimeout(chargingStationsTimer);
       map.off('move', handleCameraMove);
       removePersistedMapViewFlush();
       removeForegroundRecovery();
@@ -2579,6 +2669,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transitStopsLayer.dispose();
       transitRouteOverlay.dispose();
       trafficCamerasLayer.dispose();
+      chargingStationsLayer.dispose();
       map.remove();
       mapRef.current = null;
       treeRefreshRef.current = null;
@@ -2586,6 +2677,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       flightTreeLayerRef.current = null;
       transitStopsLayerRef.current = null;
       trafficCamerasLayerRef.current = null;
+      chargingStationsLayerRef.current = null;
       transitVehicleLayerRef.current = null;
     };
   }, []);
@@ -2931,7 +3023,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         map.once('moveend', () => { selectionCameraActiveRef.current = false; });
         map.easeTo({
           center: coordinates,
-          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : selectedTrafficCamera ? 12 : 14),
+          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : selectedTrafficCamera ? 12 : selectedChargingStation ? 14 : 14),
           offset: selectionCameraOffset(map),
           duration: 900,
         });
@@ -2941,7 +3033,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       cancelled = true;
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [positionInformation?.coordinates, selectedLocation, selectedTransitStop, selectedTrafficCamera]);
+  }, [positionInformation?.coordinates, selectedLocation, selectedTransitStop, selectedTrafficCamera, selectedChargingStation]);
   useEffect(() => () => {
     routeAddressAbortRef.current.origin?.abort();
     routeAddressAbortRef.current.destination?.abort();
@@ -3156,6 +3248,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     setSelectedTransitStop(null);
     trafficCamerasLayerRef.current?.clearSelection();
     setSelectedTrafficCamera(null);
+    chargingStationsLayerRef.current?.clearSelection();
+    setSelectedChargingStation(null);
     window.requestAnimationFrame(() => {
       if (!places.length) return;
       const bounds = new maplibregl.LngLatBounds(anchor, anchor);
@@ -3314,7 +3408,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             onZoomOut={zoomOut}
             onRouteOpen={openRoute}
             routeOpen={routeOpen}
-            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(selectedTrafficCamera) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
+            contentPanelOpen={routeOpen || Boolean(selectedLocation) || Boolean(selectedTransitStop) || Boolean(selectedTrafficCamera) || Boolean(selectedChargingStation) || Boolean(positionInformation) || Boolean(nearbyPlaces)}
             orientationChanged={orientationChanged}
             notice={mapToolNotice}
             themePreference={themePreference}
@@ -3470,7 +3564,28 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               </form>
             </div>
           )}
-          {selectedTrafficCamera && (
+          {selectedChargingStation && (
+            <ChargingStationPanel
+              key={selectedChargingStation.id}
+              station={selectedChargingStation}
+              sheet={chargingStationSheet}
+              onClose={() => {
+                chargingStationsLayerRef.current?.clearSelection();
+                closeChargingStation();
+              }}
+              onShare={() => shareSelection({
+                type: 'position',
+                coordinates: selectedChargingStation.coordinates,
+                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 14),
+                name: selectedChargingStation.name,
+              }, selectedChargingStation.name)}
+              onDirections={(destination) => {
+                openRoute();
+                setRouteEndpoint('destination', destination);
+              }}
+            />
+          )}
+          {selectedTrafficCamera && !selectedChargingStation && (
             <TrafficCameraPanel
               key={selectedTrafficCamera.id}
               selection={selectedTrafficCamera}
@@ -3491,7 +3606,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               }}
             />
           )}
-          {selectedTransitStop && !selectedTrafficCamera && (
+          {selectedTransitStop && !selectedTrafficCamera && !selectedChargingStation && (
             <Suspense fallback={null}><TransitDeparturesPanel
               stop={selectedTransitStop}
               onDetailOpenChange={setTransitDepartureDetailOpen}
@@ -3579,7 +3694,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
           {routeResult && routeOpen && (
             <MapCameraActions
               routeMode={routeMode}
-              infoPanelOpen={Boolean(selectedLocation || selectedTransitStop || selectedTrafficCamera || positionInformation)}
+              infoPanelOpen={Boolean(selectedLocation || selectedTransitStop || selectedTrafficCamera || selectedChargingStation || positionInformation)}
               vehicleFollowAvailable={vehicleFollowAvailable}
               vehicleFollowing={vehicleFollowing}
               vehiclePositionStatus={vehiclePositionStatus}
@@ -3588,7 +3703,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               onFitRoute={() => fitRouteNow(routeResult)}
             />
           )}
-          {selectedLocation && !selectedTransitStop && !selectedTrafficCamera && (
+          {selectedLocation && !selectedTransitStop && !selectedTrafficCamera && !selectedChargingStation && (
             <LocationInformationPanel
               selection={selectedLocation}
               sheet={locationSheet}

@@ -4,6 +4,7 @@ const DIGITRANSIT_ENDPOINT = 'https://api.digitransit.fi/routing/v2/finland/gtfs
 const TRANSITOUS_API = 'https://api.transitous.org/api/v6';
 const TRANSITOUS_ROUTES = 'https://api.transitous.org/api/experimental/map/routes';
 const VALHALLA_ENDPOINT = 'https://valhalla1.openstreetmap.de/route';
+const OPENCHARGEMAP_ENDPOINT = 'https://api.openchargemap.io/v3/poi';
 
 export const visualFixture = {
   id: 'tampere-ui-v1',
@@ -341,4 +342,25 @@ export async function installVisualProviderFixtures(page: Page) {
       }],
     },
   }));
+
+  await page.route(`${OPENCHARGEMAP_ENDPOINT}**`, route => json(route, [{
+    ID: 189853,
+    AddressInfo: {
+      Title: 'Koskipuisto charging',
+      AddressLine1: 'Koskikatu 1',
+      Town: 'Tampere',
+      Postcode: '33100',
+      Country: { Title: 'Finland' },
+      Latitude: 61.4981,
+      Longitude: 23.7609,
+    },
+    OperatorInfo: { Title: 'Virta' },
+    UsageType: { Title: 'Public' },
+    StatusType: { Title: 'Operational', IsOperational: true },
+    NumberOfPoints: 4,
+    Connections: [
+      { ID: 1, ConnectionType: { Title: 'CCS (Type 2)' }, PowerKW: 150, Quantity: 2, StatusType: { Title: 'Operational', IsOperational: true } },
+      { ID: 2, ConnectionType: { Title: 'Type 2' }, PowerKW: 22, Quantity: 2, StatusType: { Title: 'Operational', IsOperational: true } },
+    ],
+  }]));
 }

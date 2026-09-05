@@ -67,6 +67,7 @@ jobs:
         env:
           VITE_APP_VERSION: ${{ github.ref_name }}
           VITE_DIGITRANSIT_SUBSCRIPTION_KEY: ${{ secrets.DIGITRANSIT_SUBSCRIPTION_KEY }}
+          VITE_OPENCHARGEMAP_API_KEY: ${{ secrets.OPENCHARGEMAP_API_KEY }}
         run: npm run build -- --base="${{ steps.pages.outputs.base_path }}/"
 
       - name: Upload GitHub Pages artifact

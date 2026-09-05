@@ -16,6 +16,6 @@ export default defineConfig({
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { VITE_DIGITRANSIT_SUBSCRIPTION_KEY: 'visual-fixture-key' },
+    env: { VITE_DIGITRANSIT_SUBSCRIPTION_KEY: 'visual-fixture-key', VITE_OPENCHARGEMAP_API_KEY: 'visual-fixture-key' },
   },
 });
