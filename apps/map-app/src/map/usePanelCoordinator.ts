@@ -6,6 +6,11 @@ import type { TrafficCameraSelection } from './TrafficCameras';
 import type { TrafficCamerasLayer } from './TrafficCamerasLayer';
 import type { ChargingStation } from './ChargingStations';
 import type { ChargingStationsLayer } from './ChargingStationsLayer';
+import type { RoadWeatherStation } from './RoadWeather';
+import type { RoadWeatherLayer } from './RoadWeatherLayer';
+import type { RoadTrafficStation } from './RoadTraffic';
+import type { RoadTrafficMessage } from './RoadTrafficMessages';
+import type { RoadTrafficLayer } from './RoadTrafficLayer';
 
 type PanelCoordinatorOptions = {
   routeVehicleViewRef: RefObject<boolean>;
@@ -24,6 +29,11 @@ type PanelCoordinatorOptions = {
   setSelectedTrafficCamera: (camera: TrafficCameraSelection | null) => void;
   chargingStationsLayerRef: RefObject<ChargingStationsLayer | null>;
   setSelectedChargingStation: (station: ChargingStation | null) => void;
+  roadWeatherLayerRef: RefObject<RoadWeatherLayer | null>;
+  setSelectedRoadWeather: (station: RoadWeatherStation | null) => void;
+  roadTrafficLayerRef: RefObject<RoadTrafficLayer | null>;
+  setSelectedRoadTraffic: (station: RoadTrafficStation | null) => void;
+  setSelectedRoadTrafficMessage: (message: RoadTrafficMessage | null) => void;
   cancelRoute: () => void;
   rememberRouteVehicle: (result: RouteResult, following: boolean) => void;
 };
@@ -49,6 +59,11 @@ export function usePanelCoordinator({
   setSelectedTrafficCamera,
   chargingStationsLayerRef,
   setSelectedChargingStation,
+  roadWeatherLayerRef,
+  setSelectedRoadWeather,
+  roadTrafficLayerRef,
+  setSelectedRoadTraffic,
+  setSelectedRoadTrafficMessage,
   cancelRoute,
   rememberRouteVehicle,
 }: PanelCoordinatorOptions) {
@@ -59,6 +74,11 @@ export function usePanelCoordinator({
     setSelectedTrafficCamera(null);
     chargingStationsLayerRef.current?.clearSelection();
     setSelectedChargingStation(null);
+    roadWeatherLayerRef.current?.clearSelection();
+    setSelectedRoadWeather(null);
+    roadTrafficLayerRef.current?.clearSelection();
+    setSelectedRoadTraffic(null);
+    setSelectedRoadTrafficMessage(null);
     if (window.innerWidth <= 760) cancelRoute();
   }
 

@@ -895,10 +895,13 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.layer-panel-close')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
       await expect(panel.getByRole('heading', { name: 'Map' })).toBeVisible();
-      await expect(panel.getByRole('heading', { name: 'Routes' })).toBeVisible();
-      await expect(panel.getByRole('heading', { name: 'Places' })).toBeVisible();
+      await expect(panel.getByRole('heading', { name: 'Transit' })).toBeVisible();
+      await expect(panel.getByRole('heading', { name: 'Driving' })).toBeVisible();
+      await expect(panel.getByRole('heading', { name: 'Bike & walk' })).toBeVisible();
+      await expect(panel.getByRole('switch', { name: /Traffic.*congestion/i })).toBeVisible();
+      await expect(panel.getByRole('switch', { name: /^Road weather/i })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /Charging stations/i })).toBeVisible();
-      await expect(panel.getByRole('switch')).toHaveCount(8);
+      await expect(panel.getByRole('switch')).toHaveCount(10);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',

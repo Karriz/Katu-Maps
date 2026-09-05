@@ -6,6 +6,7 @@ import {
   Building2,
   Box,
   Camera,
+  CarFront,
   Compass,
   PlugZap,
   Crosshair,
@@ -19,6 +20,7 @@ import {
   Plus,
   Search,
   Star,
+  Thermometer,
   TrainFront,
   TrainTrack,
   Trees,
@@ -43,7 +45,9 @@ export type MapLayerKey =
   | 'transitLines'
   | 'transitModels'
   | 'trafficCameras'
-  | 'chargingStations';
+  | 'chargingStations'
+  | 'roadWeather'
+  | 'roadTraffic';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -63,6 +67,7 @@ type LayerDefinition = {
 type LayerGroup = {
   id: string;
   label: string;
+  defaultOpen?: boolean;
   layers: LayerDefinition[];
 };
 
@@ -76,21 +81,29 @@ const layerGroups: LayerGroup[] = [
     ],
   },
   {
-    id: 'routes',
-    label: 'Routes',
+    id: 'transit',
+    label: 'Transit',
     layers: [
-      { key: 'cycling', label: 'Cycling routes', description: 'Emphasized cycle networks', icon: Bike },
-      { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
       { key: 'transitLines', label: 'Transit lines', description: 'Colored metro, tram & rail', icon: TrainTrack },
+      { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
     ],
   },
   {
-    id: 'places',
-    label: 'Places',
+    id: 'driving',
+    label: 'Driving',
     layers: [
-      { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
-      { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish road weather cameras', icon: Camera },
+      { key: 'roadTraffic', label: 'Traffic', description: 'Congestion, roadworks & incidents', icon: CarFront },
+      { key: 'roadWeather', label: 'Road weather', description: 'Temperature, ice & surface', icon: Thermometer },
+      { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish roadside cameras', icon: Camera },
       { key: 'chargingStations', label: 'Charging stations', description: 'Open Charge Map locations', icon: PlugZap },
+    ],
+  },
+  {
+    id: 'bike-walk',
+    label: 'Bike & walk',
+    layers: [
+      { key: 'cycling', label: 'Cycling routes', description: 'Emphasized cycle networks', icon: Bike },
+      { key: 'hiking', label: 'Hiking routes', description: 'Trails, shelters & viewpoints', icon: Footprints },
     ],
   },
 ];
@@ -205,6 +218,9 @@ export function MapControls({
   const onSearchFocusRef = useRef(onSearchFocus);
   onSearchFocusRef.current = onSearchFocus;
   const [helpOpen, setHelpOpen] = useState(false);
+  const [openLayerGroups, setOpenLayerGroups] = useState<Record<string, boolean>>(() => (
+    Object.fromEntries(layerGroups.map((group) => [group.id, group.defaultOpen !== false]))
+  ));
   const layerSheet = useMobileBottomSheet('half');
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
   const suggestionsVisible = searchOpen && (favoritesOpen || query.trim().length >= 2 || searchResults.length > 0);
@@ -483,8 +499,20 @@ export function MapControls({
                 </div>
               </div>
               {layerGroups.map((group) => (
-                <section className="layer-group" key={group.id} aria-labelledby={`layer-group-${group.id}`}>
-                  <h3 className="layer-group-label" id={`layer-group-${group.id}`}>{group.label}</h3>
+                <details
+                  className="layer-group"
+                  key={group.id}
+                  open={openLayerGroups[group.id] !== false}
+                  onToggle={(event) => {
+                    const nextOpen = event.currentTarget.open;
+                    setOpenLayerGroups((current) => (
+                      current[group.id] === nextOpen ? current : { ...current, [group.id]: nextOpen }
+                    ));
+                  }}
+                >
+                  <summary className="layer-group-toggle" aria-labelledby={`layer-group-${group.id}`}>
+                    <h3 className="layer-group-label" id={`layer-group-${group.id}`}>{group.label}</h3>
+                  </summary>
                   <div className="layer-list">
                     {group.layers.map((definition) => (
                       <LayerRow
@@ -495,7 +523,7 @@ export function MapControls({
                       />
                     ))}
                   </div>
-                </section>
+                </details>
               ))}
               <details className="layer-advanced">
                 <summary>Advanced details</summary>

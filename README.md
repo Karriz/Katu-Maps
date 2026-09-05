@@ -12,7 +12,7 @@ An open 3D map for exploring places, public transport, and routes—directly in 
 
 - 🏙️ Explore 3D buildings, terrain, trees, and a globe view
 - 🚋 Browse transit stops, departures, routes, and live vehicles
-- 📷 View Finnish road weather cameras from Fintraffic Digitraffic
+- 📷 View Finnish road weather cameras, weather, traffic, roadworks, and incidents from Fintraffic Digitraffic
 - 🚶 Plan walking and cycling routes
 - 🔎 Search for addresses, businesses, and points of interest
 - 📱 Install it as a PWA on mobile or desktop

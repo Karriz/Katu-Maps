@@ -7,6 +7,8 @@ import type { MapLayerState } from './MapControls';
 import { applyMapTheme } from './GlobalMapStyle';
 import { TRAFFIC_CAMERA_LAYER_IDS } from './TrafficCamerasLayer';
 import { CHARGING_STATION_LAYER_IDS } from './ChargingStationsLayer';
+import { ROAD_WEATHER_LAYER_IDS } from './RoadWeatherLayer';
+import { ROAD_TRAFFIC_LAYER_IDS } from './RoadTrafficLayer';
 
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
@@ -34,6 +36,8 @@ type MapLayerVisibilityOptions = LayerRefs & {
   onTransitDisabled: () => void;
   onTrafficCamerasDisabled: () => void;
   onChargingStationsDisabled: () => void;
+  onRoadWeatherDisabled: () => void;
+  onRoadTrafficDisabled: () => void;
 };
 
 type LayerVisibilityMap = {
@@ -53,6 +57,7 @@ export function useMapLayerVisibility({
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
+  onRoadWeatherDisabled, onRoadTrafficDisabled,
 }: MapLayerVisibilityOptions) {
   useEffect(() => {
     const map = mapRef.current;
@@ -69,6 +74,8 @@ export function useMapLayerVisibility({
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
     setVisibility([...TRAFFIC_CAMERA_LAYER_IDS], layerToggles.trafficCameras);
     setVisibility([...CHARGING_STATION_LAYER_IDS], layerToggles.chargingStations);
+    setVisibility([...ROAD_WEATHER_LAYER_IDS], layerToggles.roadWeather);
+    setVisibility([...ROAD_TRAFFIC_LAYER_IDS], layerToggles.roadTraffic);
     setVisibility(building3dLayerIds, layerToggles.buildings);
     setVisibility([buildingTransitionFootprintLayerId], layerToggles.buildings);
     setVisibility([building2dLayerId], !layerToggles.buildings);
@@ -90,7 +97,9 @@ export function useMapLayerVisibility({
     if (!layerToggles.transit) onTransitDisabled();
     if (!layerToggles.trafficCameras) onTrafficCamerasDisabled();
     if (!layerToggles.chargingStations) onChargingStationsDisabled();
-  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
+    if (!layerToggles.roadWeather) onRoadWeatherDisabled();
+    if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
+  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
 
   useEffect(() => {
     const map = mapRef.current;

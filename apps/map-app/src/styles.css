@@ -282,6 +282,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .location-info-source { color: #94a3b8; font-size: 0.68rem; }
 .location-info-attribution { color: #94a3b8; display: block; font-size: 0.64rem; margin-top: 4px; text-decoration: none; }
 .location-info-attribution:hover { color: var(--color-accent); text-decoration: underline; }
+.road-traffic-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; list-style: none; margin: 0 0 12px; padding: 0; }
+.road-traffic-legend li { align-items: center; color: var(--color-muted); display: flex; font-size: 0.68rem; gap: 6px; }
+.road-traffic-legend span { border-radius: 999px; display: block; height: 4px; width: 16px; }
+.traffic-message-comment { color: var(--color-ink); font-size: 0.86rem; line-height: 1.45; margin: 0 0 12px; white-space: pre-wrap; }
 .charging-connector-list { display: grid; gap: 8px; list-style: none; margin: 4px 0 0; padding: 0; }
 .charging-connector-list li { display: flex; flex-direction: column; gap: 3px; }
 .location-info-details .charging-connector-type { color: #31465f; font-size: 0.8rem; font-weight: 700; }
@@ -610,7 +614,12 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .layer-panel-close:focus-visible { outline: 3px solid rgb(80 145 235 / 28%); outline-offset: 2px; }
 .layer-panel-close svg { height: 17px; width: 17px; }
 .layer-group { border-top: 1px solid var(--color-line); }
-.layer-group-label { color: var(--color-muted); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; margin: 0; padding: 14px 8px 2px; text-transform: uppercase; }
+.layer-group-toggle { align-items: center; cursor: pointer; display: flex; justify-content: space-between; list-style: none; padding: 14px 8px 2px; }
+.layer-group-toggle::-webkit-details-marker { display: none; }
+.layer-group-toggle:focus-visible { outline: 2px solid #8ebcff; outline-offset: 2px; }
+.layer-group-toggle::after { color: var(--color-muted); content: ' +'; font-size: 0.84rem; font-weight: 700; }
+.layer-group[open] > .layer-group-toggle::after { content: ' −'; }
+.layer-group-label { color: var(--color-muted); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; margin: 0; text-transform: uppercase; }
 .layer-list { border-top: 1px solid var(--color-line); }
 .layer-group .layer-list { border-top: 0; }
 .layer-toggle {
