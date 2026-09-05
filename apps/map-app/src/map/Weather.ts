@@ -190,7 +190,7 @@ export function forecastBoundsUsable(bounds: GeoBounds) {
 }
 
 export function isWeatherAbortError(error: unknown) {
-  return Boolean(error) && typeof error === 'object' && 'name' in error && error.name === 'AbortError';
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

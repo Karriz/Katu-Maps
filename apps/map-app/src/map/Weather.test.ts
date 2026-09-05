@@ -91,7 +91,9 @@ describe('viewed weather parsing', () => {
 
 describe('viewed weather requests', () => {
   it('fetches a rounded coordinate and caches the parsed forecast', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(helsinkiPayload), { status: 200 }));
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify(helsinkiPayload), { status: 200 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
     const first = await fetchViewedWeather(24.93841, 60.16992);
     const second = await fetchViewedWeather(24.93812, 60.17011);
@@ -165,7 +167,9 @@ describe('forecast overlay requests', () => {
       { hourly: { time: ['2026-09-05T18:00'], cloud_cover: [30], precipitation: [0.4] } },
       { hourly: { time: ['2026-09-05T18:00'], cloud_cover: [40], precipitation: [0.6] } },
     ];
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify(payload), { status: 200 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
     const bounds = { west: 24, south: 60, east: 25, north: 61 };
     const first = await fetchForecastGrid(bounds, 2, 2);
