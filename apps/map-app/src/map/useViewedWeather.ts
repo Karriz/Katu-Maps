@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
+import { OPENFREEMAP_SOURCE_ID } from './GlobalMapStyle';
 import {
   closestHourIndex,
   fetchForecastGrid,
   fetchViewedWeather,
+  fetchWeatherPlaceName,
   forecastBoundsUsable,
   isWeatherAbortError,
   overlayBoundsForView,
+  weatherPlaceCandidateFromFeature,
+  weatherPlaceName,
   type ForecastGrid,
   type ViewedWeather,
   type WeatherOverlayVariable,
@@ -30,6 +34,21 @@ function currentMapBounds(map: Map) {
   );
 }
 
+function mapWeatherPlaceName(map: Map) {
+  if (!map.getSource(OPENFREEMAP_SOURCE_ID)) return undefined;
+  try {
+    const center = map.getCenter();
+    const candidates = map.querySourceFeatures(OPENFREEMAP_SOURCE_ID, { sourceLayer: 'place' })
+      .flatMap((feature) => {
+        const candidate = weatherPlaceCandidateFromFeature(feature);
+        return candidate ? [candidate] : [];
+      });
+    return weatherPlaceName(candidates, [center.lng, center.lat]);
+  } catch {
+    return undefined;
+  }
+}
+
 export function useViewedWeather({
   mapRef,
   mapLoaded,
@@ -43,6 +62,7 @@ export function useViewedWeather({
 }) {
   const overlayLayerRef = useRef<WeatherForecastLayer | null>(null);
   const [weather, setWeather] = useState<ViewedWeather | null>(null);
+  const [placeName, setPlaceName] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -148,6 +168,31 @@ export function useViewedWeather({
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!enabled || !mapLoaded || flightActive || !panelOpen || !map) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const coordinates = weatherRef.current?.coordinates;
+    const lng = coordinates?.[0] ?? map.getCenter().lng;
+    const lat = coordinates?.[1] ?? map.getCenter().lat;
+    const fromMap = mapWeatherPlaceName(map);
+    if (fromMap) setPlaceName(fromMap);
+
+    void fetchWeatherPlaceName(lng, lat, controller.signal)
+      .then((name) => {
+        if (!cancelled && name) setPlaceName(name);
+      })
+      .catch((error: unknown) => {
+        if (cancelled || isWeatherAbortError(error)) return;
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [enabled, flightActive, mapLoaded, mapRef, panelOpen, weather]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!enabled || !mapLoaded || flightActive || !overlayOpen || !map) {
       if (!overlayOpen) {
         setOverlayLoading(false);
@@ -206,6 +251,7 @@ export function useViewedWeather({
 
   return {
     weather,
+    placeName,
     loading,
     unavailable,
     panelOpen,

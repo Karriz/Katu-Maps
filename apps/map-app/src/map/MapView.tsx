@@ -3679,6 +3679,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
           {viewedWeather.panelOpen && (
             <WeatherPanel
               weather={viewedWeather.weather}
+              placeName={viewedWeather.placeName}
               loading={viewedWeather.loading}
               unavailable={viewedWeather.unavailable}
               sheet={weatherSheet}

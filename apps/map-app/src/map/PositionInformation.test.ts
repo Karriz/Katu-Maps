@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultPositionName, elevationResult, formatCoordinates, formatElevation, formatNominatimAddress, hasDisplayableElevation, parseCoordinates, queryTerrainElevation } from './PositionInformation';
+import { defaultPositionName, elevationResult, formatCoordinates, formatElevation, formatNominatimAddress, formatNominatimLocality, hasDisplayableElevation, parseCoordinates, queryTerrainElevation } from './PositionInformation';
 
 describe('position information', () => {
   it('formats latitude and longitude with sensible precision', () => {
@@ -44,6 +44,16 @@ describe('position information', () => {
     expect(formatNominatimAddress({ display_name: 'Pyynikinharju, Tampere, Finland' }))
       .toBe('Pyynikinharju, Tampere, Finland');
     expect(formatNominatimAddress(undefined)).toBeUndefined();
+  });
+
+  it('picks a locality name for weather and other place-level labels', () => {
+    expect(formatNominatimLocality({
+      name: 'Keskusta',
+      address: { suburb: 'Keskusta', city: 'Tampere', country: 'Finland' },
+    })).toBe('Tampere');
+    expect(formatNominatimLocality({ name: 'Ylöjärvi', address: { town: 'Ylöjärvi' } })).toBe('Ylöjärvi');
+    expect(formatNominatimLocality({ name: 'Lapland', address: { state: 'Lapland' } })).toBe('Lapland');
+    expect(formatNominatimLocality(undefined)).toBeUndefined();
   });
 
   it('represents missing and invalid elevation as unavailable', () => {

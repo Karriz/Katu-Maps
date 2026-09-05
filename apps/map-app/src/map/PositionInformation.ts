@@ -134,6 +134,18 @@ export function formatNominatimAddress(result: Record<string, unknown> | undefin
   return displayName || undefined;
 }
 
+export function formatNominatimLocality(result: Record<string, unknown> | undefined) {
+  if (!result) return undefined;
+  const address = result.address && typeof result.address === 'object'
+    ? result.address as Record<string, unknown>
+    : undefined;
+  const named = typeof result.name === 'string' ? result.name.trim() : '';
+  return addressPart(address, 'city', 'town', 'village', 'municipality', 'hamlet')
+    || named
+    || addressPart(address, 'suburb', 'county', 'state', 'country')
+    || undefined;
+}
+
 export function elevationResult(value: number | null | undefined): ElevationState {
   return typeof value === 'number' && Number.isFinite(value)
     ? { status: 'available', metres: value }

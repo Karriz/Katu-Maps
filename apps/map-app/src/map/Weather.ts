@@ -1,4 +1,5 @@
 import { apiHttpError, fetchWithTimeout } from './ApiRequest';
+import { formatNominatimLocality } from './PositionInformation';
 import { serviceConfig } from './ServiceConfig';
 
 export type WeatherIconKind = 'clear' | 'partly-cloudy' | 'cloudy' | 'fog' | 'drizzle' | 'rain' | 'snow' | 'thunder';
@@ -76,14 +77,25 @@ export type GeoBounds = {
 
 const POINT_TTL_MS = 15 * 60_000;
 const GRID_TTL_MS = 15 * 60_000;
+const PLACE_TTL_MS = 60 * 60_000;
 const POINT_DECIMALS = 3;
+const PLACE_DECIMALS = 2;
+
+export type WeatherPlaceCandidate = {
+  name: string;
+  placeClass: string;
+  rank?: number;
+  coordinates: [number, number];
+};
 
 let pointCache: { key: string; weather: ViewedWeather; fetchedAt: number } | null = null;
 const gridCache = new Map<string, { grid: ForecastGrid; fetchedAt: number }>();
+const placeCache = new Map<string, { name: string; fetchedAt: number }>();
 
 export function resetWeatherCaches() {
   pointCache = null;
   gridCache.clear();
+  placeCache.clear();
 }
 
 export function roundViewedCoordinate(value: number, decimals = POINT_DECIMALS) {
@@ -93,6 +105,82 @@ export function roundViewedCoordinate(value: number, decimals = POINT_DECIMALS) 
 
 export function viewedWeatherCacheKey(longitude: number, latitude: number) {
   return `${roundViewedCoordinate(longitude)},${roundViewedCoordinate(latitude)}`;
+}
+
+export function weatherPlaceCacheKey(longitude: number, latitude: number) {
+  return `${roundViewedCoordinate(longitude, PLACE_DECIMALS)},${roundViewedCoordinate(latitude, PLACE_DECIMALS)}`;
+}
+
+function localizedPlaceName(properties: Record<string, unknown>) {
+  const language = typeof navigator === 'undefined'
+    ? 'en'
+    : navigator.language.split('-')[0]?.toLowerCase();
+  const keys = language && /^[a-z]{2,3}$/.test(language)
+    ? [`name:${language}`, 'name', 'name:en', 'name:latin']
+    : ['name', 'name:en', 'name:latin'];
+  for (const key of keys) {
+    const value = properties[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function pointCoordinates(value: unknown): [number, number] | undefined {
+  if (!Array.isArray(value) || value.length < 2) return undefined;
+  const longitude = finiteNumber(value[0]);
+  const latitude = finiteNumber(value[1]);
+  return longitude !== undefined && latitude !== undefined ? [longitude, latitude] : undefined;
+}
+
+function planarDistanceKm(from: [number, number], to: [number, number]) {
+  const latitudeScale = 111.32;
+  const longitudeScale = 111.32 * Math.cos((from[1] + to[1]) * Math.PI / 360);
+  return Math.hypot((from[0] - to[0]) * longitudeScale, (from[1] - to[1]) * latitudeScale);
+}
+
+export function weatherPlaceCandidateFromFeature(feature: {
+  properties?: Record<string, unknown> | null;
+  geometry?: { type?: string; coordinates?: unknown } | null;
+}): WeatherPlaceCandidate | undefined {
+  const properties = feature.properties ?? {};
+  const name = localizedPlaceName(properties);
+  const coordinates = feature.geometry?.type === 'Point'
+    ? pointCoordinates(feature.geometry.coordinates)
+    : undefined;
+  const placeClass = typeof properties.class === 'string' ? properties.class : '';
+  if (!name || !coordinates) return undefined;
+  return {
+    name,
+    placeClass,
+    rank: finiteNumber(properties.rank),
+    coordinates,
+  };
+}
+
+export function weatherPlaceName(
+  candidates: WeatherPlaceCandidate[],
+  center: [number, number],
+) {
+  const nearest = (classes: string[], maxKm: number) => {
+    let best: { name: string; distance: number; rank: number } | undefined;
+    for (const candidate of candidates) {
+      if (!classes.includes(candidate.placeClass)) continue;
+      const distance = planarDistanceKm(candidate.coordinates, center);
+      if (distance > maxKm) continue;
+      const rank = candidate.rank ?? 20;
+      if (!best || distance < best.distance - 0.4 || (Math.abs(distance - best.distance) <= 0.4 && rank < best.rank)) {
+        best = { name: candidate.name, distance, rank };
+      }
+    }
+    return best;
+  };
+
+  const local = nearest(['village', 'town', 'hamlet', 'municipality', 'isolated_dwelling'], 10);
+  if (local && local.distance <= 8) return local.name;
+  const city = nearest(['city'], 35);
+  if (city) return city.name;
+  if (local) return local.name;
+  return nearest(['island', 'state', 'country'], 800)?.name;
 }
 
 export function weatherIconKind(code: number | undefined): WeatherIconKind {
@@ -450,6 +538,30 @@ export async function fetchViewedWeather(longitude: number, latitude: number, si
   if (!weather) throw new Error('Weather forecast was empty.');
   pointCache = { key, weather, fetchedAt: Date.now() };
   return weather;
+}
+
+export async function fetchWeatherPlaceName(
+  longitude: number,
+  latitude: number,
+  signal?: AbortSignal,
+) {
+  const coordinates: [number, number] = [
+    roundViewedCoordinate(longitude, PLACE_DECIMALS),
+    roundViewedCoordinate(latitude, PLACE_DECIMALS),
+  ];
+  const key = weatherPlaceCacheKey(coordinates[0], coordinates[1]);
+  const cached = placeCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < PLACE_TTL_MS) return cached.name;
+  const params = new URLSearchParams({ format: 'jsonv2', addressdetails: '1', zoom: '10' });
+  const response = await fetchWithTimeout(
+    `${serviceConfig.nominatimEndpoint}/reverse?lat=${coordinates[1]}&lon=${coordinates[0]}&${params}`,
+    { signal, headers: { Accept: 'application/json' } },
+  );
+  if (!response.ok) throw apiHttpError(response, 'Nominatim');
+  const name = formatNominatimLocality(await response.json() as Record<string, unknown>);
+  if (!name) return undefined;
+  placeCache.set(key, { name, fetchedAt: Date.now() });
+  return name;
 }
 
 export function forecastGridPoints(

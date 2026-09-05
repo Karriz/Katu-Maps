@@ -8,7 +8,7 @@ unless explicitly stated otherwise.
 | Service | Use | Current controls | Residual production risk |
 | --- | --- | --- | --- |
 | Photon | Search autocomplete | 280 ms debounce, cancellation, bounded result cache, 15 s timeout | Public instance has an undefined reasonable-use limit and may throttle without notice. |
-| Nominatim | Selected-place details and reverse geocoding | No autocomplete, 1.1 s serialized request gate, cancellation, session cache, 15 s timeout | Public policy has an absolute 1 request/s limit; replace before sustained high traffic. |
+| Nominatim | Selected-place details, reverse geocoding, and weather-panel locality | Place details use a 1.1 s serialized request gate, cancellation and session cache. Weather locality runs only while the panel is open, with a 2-decimal cache and in-flight abort. | Public policy has an absolute 1 request/s limit; replace before sustained high traffic. |
 | Valhalla | Walk, bicycle and car routing | Cancellation, bounded retries/timeouts, optional OSRM fallback, identifying client header | Default endpoint is a public demo server, not a production SLA. Contact its operator or replace it before material scale. |
 | Transitous | Global transit stops, departures, trips and plans | Cancellation, timeouts, visibility-aware polling, identifying client header | Volunteer best-effort service; failures must remain recoverable. |
 | Digitransit | Finnish transit and live positions | Subscription key, cancellation, timeout, polling only for selected journeys | Respect rate-limit responses and do not poll faster than useful source updates. |
