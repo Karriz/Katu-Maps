@@ -1132,9 +1132,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .location-search-results { max-height: min(44dvh, 360px); overflow-y: auto; overscroll-behavior: contain; }
   .weather-chip {
     border-radius: 13px;
-    left: calc(70px + env(safe-area-inset-left, 0px));
+    left: auto;
     min-height: 50px;
     padding: 0 12px 0 10px;
+    right: calc(12px + env(safe-area-inset-right, 0px));
     top: calc(78px + env(safe-area-inset-top, 0px));
   }
   .weather-chip-copy strong { font-size: 0.95rem; }
@@ -1235,12 +1236,13 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .location-search { width: min(300px, calc(100% - 24px)); }
   .location-search-form { min-height: 48px; }
   .weather-chip {
-    left: calc(66px + env(safe-area-inset-left, 0px));
-    min-height: 46px;
-    top: calc(68px + env(safe-area-inset-top, 0px));
+    left: calc(var(--map-control-edge) + min(300px, calc(100% - 24px)) + 8px);
+    min-height: 48px;
+    right: auto;
+    top: 22px;
   }
   .map-tool-help {
-    left: 320px;
+    left: calc(var(--map-control-edge) + min(300px, calc(100% - 24px)) + 136px);
     top: calc(-86px + env(safe-area-inset-top, 0px));
   }
   .controls-help-panel { left: 72px; }
@@ -1255,6 +1257,12 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .location-info-panel,
   .nearby-panel { border-radius: 20px 0 0; left: auto; }
   .layer-panel { border-radius: 0 20px 0 0; right: auto; }
+}
+
+@media (max-width: 640px) and (max-height: 520px) and (orientation: landscape) {
+  .weather-chip {
+    top: calc(12px + env(safe-area-inset-top, 0px));
+  }
 }
 
 @media (max-width: 640px) and (pointer: coarse) {
