@@ -6,7 +6,7 @@ import {
   fetchViewedWeather,
   forecastBoundsUsable,
   isWeatherAbortError,
-  padForecastBounds,
+  overlayBoundsForView,
   type ForecastGrid,
   type ViewedWeather,
   type WeatherOverlayVariable,
@@ -18,12 +18,16 @@ const GRID_DEBOUNCE_MS = 450;
 
 function currentMapBounds(map: Map) {
   const bounds = map.getBounds();
-  return padForecastBounds({
-    west: bounds.getWest(),
-    south: bounds.getSouth(),
-    east: bounds.getEast(),
-    north: bounds.getNorth(),
-  });
+  const center = map.getCenter();
+  return overlayBoundsForView(
+    { lng: center.lng, lat: center.lat },
+    {
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    },
+  );
 }
 
 export function useViewedWeather({

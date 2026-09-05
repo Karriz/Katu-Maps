@@ -189,6 +189,18 @@ export function forecastBoundsUsable(bounds: GeoBounds) {
     && bounds.east <= 180;
 }
 
+export function overlayBoundsForView(center: { lng: number; lat: number }, viewport: GeoBounds): GeoBounds {
+  const span = viewport.east - viewport.west;
+  if (forecastBoundsUsable(viewport) && span <= 25) return padForecastBounds(viewport);
+  const bounds = {
+    west: Math.max(-180, center.lng - 5),
+    south: Math.max(-85, center.lat - 4),
+    east: Math.min(180, center.lng + 5),
+    north: Math.min(85, center.lat + 4),
+  };
+  return forecastBoundsUsable(bounds) ? bounds : viewport;
+}
+
 export function isWeatherAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError';
 }

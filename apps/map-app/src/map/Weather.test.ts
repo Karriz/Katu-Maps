@@ -6,6 +6,7 @@ import {
   fetchViewedWeather,
   forecastBoundsUsable,
   forecastGridPoints,
+  overlayBoundsForView,
   padForecastBounds,
   parseForecastGrid,
   parseViewedWeather,
@@ -155,6 +156,18 @@ describe('forecast overlay bounds', () => {
       south: 60,
       east: 26,
       north: 64,
+    });
+  });
+
+  it('falls back to a local window around the map centre on a world view', () => {
+    expect(overlayBoundsForView(
+      { lng: 24, lat: 61 },
+      { west: -180, south: -85, east: 180, north: 85 },
+    )).toEqual({
+      west: 19,
+      south: 57,
+      east: 29,
+      north: 65,
     });
   });
 });
