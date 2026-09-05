@@ -268,8 +268,9 @@ export function parseViewedWeather(payload: unknown, coordinates: [number, numbe
     windSpeed: hourlyWind[index],
   }));
 
-  const currentCode = finiteNumber(current?.weather_code) ?? hours[closestHourIndex(hourlyTimes)]?.weatherCode;
-  const nearestHour = hours[closestHourIndex(hourlyTimes)];
+  const observedAt = Date.parse(text(current?.time) ?? '');
+  const nearestHour = hours[closestHourIndex(hourlyTimes, Number.isFinite(observedAt) ? observedAt : Date.now())];
+  const currentCode = finiteNumber(current?.weather_code) ?? nearestHour?.weatherCode;
   const parsedCurrent: WeatherCurrent | null = current
     ? {
       time: text(current.time) ?? nearestHour?.time ?? new Date().toISOString(),

@@ -65,12 +65,14 @@ afterEach(() => {
 describe('viewed weather parsing', () => {
   it('maps Open-Meteo current, hourly and daily fields', () => {
     const weather = parseViewedWeather(helsinkiPayload, [24.938, 60.17]);
+    expect(weather?.hourly[0].precipitationProbability).toBe(10);
+    expect(weather?.hourly[1].precipitationProbability).toBe(40);
     expect(weather?.current).toEqual(expect.objectContaining({
       temperature: 16.7,
       icon: 'cloudy',
       summary: 'Cloudy',
       cloudCover: 98,
-      precipitationProbability: 10,
+      precipitationProbability: 40,
     }));
     expect(weather?.hourly[1].icon).toBe('rain');
     expect(weather?.daily[1].precipitationProbabilityMax).toBe(70);
