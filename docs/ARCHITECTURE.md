@@ -52,6 +52,8 @@ apps/
   map-app/                 # Browser application
 docs/
   ARCHITECTURE.md          # Runtime and rendering boundaries
+  API_SERVICE_ASSESSMENT.md
+  WEATHER_DATA.md          # Open-data study for a weather panel and overlays
   MVP.md                   # Current product checklist
 ```
 
