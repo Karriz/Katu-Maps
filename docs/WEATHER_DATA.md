@@ -387,5 +387,6 @@ describe it as a radar nowcast. Prefer Open-Meteo’s already-ingested ECMWF
 
 Shipped as an optional **Weather** layer (on by default): a chip for the
 **map centre**, a dedicated forecast panel, and a cloud/precip **model**
-time slider. Open-Meteo only; overlay is a 5×5 in-app canvas, not FMI WMS
-or radar. Fetch is debounced on `moveend` with rounded coordinates.
+time slider. Hidden at continental and world zooms (below z5). Open-Meteo
+only; overlay is a 5×5 in-app canvas, not FMI WMS or radar. Fetch is
+debounced 1 s on `moveend` with 2-decimal coordinates and a 15-minute cache.

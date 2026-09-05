@@ -48,7 +48,7 @@ export function WeatherTimeSlider({
         {loading && <span>Updating overlay…</span>}
         {unavailable && !loading && <span>Zoom in to a region to show this overlay</span>}
         {!loading && !unavailable && (
-          <span>{variable === 'cloud' ? 'Model cloud cover' : 'Model precipitation, not radar'}</span>
+          <span>{variable === 'cloud' ? 'Model cloud cover' : 'Model precipitation'}</span>
         )}
       </div>
       <input

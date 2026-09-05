@@ -893,8 +893,10 @@ const scenarios: Scenario[] = [
       await expect(chip).toBeVisible();
       await expect(chip).toContainText(/°|…|—/);
       await chip.click();
-      const panel = page.getByRole('dialog', { name: 'Weather forecast' });
+      const panel = page.getByRole('dialog', { name: /Weather forecast/i });
       await expect(panel).toBeVisible();
+      await expect(panel.getByRole('heading', { level: 2 })).toContainText(/°/);
+      await expect(panel).toContainText('Tampere');
       await expect(panel.getByRole('button', { name: 'Cloud cover' })).toBeVisible();
       await expect(panel.getByRole('button', { name: 'Rain forecast' })).toBeVisible();
     },

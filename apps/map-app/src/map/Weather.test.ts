@@ -4,6 +4,7 @@ import {
   closestHourIndex,
   fetchForecastGrid,
   fetchViewedWeather,
+  fetchWeatherPlaceName,
   forecastBoundsUsable,
   forecastGridPoints,
   overlayBoundsForView,
@@ -17,7 +18,10 @@ import {
   upcomingHourlyForecast,
   viewedWeatherCacheKey,
   weatherIconKind,
+  weatherPlaceCandidateFromFeature,
+  weatherPlaceName,
   weatherSummary,
+  weatherZoomUsable,
 } from './Weather';
 
 const helsinkiPayload = {
@@ -87,8 +91,15 @@ describe('viewed weather parsing', () => {
   });
 
   it('rounds cache keys so nearby pans reuse a forecast', () => {
-    expect(roundViewedCoordinate(24.93841)).toBe(24.938);
-    expect(viewedWeatherCacheKey(24.9384, 60.1699)).toBe(viewedWeatherCacheKey(24.9381, 60.1702));
+    expect(roundViewedCoordinate(24.93841)).toBe(24.94);
+    expect(viewedWeatherCacheKey(24.9384, 60.1699)).toBe(viewedWeatherCacheKey(24.941, 60.1702));
+  });
+
+  it('keeps weather off at continental and world zooms', () => {
+    expect(weatherZoomUsable(2.2)).toBe(false);
+    expect(weatherZoomUsable(4.9)).toBe(false);
+    expect(weatherZoomUsable(5)).toBe(true);
+    expect(weatherZoomUsable(14)).toBe(true);
   });
 });
 
@@ -104,7 +115,63 @@ describe('viewed weather requests', () => {
     expect(second).toBe(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain('latitude=60.17');
-    expect(String(fetchMock.mock.calls[0][0])).toContain('longitude=24.938');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('longitude=24.94');
+  });
+});
+
+describe('weather place names', () => {
+  it('prefers the surrounding city over a nearby suburb', () => {
+    const center: [number, number] = [23.7609, 61.4981];
+    expect(weatherPlaceName([
+      {
+        name: 'Keskusta',
+        placeClass: 'suburb',
+        coordinates: [23.761, 61.498],
+      },
+      {
+        name: 'Tampere',
+        placeClass: 'city',
+        rank: 2,
+        coordinates: [23.761, 61.498],
+      },
+    ], center)).toBe('Tampere');
+  });
+
+  it('uses a nearby village instead of a distant city', () => {
+    expect(weatherPlaceName([
+      { name: 'Kuru', placeClass: 'village', coordinates: [23.72, 61.93] },
+      { name: 'Tampere', placeClass: 'city', coordinates: [23.76, 61.50] },
+    ], [23.72, 61.93])).toBe('Kuru');
+  });
+
+  it('reads a named point feature from map properties', () => {
+    expect(weatherPlaceCandidateFromFeature({
+      properties: { name: 'Tampere', class: 'city', rank: 2 },
+      geometry: { type: 'Point', coordinates: [23.76, 61.5] },
+    })).toEqual({
+      name: 'Tampere',
+      placeClass: 'city',
+      rank: 2,
+      coordinates: [23.76, 61.5],
+    });
+  });
+});
+
+describe('weather place reverse geocoding', () => {
+  it('caches a locality for nearby coordinates', async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(JSON.stringify({
+        name: 'Tampere',
+        address: { city: 'Tampere', country: 'Finland' },
+      }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const first = await fetchWeatherPlaceName(23.7609, 61.4981);
+    const second = await fetchWeatherPlaceName(23.7612, 61.499);
+    expect(first).toBe('Tampere');
+    expect(second).toBe('Tampere');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('zoom=10');
   });
 });
 
