@@ -147,9 +147,8 @@ export class RoadWeatherLayer {
       type: 'circle',
       source: SOURCE_ID,
       minzoom: 5,
-      maxzoom: 8,
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3, 8, 5],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.2, 8, 5.5, 14, 7],
         'circle-color': temperatureColor,
         'circle-stroke-color': ['case', ['==', ['get', 'icy'], 1], '#e0f2fe', '#ffffff'],
         'circle-stroke-width': ['case', ['==', ['get', 'icy'], 1], 2.2, 1.2],
@@ -208,7 +207,7 @@ export class RoadWeatherLayer {
       id: 'road-weather-labels',
       type: 'symbol',
       source: SOURCE_ID,
-      minzoom: 9,
+      minzoom: 8,
       layout: {
         'text-field': ['get', 'temperatureLabel'],
         'text-font': ['Noto Sans Regular', 'Open Sans Regular'],

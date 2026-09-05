@@ -138,7 +138,7 @@ export class RoadTrafficLayer {
       source: SOURCE_ID,
       filter: ['==', ['geometry-type'], 'Point'],
       minzoom: 5,
-      maxzoom: 8.5,
+      maxzoom: 11,
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.2, 8, 5.2],
         'circle-color': congestionColor,
@@ -181,7 +181,7 @@ export class RoadTrafficLayer {
       minzoom: 7,
       paint: {
         'line-color': '#ffffff',
-        'line-width': 16,
+        'line-width': 22,
         'line-opacity': 0.01,
       },
     };
