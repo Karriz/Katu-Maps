@@ -128,7 +128,9 @@ describe('global map overlay styles', () => {
 
   it('keeps globe and continental zooms free of dense overview geometry', () => {
     const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
-    const filterOf = (layerId: string) => JSON.stringify(layersById.get(layerId)?.filter);
+    const filterOf = (layerId: string) => JSON.stringify(
+      (layersById.get(layerId) as { filter?: unknown } | undefined)?.filter,
+    );
 
     expect(layersById.get('global-overview-roads')?.minzoom).toBe(2.2);
     expect(filterOf('global-overview-roads')).toContain('motorway');
