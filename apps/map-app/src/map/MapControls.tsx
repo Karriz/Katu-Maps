@@ -94,7 +94,7 @@ const layerGroups: LayerGroup[] = [
     layers: [
       { key: 'roadTraffic', label: 'Traffic', description: 'Green to red by congestion', icon: CarFront },
       { key: 'roadWeather', label: 'Road weather', description: 'Temperature, ice & surface', icon: Thermometer },
-      { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish road weather cameras', icon: Camera },
+      { key: 'trafficCameras', label: 'Traffic cameras', description: 'Finnish roadside cameras', icon: Camera },
       { key: 'chargingStations', label: 'Charging stations', description: 'Open Charge Map locations', icon: PlugZap },
     ],
   },
