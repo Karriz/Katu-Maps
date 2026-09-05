@@ -249,6 +249,7 @@ async function verifyRouteKeyboard(page: Page) {
   await expect(origin).toHaveAttribute('aria-activedescendant', 'route-origin-option-0');
   await origin.press('Enter');
   await expect(origin).toHaveValue('Your location');
+  await expect(origin).not.toBeFocused();
 
   const destination = page.getByRole('combobox', { name: 'Search destination', exact: true });
   await destination.focus();
@@ -256,6 +257,7 @@ async function verifyRouteKeyboard(page: Page) {
   await destination.press('ArrowDown');
   await destination.press('Enter');
   await expect(destination).toHaveValue('Your location');
+  await expect(destination).not.toBeFocused();
 }
 
 async function verifyMapAndHelpKeyboard(page: Page) {
@@ -350,6 +352,8 @@ async function chooseRouteResult(page: Page, listName: string, resultText: strin
   const candidates = list.locator('button.route-search-result').filter({ hasText: resultText });
   await expect(candidates.first()).toBeVisible();
   await (useLast ? candidates.last() : candidates.first()).click();
+  await expect(list).toHaveCount(0);
+  await expect(page.locator('.route-search-field input:focus')).toHaveCount(0);
 }
 
 async function setRouteEndpoints(page: Page, mode: 'pedestrian' | 'bicycle' | 'transit' | 'auto') {

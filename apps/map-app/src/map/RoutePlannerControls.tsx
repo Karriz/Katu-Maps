@@ -1,10 +1,29 @@
 import { createPortal } from 'react-dom';
 import { ArrowRightLeft, Clock3, MapPin, X } from 'lucide-react';
-import type { MutableRefObject, RefObject } from 'react';
+import type { MouseEvent, MutableRefObject, RefObject } from 'react';
 import type { useRoutePlanning } from './useRoutePlanning';
 import type { TransitProviderId } from './transit';
 import { TransitRouteOptions } from './TransitRouteOptions';
 import { useAutocompleteNavigation } from '../lib/useAutocompleteNavigation';
+
+function dismissActiveKeyboard() {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) active.blur();
+}
+
+/** Blur on mousedown so mobile OS keyboards dismiss in the tap gesture. */
+function routeSearchOptionHandlers(select: () => void) {
+  return {
+    onMouseDown: (event: MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      dismissActiveKeyboard();
+    },
+    onClick: () => {
+      dismissActiveKeyboard();
+      select();
+    },
+  };
+}
 
 type PhotonFeature = {
   geometry: { coordinates: [number, number] };
@@ -84,6 +103,7 @@ export function RoutePlannerControls({
     open: routeSearchTarget !== null,
     onSelect: (index) => {
       if (routeSearchTarget === null) return;
+      dismissActiveKeyboard();
       if (index === 0) selectYourLocation(routeSearchTarget);
       else selectSearchResult(displayedSearchResults[index - 1]);
     },
@@ -147,7 +167,7 @@ export function RoutePlannerControls({
               </div>
               {routeSearchTarget === kind && createPortal(
                 <div className="route-search-results route-search-results-floating" id={`route-${kind}-search-results`} ref={routeSearchResultsRef} role="listbox" aria-label={`Search ${label.toLowerCase()} results`}>
-                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectYourLocation(kind)}>
+                  <button id={`route-${kind}-option-0`} role="option" aria-selected={routeNavigation.highlightedIndex === 0} className={`route-search-result route-search-current-location${routeNavigation.highlightedIndex === 0 ? ' highlighted' : ''}`} type="button" {...routeSearchOptionHandlers(() => selectYourLocation(kind))}>
                     <strong>Your location</strong>
                     <span>{userLocationRef.current ? 'Use current GPS position' : 'Request location access'}</span>
                   </button>
@@ -157,7 +177,7 @@ export function RoutePlannerControls({
                   {!searchLoading && (searchQuery.trim().length >= 2 || favoriteFeatures.length > 0) && displayedSearchResults.map((feature, index) => {
                     const { primary, secondary } = photonResultLabel(feature);
                     const optionIndex = index + 1;
-                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(feature)}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
+                    return <button id={`route-${kind}-option-${optionIndex}`} role="option" aria-selected={routeNavigation.highlightedIndex === optionIndex} className={`route-search-result${routeNavigation.highlightedIndex === optionIndex ? ' highlighted' : ''}`} key={`${feature.geometry.coordinates.join(':')}-${index}`} type="button" {...routeSearchOptionHandlers(() => selectSearchResult(feature))}><strong>{primary}</strong>{secondary && <span>{secondary}</span>}</button>;
                   })}
                 </div>,
                 document.body,
