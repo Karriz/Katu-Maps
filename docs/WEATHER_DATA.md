@@ -214,6 +214,56 @@ the current static-app model. It is **not** a forecast.
 DWD nowcast is the rare **open radar forecast**, but it is not a Finland/global
 product.
 
+### ECMWF open data — not forecast radar
+
+[ECMWF Open Data](https://www.ecmwf.int/en/forecasts/datasets/open-data) is a
+CC BY 4.0 subset of IFS and AIFS **numerical weather prediction**, in GRIB2 at
+**0.25°** (about 28 km north–south, 14 km east–west at Helsinki). It is worth
+using as the *physics behind* a precipitation/cloud forecast overlay. It is
+not a radar product and is a poor direct source for a MapLibre “forecast
+radar” layer.
+
+What the catalogue actually has that looks rain-related:
+
+| Field | Meaning |
+| --- | --- |
+| `tp` | Total precipitation (accumulated) |
+| `tprate` | Instantaneous precipitation rate |
+| `ptype` | Precipitation type (rain/snow/…) |
+| `sf` | Snowfall water equivalent |
+| `tcc` | Total cloud cover |
+| `sd` | Snow depth water equivalent |
+
+Time steps are **3-hourly** to +144 h, then 6-hourly to +15 days (AIFS is
+6-hourly throughout). Operational IFS HRES is ~9 km; that higher-resolution
+feed is **not** in the free open-data subset (it is a paid dissemination
+product). The portal keeps only ~12 recent runs, is GRIB2/CCSDS, and is
+capped at 500 simultaneous connections. A full day’s files are on the order of
+hundreds of GiB. AWS / Azure / GCP replicas exist; the Python client
+`ecmwf-opendata` is the intended access path.
+
+Putting this on the map ourselves would mean a backend: download GRIB →
+difference accumulations → colourise → XYZ or `.om` tiles. That is the job
+Open-Meteo already does. Their public spatial files already expose ECMWF
+grids as map-ready arrays (checked 5 September 2026):
+
+| Open-Meteo model | Grid | Steps in `latest.json` | Rain/cloud fields |
+| --- | --- | --- | --- |
+| `ecmwf_ifs025` | 0.25° (the open dataset) | 49 | precipitation, precipitation_type, cloud_cover, snow |
+| `ecmwf_aifs025_single` | 0.25° AIFS | 61 | precipitation, cloud_cover, snowfall |
+| `ecmwf_ifs` | ~9 km HRES (Open-Meteo’s own ingest) | 109 | precipitation, cloud_cover, snowfall |
+| `dwd_icon` | ~13 km global, finer over Europe | 113 | precipitation, rain, cloud, snow |
+
+For Finland, DWD ICON / FMI HARMONIE (~2.5 km) beat 0.25° ECMWF for a close
+map. Direct ECMWF GRIB is only worth a custom pipeline if we later need
+CC BY data **without** Open-Meteo’s non-commercial API terms, or ensemble
+spread from `enfo` members.
+
+Copernicus EFAS/TAMIR layers that *blend* OPERA radar nowcasts with the ECMWF
+ensemble for ~6 h, then NWP to 120 h, are closer to “forecast radar” — but
+they are European flood-service WMS, experimental, and **not** this open
+GRIB catalogue. Do not plan on them as a Katu Maps tile source.
+
 ### Satellite cloud and snow (daily, observed)
 
 [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/access-basics/) WMTS in
@@ -233,7 +283,7 @@ the default cloud overlay.
 | Source | Why not |
 | --- | --- |
 | OpenWeather, Tomorrow.io, Mapbox Weather | Proprietary, keys, not open data |
-| ECMWF open GRIB / CDS | Not a browser API; CDS accounts |
+| ECMWF open GRIB (direct) | NWP precipitation, not radar; GRIB2 needs a backend. Already ingested by Open-Meteo — see below |
 | Copernicus CAMS WMS | Air quality, not rain/snow radar |
 | MET Norway radar images | Cache/host yourself at scale |
 | RainViewer nowcast / IR | Removed from the public API (2026) |
@@ -290,6 +340,7 @@ This matches existing panel CSS, `fetchWithTimeout`, and
 ### Deferred
 
 - Self-hosted FMI radar GeoTIFF tiles (needs a backend or CDN job).
+- Direct ECMWF Open Data GRIB ingest (Open-Meteo already republishes it).
 - MET Norway direct API.
 - 3D / globe cloud volumes.
 - Global radar **nowcast**.
@@ -314,8 +365,10 @@ Road-surface snow remains Digitraffic.
 **Can we have a time slider with cloud and rain-radar forecasts?**
 A slider is feasible. **Rain-radar forecast** is the weak leg: RainViewer
 nowcast is gone; FMI nowcast is not on the open JSON API; DWD nowcast is
-Germany-only. Ship the slider as **past radar + model precipitation/cloud
-forecast**, and do not describe it as a radar nowcast.
+Germany-only; ECMWF open data is 0.25°/3-hourly NWP, not radar. Ship the
+slider as **past radar + model precipitation/cloud forecast**, and do not
+describe it as a radar nowcast. Prefer Open-Meteo’s already-ingested ECMWF
+(and ICON) spatial files over downloading ECMWF GRIB in-app.
 
 ## Live checks (5 September 2026)
 
@@ -326,5 +379,6 @@ forecast**, and do not describe it as a radar nowcast.
 - FMI `metcoop_scandinavia_nowcast_surface` on `opendata.fmi.fi`: unknown producer.
 - RainViewer `weather-maps.json` 200, CORS `*`, 13 past frames, empty nowcast.
 - Open-Meteo S3 `dwd_icon/latest.json` includes `cloud_cover` and `snow_depth`.
+- Open-Meteo S3 `ecmwf_ifs025`, `ecmwf_ifs`, and `ecmwf_aifs025_single` `latest.json` 200, with precipitation and cloud_cover.
 - NASA GIBS sample tile 200, CORS `*`.
 - SYKE EO WMS GetCapabilities 200, CORS `*`.
