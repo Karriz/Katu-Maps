@@ -307,13 +307,9 @@ function openMeteoFixture(url: URL, clock: ReturnType<typeof fixtureClock>) {
         time: times,
         cloud_cover: times.map(() => 35 + (index % 5) * 8),
         precipitation: times.map((__, hour) => (hour > 5 ? 0.3 + (index % 4) * 0.2 : 0)),
-    },
-  }));
-
-  await page.route('https://api.open-meteo.com/**', route => {
-    return json(route, openMeteoFixture(new URL(route.request().url()), clock));
-  });
-}
+      },
+    }));
+  }
   return {
     timezone: 'Europe/Helsinki',
     current: {
