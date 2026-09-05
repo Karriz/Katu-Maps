@@ -21,6 +21,7 @@ import {
   weatherPlaceCandidateFromFeature,
   weatherPlaceName,
   weatherSummary,
+  weatherZoomUsable,
 } from './Weather';
 
 const helsinkiPayload = {
@@ -90,8 +91,15 @@ describe('viewed weather parsing', () => {
   });
 
   it('rounds cache keys so nearby pans reuse a forecast', () => {
-    expect(roundViewedCoordinate(24.93841)).toBe(24.938);
-    expect(viewedWeatherCacheKey(24.9384, 60.1699)).toBe(viewedWeatherCacheKey(24.9381, 60.1702));
+    expect(roundViewedCoordinate(24.93841)).toBe(24.94);
+    expect(viewedWeatherCacheKey(24.9384, 60.1699)).toBe(viewedWeatherCacheKey(24.941, 60.1702));
+  });
+
+  it('keeps weather off at continental and world zooms', () => {
+    expect(weatherZoomUsable(2.2)).toBe(false);
+    expect(weatherZoomUsable(4.9)).toBe(false);
+    expect(weatherZoomUsable(5)).toBe(true);
+    expect(weatherZoomUsable(14)).toBe(true);
   });
 });
 
@@ -107,7 +115,7 @@ describe('viewed weather requests', () => {
     expect(second).toBe(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain('latitude=60.17');
-    expect(String(fetchMock.mock.calls[0][0])).toContain('longitude=24.938');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('longitude=24.94');
   });
 });
 

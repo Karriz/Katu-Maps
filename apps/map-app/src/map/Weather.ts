@@ -78,8 +78,10 @@ export type GeoBounds = {
 const POINT_TTL_MS = 15 * 60_000;
 const GRID_TTL_MS = 15 * 60_000;
 const PLACE_TTL_MS = 60 * 60_000;
-const POINT_DECIMALS = 3;
+const POINT_DECIMALS = 2;
 const PLACE_DECIMALS = 2;
+/** Continent and world views; weather is for a local place, not a hemisphere. */
+export const WEATHER_MIN_ZOOM = 5;
 
 export type WeatherPlaceCandidate = {
   name: string;
@@ -109,6 +111,10 @@ export function viewedWeatherCacheKey(longitude: number, latitude: number) {
 
 export function weatherPlaceCacheKey(longitude: number, latitude: number) {
   return `${roundViewedCoordinate(longitude, PLACE_DECIMALS)},${roundViewedCoordinate(latitude, PLACE_DECIMALS)}`;
+}
+
+export function weatherZoomUsable(zoom: number) {
+  return Number.isFinite(zoom) && zoom >= WEATHER_MIN_ZOOM;
 }
 
 function localizedPlaceName(properties: Record<string, unknown>) {

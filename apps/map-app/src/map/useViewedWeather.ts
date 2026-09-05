@@ -9,16 +9,18 @@ import {
   forecastBoundsUsable,
   isWeatherAbortError,
   overlayBoundsForView,
+  viewedWeatherCacheKey,
   weatherPlaceCandidateFromFeature,
   weatherPlaceName,
+  weatherZoomUsable,
   type ForecastGrid,
   type ViewedWeather,
   type WeatherOverlayVariable,
 } from './Weather';
 import { WeatherForecastLayer } from './WeatherForecastLayer';
 
-const POINT_DEBOUNCE_MS = 400;
-const GRID_DEBOUNCE_MS = 450;
+const POINT_DEBOUNCE_MS = 1_000;
+const GRID_DEBOUNCE_MS = 1_200;
 
 function currentMapBounds(map: Map) {
   const bounds = map.getBounds();
@@ -63,6 +65,7 @@ export function useViewedWeather({
   const overlayLayerRef = useRef<WeatherForecastLayer | null>(null);
   const [weather, setWeather] = useState<ViewedWeather | null>(null);
   const [placeName, setPlaceName] = useState<string | undefined>(undefined);
+  const [viewUsable, setViewUsable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -74,6 +77,8 @@ export function useViewedWeather({
   const [overlayUnavailable, setOverlayUnavailable] = useState(false);
   const weatherRef = useRef(weather);
   weatherRef.current = weather;
+  const requestedPointKeyRef = useRef<string | null>(null);
+  const requestedGridKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -126,13 +131,33 @@ export function useViewedWeather({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!enabled || !mapLoaded || flightActive || !map) return;
+    if (!enabled || !mapLoaded || flightActive || !map) {
+      setViewUsable(false);
+      return;
+    }
     let timer: number | undefined;
     let controller = new AbortController();
     let cancelled = false;
 
+    const applyViewUsable = () => {
+      const usable = weatherZoomUsable(map.getZoom());
+      setViewUsable(usable);
+      if (!usable) {
+        setPanelOpen(false);
+        setOverlayOpen(false);
+        setOverlayUnavailable(false);
+        overlayLayerRef.current?.clear();
+        setLoading(false);
+      }
+      return usable;
+    };
+
     const load = () => {
+      if (!applyViewUsable()) return;
       const center = map.getCenter();
+      const key = viewedWeatherCacheKey(center.lng, center.lat);
+      if (key === requestedPointKeyRef.current && weatherRef.current) return;
+      requestedPointKeyRef.current = key;
       controller.abort();
       controller = new AbortController();
       if (!weatherRef.current) setLoading(true);
@@ -144,6 +169,7 @@ export function useViewedWeather({
         })
         .catch((error: unknown) => {
           if (cancelled || isWeatherAbortError(error)) return;
+          requestedPointKeyRef.current = null;
           setUnavailable(true);
         })
         .finally(() => {
@@ -152,23 +178,30 @@ export function useViewedWeather({
     };
 
     const schedule = () => {
+      if (!applyViewUsable()) {
+        if (timer !== undefined) window.clearTimeout(timer);
+        return;
+      }
       if (timer !== undefined) window.clearTimeout(timer);
       timer = window.setTimeout(load, POINT_DEBOUNCE_MS);
     };
 
+    applyViewUsable();
     load();
+    map.on('zoom', applyViewUsable);
     map.on('moveend', schedule);
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
       controller.abort();
+      map.off('zoom', applyViewUsable);
       map.off('moveend', schedule);
     };
   }, [enabled, flightActive, mapLoaded, mapRef]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!enabled || !mapLoaded || flightActive || !panelOpen || !map) return;
+    if (!enabled || !mapLoaded || flightActive || !panelOpen || !viewUsable || !map) return;
     let cancelled = false;
     const controller = new AbortController();
     const coordinates = weatherRef.current?.coordinates;
@@ -189,7 +222,7 @@ export function useViewedWeather({
       cancelled = true;
       controller.abort();
     };
-  }, [enabled, flightActive, mapLoaded, mapRef, panelOpen, weather]);
+  }, [enabled, flightActive, mapLoaded, mapRef, panelOpen, viewUsable, weather?.coordinates[0], weather?.coordinates[1]]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -205,6 +238,13 @@ export function useViewedWeather({
     let cancelled = false;
 
     const load = () => {
+      if (!weatherZoomUsable(map.getZoom())) {
+        setOverlayGrid(null);
+        setOverlayUnavailable(true);
+        setOverlayLoading(false);
+        overlayLayerRef.current?.clear();
+        return;
+      }
       const bounds = currentMapBounds(map);
       if (!forecastBoundsUsable(bounds)) {
         setOverlayGrid(null);
@@ -213,6 +253,11 @@ export function useViewedWeather({
         overlayLayerRef.current?.clear();
         return;
       }
+      const key = [bounds.west, bounds.south, bounds.east, bounds.north]
+        .map((value) => value.toFixed(2))
+        .join(':');
+      if (key === requestedGridKeyRef.current) return;
+      requestedGridKeyRef.current = key;
       controller.abort();
       controller = new AbortController();
       setOverlayLoading(true);
@@ -227,6 +272,7 @@ export function useViewedWeather({
         })
         .catch((error: unknown) => {
           if (cancelled || isWeatherAbortError(error)) return;
+          requestedGridKeyRef.current = null;
           setOverlayUnavailable(true);
         })
         .finally(() => {
@@ -252,6 +298,7 @@ export function useViewedWeather({
   return {
     weather,
     placeName,
+    viewUsable,
     loading,
     unavailable,
     panelOpen,
