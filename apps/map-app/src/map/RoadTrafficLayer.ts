@@ -15,7 +15,6 @@ import { MAP_COLORS } from './MapPalette';
 import {
   fetchRoadTrafficStations,
   stationCongestion,
-  trafficSegmentCoordinates,
   TRAFFIC_CONGESTION_COLORS,
   type RoadTrafficSelection,
   type RoadTrafficStation,
@@ -24,6 +23,8 @@ import {
   fetchRoadTrafficMessages,
   type RoadTrafficMessage,
 } from './RoadTrafficMessages';
+import { fetchViewportRoads, TRAFFIC_ROAD_SNAP_MIN_ZOOM, trafficRoadsRequestKey } from './RoadTrafficRoads';
+import { mergeRoadNetwork, stationSegmentCoordinates, type RoadTrafficWay } from './RoadTrafficSnap';
 
 const SOURCE_ID = 'road-traffic';
 const SELECTED_SOURCE_ID = 'road-traffic-selected';
@@ -112,7 +113,7 @@ async function addTrafficIcon(map: Map, imageId: string, Icon: LucideIcon, fill:
   if (!map.hasImage(imageId)) map.addImage(imageId, image, { pixelRatio: 2 });
 }
 
-function lineFeatures(station: RoadTrafficStation) {
+function lineFeatures(station: RoadTrafficStation, network: RoadTrafficWay[] = []) {
   return ([1, 2] as const).flatMap((direction) => {
     const reading = direction === 1 ? station.direction1 : station.direction2;
     if (reading.speedKmh === undefined && reading.volumePerHour === undefined) return [];
@@ -122,7 +123,7 @@ function lineFeatures(station: RoadTrafficStation) {
       id: Number.parseInt(`${station.id}${direction}`, 10) || undefined,
       geometry: {
         type: 'LineString' as const,
-        coordinates: trafficSegmentCoordinates(station.coordinates[0], station.coordinates[1], station.bearing, direction),
+        coordinates: stationSegmentCoordinates(station, direction, network),
       },
       properties: {
         id: station.id,
@@ -222,11 +223,23 @@ function selectionFromFeature(feature: MapGeoJSONFeature, point: Point, map: Map
 export class RoadTrafficLayer {
   private map: Map | null = null;
   private requestController: AbortController | null = null;
+  private roadsController: AbortController | null = null;
   private selected: RoadTrafficSelection | null = null;
   private selectedMessageId: string | null = null;
   private stations = new globalThis.Map<string, RoadTrafficStation>();
   private messages = new globalThis.Map<string, RoadTrafficMessage>();
+  private ways: RoadTrafficWay[] = [];
+  private lastRoadsKey = '';
   private ready = false;
+  private roadsMoveTimer = 0;
+  private handleMoveEnd = () => {
+    window.clearTimeout(this.roadsMoveTimer);
+    this.roadsMoveTimer = window.setTimeout(() => {
+      const map = this.map;
+      if (!map || !this.ready) return;
+      void this.syncViewport(map.getBounds(), map.getZoom());
+    }, 280);
+  };
 
   async install(
     map: Map,
@@ -469,6 +482,7 @@ export class RoadTrafficLayer {
       map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
     });
+    map.on('moveend', this.handleMoveEnd);
   }
 
   async update(options?: { bypassCache?: boolean }) {
@@ -489,15 +503,12 @@ export class RoadTrafficLayer {
       if (stationsResult.status === 'fulfilled') {
         const stations = stationsResult.value;
         this.stations = new globalThis.Map(stations.map((station) => [station.id, station]));
-        const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-        source?.setData({
-          type: 'FeatureCollection',
-          features: stations.flatMap((station) => [pointFeature(station), ...lineFeatures(station)]),
-        });
+        this.applyGeometry();
         if (this.selected) {
           const next = this.stations.get(this.selected.id);
           if (next) this.selectStation(next);
         }
+        void this.syncViewport(map.getBounds(), map.getZoom());
       }
       if (messagesResult.status === 'fulfilled') {
         const messages = messagesResult.value;
@@ -518,13 +529,63 @@ export class RoadTrafficLayer {
     }
   }
 
+  private network() {
+    return this.ways.length ? mergeRoadNetwork(this.ways) : [];
+  }
+
+  private applyGeometry() {
+    const map = this.map;
+    if (!map || !this.ready) return;
+    const network = this.network();
+    const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
+    source?.setData({
+      type: 'FeatureCollection',
+      features: [...this.stations.values()].flatMap((station) => [pointFeature(station), ...lineFeatures(station, network)]),
+    });
+  }
+
+  async syncViewport(bounds: { getWest(): number; getSouth(): number; getEast(): number; getNorth(): number }, zoom: number) {
+    const map = this.map;
+    if (!map || !this.ready) return;
+    if (!this.stations.size) return;
+    if (map.getLayoutProperty('road-traffic-lines', 'visibility') === 'none') return;
+    const pad = 0.012;
+    const bbox: [number, number, number, number] = [
+      bounds.getWest() - pad,
+      bounds.getSouth() - pad,
+      bounds.getEast() + pad,
+      bounds.getNorth() + pad,
+    ];
+    const key = trafficRoadsRequestKey(bbox, zoom);
+    if (key === this.lastRoadsKey) return;
+    this.lastRoadsKey = key;
+    this.roadsController?.abort();
+    const controller = new AbortController();
+    this.roadsController = controller;
+    try {
+      const ways = zoom < TRAFFIC_ROAD_SNAP_MIN_ZOOM ? [] : await fetchViewportRoads(bbox, controller.signal);
+      if (this.roadsController !== controller || this.map !== map) return;
+      this.ways = ways;
+      this.applyGeometry();
+      if (this.selected) {
+        const next = this.stations.get(this.selected.id);
+        if (next) this.selectStation(next);
+      }
+    } catch {
+      if (controller.signal.aborted) return;
+      if (this.lastRoadsKey === key) this.lastRoadsKey = '';
+      this.ways = [];
+      this.applyGeometry();
+    }
+  }
+
   selectStation(station: RoadTrafficStation) {
     this.selected = station;
     this.selectedMessageId = null;
     const selectedSource = this.map?.getSource(SELECTED_SOURCE_ID) as GeoJSONSource | undefined;
     selectedSource?.setData({
       type: 'FeatureCollection',
-      features: lineFeatures(station),
+      features: lineFeatures(station, this.network()),
     });
     const messageSelected = this.map?.getSource(MESSAGE_SELECTED_SOURCE_ID) as GeoJSONSource | undefined;
     messageSelected?.setData(emptyCollection());
@@ -560,13 +621,20 @@ export class RoadTrafficLayer {
   }
 
   dispose() {
+    window.clearTimeout(this.roadsMoveTimer);
+    this.roadsMoveTimer = 0;
+    this.map?.off('moveend', this.handleMoveEnd);
     this.requestController?.abort();
     this.requestController = null;
+    this.roadsController?.abort();
+    this.roadsController = null;
     this.map = null;
     this.selected = null;
     this.selectedMessageId = null;
     this.stations.clear();
     this.messages.clear();
+    this.ways = [];
+    this.lastRoadsKey = '';
     this.ready = false;
   }
 }

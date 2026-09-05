@@ -43,6 +43,11 @@ export function formatRoadStationName(raw: string) {
   return `${match[1].toUpperCase()} ${match[2]} ${match[3].replaceAll('_', ' ')}`.trim();
 }
 
+export function roadNumberFromStationName(raw: string) {
+  const match = /^(vt|kt|st|yt|mt)(\d+)/i.exec(raw.trim());
+  return match ? Number(match[2]) : undefined;
+}
+
 export function localizedRoadStationName(names: unknown, fallback: string) {
   if (!isRecord(names)) return formatRoadStationName(fallback);
   return text(names.en) ?? text(names.fi) ?? text(names.sv) ?? formatRoadStationName(fallback);

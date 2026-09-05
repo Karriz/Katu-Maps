@@ -5,6 +5,7 @@ import {
   isRecord,
   localizedRoadStationName,
   pointCoordinates,
+  roadNumberFromStationName,
   text,
 } from './Digitraffic';
 
@@ -153,7 +154,8 @@ export function parseRoadTrafficStations(payload: unknown): RoadTrafficStation[]
       coordinates,
       municipality: text(properties.municipality),
       province: text(properties.province),
-      roadNumber: finiteNumber(isRecord(properties.roadAddress) ? properties.roadAddress.roadNumber : properties.roadNumber),
+      roadNumber: finiteNumber(isRecord(properties.roadAddress) ? properties.roadAddress.roadNumber : properties.roadNumber)
+        ?? roadNumberFromStationName(fallbackName),
       bearing: finiteNumber(properties.bearing),
       collectionStatus: 'GATHERING',
       direction1: {

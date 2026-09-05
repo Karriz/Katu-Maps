@@ -70,6 +70,7 @@ describe('road traffic parsing', () => {
     const merged = mergeRoadTrafficStations(stations, observations);
     expect(merged).toHaveLength(1);
     expect(merged[0].name).toBe('Road 7 Porvoo, Rita');
+    expect(merged[0].roadNumber).toBe(7);
     expect(merged[0].direction1).toEqual(expect.objectContaining({
       municipality: 'Kotka',
       speedKmh: 28,
@@ -96,6 +97,18 @@ describe('road traffic parsing', () => {
     const segment = trafficSegmentCoordinates(25.689529, 60.417002, 60, 1);
     expect(segment).toHaveLength(2);
     expect(segment[0][0]).not.toBeCloseTo(segment[1][0], 5);
+  });
+
+  it('reads the road number from a Finnish station id when metadata omits roadAddress', () => {
+    const stations = parseRoadTrafficStations({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [25.029364, 60.241347] },
+        properties: { id: 23149, name: 'st101_Malmi', collectionStatus: 'GATHERING', bearing: 90 },
+      }],
+    });
+    expect(stations[0].roadNumber).toBe(101);
   });
 });
 
