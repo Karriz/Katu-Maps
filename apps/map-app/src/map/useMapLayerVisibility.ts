@@ -5,6 +5,7 @@ import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { MapLayerState } from './MapControls';
 import { applyMapTheme } from './GlobalMapStyle';
+import { syncTerrain3d } from './MapTerrain';
 import { TRAFFIC_CAMERA_LAYER_IDS } from './TrafficCamerasLayer';
 import { CHARGING_STATION_LAYER_IDS } from './ChargingStationsLayer';
 import { ROAD_WEATHER_LAYER_IDS } from './RoadWeatherLayer';
@@ -88,7 +89,7 @@ export function useMapLayerVisibility({
     setVisibility(waterEffectLayerIds, true);
     map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
     terrainEnabledRef.current = layerToggles.terrain;
-    map.setTerrain(layerToggles.terrain ? { source: terrainSourceRef.current, exaggeration: 1.0 } : null);
+    syncTerrain3d(map, { userEnabled: layerToggles.terrain, source: terrainSourceRef.current });
     if (map.getLayer('terrain-hillshade')) {
       map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
     }

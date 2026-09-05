@@ -125,4 +125,28 @@ describe('global map overlay styles', () => {
     expect(serializedFilter).not.toContain('playground');
     expect(serializedFilter).not.toContain('sports_centre');
   });
+
+  it('keeps globe and continental zooms free of dense overview geometry', () => {
+    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
+    const filterOf = (layerId: string) => JSON.stringify(
+      (layersById.get(layerId) as { filter?: unknown } | undefined)?.filter,
+    );
+
+    expect(layersById.get('global-overview-roads')?.minzoom).toBe(2.2);
+    expect(filterOf('global-overview-roads')).toContain('motorway');
+    expect(filterOf('global-overview-roads')).toContain('trunk');
+    expect(filterOf('global-overview-roads')).not.toContain('secondary');
+    expect(layersById.get('global-overview-regional-roads')?.minzoom).toBe(8);
+    expect(filterOf('global-overview-regional-roads')).toContain('primary');
+    expect(layersById.get('global-overview-railways')?.minzoom).toBe(6);
+    expect(layersById.get('global-waterway')?.minzoom).toBe(7);
+    expect(layersById.get('global-landuse')?.minzoom).toBe(5);
+    expect(layersById.get('global-boundaries-regional')?.minzoom).toBe(5);
+    expect(filterOf('global-boundaries')).toContain('admin_level');
+    expect(layersById.get('global-road-labels-regional')?.minzoom).toBe(11);
+    expect(layersById.get('global-town-labels')?.minzoom).toBe(8);
+    expect(layersById.get('global-locality-labels')?.minzoom).toBe(11);
+    expect(filterOf('global-place-labels')).toContain('city');
+    expect(filterOf('global-place-labels')).not.toContain('village');
+  });
 });
