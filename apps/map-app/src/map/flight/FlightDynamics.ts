@@ -17,13 +17,9 @@ const CAMERA_POSITION_FOLLOW_RATE = 12;
 const CAMERA_ORIENTATION_FOLLOW_RATE = 6.5;
 const CAMERA_CHASE_DISTANCE_METERS = 58;
 const CAMERA_LOOK_AHEAD_METERS = 30;
-const CAMERA_CLIMB_LOOK_AHEAD_METERS = 8;
 const CAMERA_CHASE_HEIGHT_METERS = 22;
 const CAMERA_LOOK_HEIGHT_METERS = 4;
 const CAMERA_BANK_OFFSET_METERS = 16;
-const CAMERA_MAX_TERRAIN_PITCH_RADIANS = degreesToRadians(85);
-const CAMERA_ADAPTIVE_CLIMB_START_RADIANS = degreesToRadians(5);
-const CAMERA_ADAPTIVE_CLIMB_END_RADIANS = degreesToRadians(20);
 
 export type FlightState = {
   longitude: number;
@@ -248,54 +244,47 @@ export function smoothFlightCameraRig(
 
 export function flightCameraPose(state: FlightCameraRig): FlightCameraPose {
   const coordinate: [number, number] = [state.longitude, state.latitude];
-  const forwardEast = Math.sin(state.heading);
-  const forwardNorth = Math.cos(state.heading);
-  const rightEast = Math.cos(state.heading);
-  const rightNorth = -Math.sin(state.heading);
+  const sinHeading = Math.sin(state.heading);
+  const cosHeading = Math.cos(state.heading);
   const sinPitch = Math.sin(state.pitch);
   const cosPitch = Math.cos(state.pitch);
+
+  // Pitch the chase offset in the aircraft's vertical plane so climb and
+  // dive keep the same behind/above framing. Bank stays a lateral slide on
+  // the unbanked right axis (plus map roll) — rolling the chase height into
+  // the bank fought the slide and pulled the camera the wrong way.
+  const forwardEast = sinHeading * cosPitch;
+  const forwardNorth = cosHeading * cosPitch;
+  const forwardUp = sinPitch;
+  const upEast = -sinHeading * sinPitch;
+  const upNorth = -cosHeading * sinPitch;
+  const upUp = cosPitch;
+  const rightEast = cosHeading;
+  const rightNorth = -sinHeading;
   const bankOffset = Math.sin(state.roll) * CAMERA_BANK_OFFSET_METERS;
-  const climbAdaptation = clamp(
-    (sinPitch - Math.sin(CAMERA_ADAPTIVE_CLIMB_START_RADIANS))
-      / (
-        Math.sin(CAMERA_ADAPTIVE_CLIMB_END_RADIANS)
-        - Math.sin(CAMERA_ADAPTIVE_CLIMB_START_RADIANS)
-      ),
-    0,
-    1,
-  );
-  const lookAheadDistance = CAMERA_LOOK_AHEAD_METERS * (1 - climbAdaptation)
-    + CAMERA_CLIMB_LOOK_AHEAD_METERS * climbAdaptation;
-  const lookHeight = CAMERA_LOOK_HEIGHT_METERS * cosPitch * (1 - climbAdaptation);
-  const targetAltitude = state.altitude
-    + lookHeight
-    + lookAheadDistance * sinPitch;
-  const desiredFromAltitude = state.altitude
-    + CAMERA_CHASE_HEIGHT_METERS * cosPitch
-    - CAMERA_CHASE_DISTANCE_METERS * sinPitch;
-  const cameraHorizontalDistance = Math.hypot(
-    CAMERA_CHASE_DISTANCE_METERS + lookAheadDistance,
-    bankOffset * 0.8,
-  );
-  const minimumTerrainDrop = cameraHorizontalDistance
-    / Math.tan(CAMERA_MAX_TERRAIN_PITCH_RADIANS);
-  const fromAltitude = Math.max(
-    desiredFromAltitude,
-    targetAltitude + minimumTerrainDrop,
-  );
+
+  const fromEast = -forwardEast * CAMERA_CHASE_DISTANCE_METERS
+    + upEast * CAMERA_CHASE_HEIGHT_METERS
+    + rightEast * bankOffset;
+  const fromNorth = -forwardNorth * CAMERA_CHASE_DISTANCE_METERS
+    + upNorth * CAMERA_CHASE_HEIGHT_METERS
+    + rightNorth * bankOffset;
+  const fromUp = -forwardUp * CAMERA_CHASE_DISTANCE_METERS
+    + upUp * CAMERA_CHASE_HEIGHT_METERS;
+  const targetEast = forwardEast * CAMERA_LOOK_AHEAD_METERS
+    + upEast * CAMERA_LOOK_HEIGHT_METERS
+    + rightEast * bankOffset * 0.2;
+  const targetNorth = forwardNorth * CAMERA_LOOK_AHEAD_METERS
+    + upNorth * CAMERA_LOOK_HEIGHT_METERS
+    + rightNorth * bankOffset * 0.2;
+  const targetUp = forwardUp * CAMERA_LOOK_AHEAD_METERS
+    + upUp * CAMERA_LOOK_HEIGHT_METERS;
+
   return {
-    from: offsetCoordinate(
-      coordinate,
-      -forwardEast * CAMERA_CHASE_DISTANCE_METERS + rightEast * bankOffset,
-      -forwardNorth * CAMERA_CHASE_DISTANCE_METERS + rightNorth * bankOffset,
-    ),
-    fromAltitude,
-    target: offsetCoordinate(
-      coordinate,
-      forwardEast * lookAheadDistance + rightEast * bankOffset * 0.2,
-      forwardNorth * lookAheadDistance + rightNorth * bankOffset * 0.2,
-    ),
-    targetAltitude,
+    from: offsetCoordinate(coordinate, fromEast, fromNorth),
+    fromAltitude: state.altitude + fromUp,
+    target: offsetCoordinate(coordinate, targetEast, targetNorth),
+    targetAltitude: state.altitude + targetUp,
     bearing: radiansToDegrees(state.heading),
     roll: radiansToDegrees(state.roll),
   };

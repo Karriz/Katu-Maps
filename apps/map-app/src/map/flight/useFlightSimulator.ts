@@ -349,11 +349,10 @@ export function useFlightSimulator({
       terrainEnabledRef.current = true;
       map.setTerrain({ source: terrainSourceRef.current, exaggeration: 1 });
     }
-    // MapLibre accepts larger pitch limits, but terrain tile covering and
-    // culling are not reliable once the camera looks beyond the horizon.
-    // The adaptive chase rig keeps the aircraft aerobatic while the map
-    // camera remains within this terrain-safe range.
-    map.setMaxPitch(85);
+    // Pitch > 90 (above horizon) needs an elevated look-at center from
+    // calculateCameraOptionsFromTo (elevation on jumpTo). Keep
+    // centerClampedToGround false or the camera drops underground.
+    map.setMaxPitch(180);
     map.setMaxZoom(22);
     map.setCenterClampedToGround(false);
     modelLayer.setPose(initialState);
@@ -378,7 +377,9 @@ export function useFlightSimulator({
     let previousCameraOptions: { zoom: number; pitch: number; center: [number, number] } | null = null;
     let consecutiveRejectedFrames = 0;
     const MAX_ZOOM_CHANGE_PER_FRAME = 0.4;
-    const MAX_PITCH_CHANGE_PER_FRAME_DEGREES = 12;
+    // Loops swing map pitch through the horizon quickly; allow larger steps
+    // than ground mode so legitimate climb/look-up motion is not rejected.
+    const MAX_PITCH_CHANGE_PER_FRAME_DEGREES = 25;
     const MAX_CENTER_JUMP_METERS = 250;
     const MAX_CONSECUTIVE_REJECTIONS = 4;
 
@@ -446,6 +447,12 @@ export function useFlightSimulator({
           camera.fromAltitude,
           cameraGroundElevation + FLIGHT_MIN_CLEARANCE_METERS,
         );
+        // FromTo returns the geometric look pitch (including > 90 when the
+        // target is above the camera) and an elevated look-at. Passing that
+        // elevation through jumpTo with centerClampedToGround false is what
+        // keeps ground visible above the horizon — do not recompute the
+        // center via FromCameraLngLatAltRotation, which aims from the current
+        // terrain elevation and pulls the chase view off the aircraft.
         const cameraOptions = map.calculateCameraOptionsFromTo(
           new LngLat(camera.from[0], camera.from[1]),
           fromAltitude,
@@ -474,8 +481,7 @@ export function useFlightSimulator({
           previousCameraOptions = { zoom: nextZoom, pitch: nextPitch, center: nextCenter };
           jumpToFlightCamera(map, {
             ...cameraOptions,
-            pitch: nextPitch,
-            zoom: Math.max(cameraOptions.zoom ?? map.getZoom(), 14),
+            zoom: Math.max(nextZoom, 14),
             roll: camera.roll,
           });
           keepDistantTerrainVisible(map);
