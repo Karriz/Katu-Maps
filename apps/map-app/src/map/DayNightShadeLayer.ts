@@ -9,18 +9,9 @@ export const DAY_NIGHT_SHADE_LAYER_ID = 'day-night-shade';
 
 const LAT_SEGMENTS = 72;
 const LNG_SEGMENTS = 144;
-const SHELL_ALTITUDE_METERS = 28_000;
-
-const VERTEX_SHADER = `#version 300 es
-uniform mat4 u_matrix;
-in vec3 a_pos;
-in vec2 a_lnglat;
-out vec2 v_lnglat;
-void main() {
-  v_lnglat = a_lnglat;
-  gl_Position = u_matrix * vec4(a_pos, 1.0);
-}
-`;
+const SHELL_ALTITUDE_METERS = 80_000;
+const MERCATOR_ATTRIB = 0;
+const LNGLAT_ATTRIB = 1;
 
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -53,13 +44,18 @@ void main() {
 
 type ShadeProgram = {
   program: WebGLProgram;
-  matrix: WebGLUniformLocation | null;
+  variant: string;
+  projectionMatrix: WebGLUniformLocation | null;
+  tileMercator: WebGLUniformLocation | null;
+  clippingPlane: WebGLUniformLocation | null;
+  projectionTransition: WebGLUniformLocation | null;
+  fallbackMatrix: WebGLUniformLocation | null;
+  clipAntimeridian: WebGLUniformLocation | null;
+  elevation: WebGLUniformLocation | null;
   sun: WebGLUniformLocation | null;
   opacity: WebGLUniformLocation | null;
   lights: WebGLUniformLocation | null;
   cityLights: WebGLUniformLocation | null;
-  position: number;
-  lnglat: number;
 };
 
 const URBAN_REGIONS: Array<[number, number, number, number]> = [
@@ -183,8 +179,30 @@ function compileShader(gl: WebGL2RenderingContext, type: number, source: string)
   return shader;
 }
 
-function createShadeProgram(gl: WebGL2RenderingContext): ShadeProgram | null {
-  const vertex = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
+function asMat4f32(matrix: ArrayLike<number>) {
+  return matrix instanceof Float32Array ? matrix : new Float32Array(matrix);
+}
+
+function vertexShaderSource(shaderData: CustomRenderMethodInput['shaderData']) {
+  return `#version 300 es
+${shaderData.vertexShaderPrelude}
+${shaderData.define}
+layout(location=${MERCATOR_ATTRIB}) in vec2 a_mercator;
+layout(location=${LNGLAT_ATTRIB}) in vec2 a_lnglat;
+out vec2 v_lnglat;
+uniform float u_elevation;
+void main() {
+  v_lnglat = a_lnglat;
+  gl_Position = projectTileFor3D(a_mercator, u_elevation);
+}
+`;
+}
+
+function createShadeProgram(
+  gl: WebGL2RenderingContext,
+  shaderData: CustomRenderMethodInput['shaderData'],
+): ShadeProgram | null {
+  const vertex = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource(shaderData));
   const fragment = compileShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
   if (!vertex || !fragment) return null;
   const program = gl.createProgram();
@@ -201,26 +219,31 @@ function createShadeProgram(gl: WebGL2RenderingContext): ShadeProgram | null {
   }
   return {
     program,
-    matrix: gl.getUniformLocation(program, 'u_matrix'),
+    variant: shaderData.variantName,
+    projectionMatrix: gl.getUniformLocation(program, 'u_projection_matrix'),
+    tileMercator: gl.getUniformLocation(program, 'u_projection_tile_mercator_coords'),
+    clippingPlane: gl.getUniformLocation(program, 'u_projection_clipping_plane'),
+    projectionTransition: gl.getUniformLocation(program, 'u_projection_transition'),
+    fallbackMatrix: gl.getUniformLocation(program, 'u_projection_fallback_matrix'),
+    clipAntimeridian: gl.getUniformLocation(program, 'u_projection_clip_antimeridian'),
+    elevation: gl.getUniformLocation(program, 'u_elevation'),
     sun: gl.getUniformLocation(program, 'u_sun'),
     opacity: gl.getUniformLocation(program, 'u_opacity'),
     lights: gl.getUniformLocation(program, 'u_lights'),
     cityLights: gl.getUniformLocation(program, 'u_city_lights'),
-    position: gl.getAttribLocation(program, 'a_pos'),
-    lnglat: gl.getAttribLocation(program, 'a_lnglat'),
   };
 }
 
 function createGlobeMesh() {
-  const positions: number[] = [];
+  const mercators: number[] = [];
   const lnglats: number[] = [];
   const indices: number[] = [];
   for (let latIndex = 0; latIndex <= LAT_SEGMENTS; latIndex += 1) {
     const lat = 85 - latIndex * (170 / LAT_SEGMENTS);
     for (let lngIndex = 0; lngIndex <= LNG_SEGMENTS; lngIndex += 1) {
       const lng = -180 + lngIndex * (360 / LNG_SEGMENTS);
-      const mercator = maplibregl.MercatorCoordinate.fromLngLat({ lng, lat }, SHELL_ALTITUDE_METERS);
-      positions.push(mercator.x, mercator.y, mercator.z ?? 0);
+      const mercator = maplibregl.MercatorCoordinate.fromLngLat({ lng, lat });
+      mercators.push(mercator.x, mercator.y);
       lnglats.push(lng, lat);
     }
   }
@@ -229,11 +252,11 @@ function createGlobeMesh() {
       const stride = LNG_SEGMENTS + 1;
       const top = latIndex * stride + lngIndex;
       const bottom = top + stride;
-      indices.push(top, bottom, top + 1, bottom, bottom + 1, top + 1);
+      indices.push(top, bottom, top + 1, top + 1, bottom, bottom + 1);
     }
   }
   return {
-    positions: new Float32Array(positions),
+    mercators: new Float32Array(mercators),
     lnglats: new Float32Array(lnglats),
     indices: new Uint32Array(indices),
   };
@@ -244,9 +267,9 @@ export class DayNightShadeLayer implements CustomLayerInterface {
   readonly type = 'custom';
   readonly renderingMode = '3d';
   private map?: MaplibreMap;
-  private program: ShadeProgram | null = null;
+  private programs = new Map<string, ShadeProgram>();
   private vao: WebGLVertexArrayObject | null = null;
-  private positionBuffer: WebGLBuffer | null = null;
+  private mercatorBuffer: WebGLBuffer | null = null;
   private lnglatBuffer: WebGLBuffer | null = null;
   private indexBuffer: WebGLBuffer | null = null;
   private lightsTexture: WebGLTexture | null = null;
@@ -265,23 +288,21 @@ export class DayNightShadeLayer implements CustomLayerInterface {
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
     this.map = map;
     const gl2 = gl as WebGL2RenderingContext;
-    this.program = createShadeProgram(gl2);
-    if (!this.program) return;
     const mesh = createGlobeMesh();
     this.indexCount = mesh.indices.length;
     this.vao = gl2.createVertexArray();
-    this.positionBuffer = gl2.createBuffer();
+    this.mercatorBuffer = gl2.createBuffer();
     this.lnglatBuffer = gl2.createBuffer();
     this.indexBuffer = gl2.createBuffer();
     gl2.bindVertexArray(this.vao);
-    gl2.bindBuffer(gl2.ARRAY_BUFFER, this.positionBuffer);
-    gl2.bufferData(gl2.ARRAY_BUFFER, mesh.positions, gl2.STATIC_DRAW);
-    gl2.enableVertexAttribArray(this.program.position);
-    gl2.vertexAttribPointer(this.program.position, 3, gl2.FLOAT, false, 0, 0);
+    gl2.bindBuffer(gl2.ARRAY_BUFFER, this.mercatorBuffer);
+    gl2.bufferData(gl2.ARRAY_BUFFER, mesh.mercators, gl2.STATIC_DRAW);
+    gl2.enableVertexAttribArray(MERCATOR_ATTRIB);
+    gl2.vertexAttribPointer(MERCATOR_ATTRIB, 2, gl2.FLOAT, false, 0, 0);
     gl2.bindBuffer(gl2.ARRAY_BUFFER, this.lnglatBuffer);
     gl2.bufferData(gl2.ARRAY_BUFFER, mesh.lnglats, gl2.STATIC_DRAW);
-    gl2.enableVertexAttribArray(this.program.lnglat);
-    gl2.vertexAttribPointer(this.program.lnglat, 2, gl2.FLOAT, false, 0, 0);
+    gl2.enableVertexAttribArray(LNGLAT_ATTRIB);
+    gl2.vertexAttribPointer(LNGLAT_ATTRIB, 2, gl2.FLOAT, false, 0, 0);
     gl2.bindBuffer(gl2.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     gl2.bufferData(gl2.ELEMENT_ARRAY_BUFFER, mesh.indices, gl2.STATIC_DRAW);
     gl2.bindVertexArray(null);
@@ -298,10 +319,19 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     gl2.bindTexture(gl2.TEXTURE_2D, null);
   }
 
+  private programFor(gl: WebGL2RenderingContext, shaderData: CustomRenderMethodInput['shaderData']) {
+    const cached = this.programs.get(shaderData.variantName);
+    if (cached) return cached;
+    const program = createShadeProgram(gl, shaderData);
+    if (program) this.programs.set(shaderData.variantName, program);
+    return program;
+  }
+
   render(gl: WebGLRenderingContext | WebGL2RenderingContext, options: CustomRenderMethodInput) {
     const gl2 = gl as WebGL2RenderingContext;
-    const program = this.program;
-    if (!program || !this.vao || this.opacity <= 0.002) return;
+    if (!this.vao || this.opacity <= 0.002) return;
+    const program = this.programFor(gl2, options.shaderData);
+    if (!program) return;
 
     const previousProgram = gl2.getParameter(gl2.CURRENT_PROGRAM);
     const previousVao = gl2.getParameter(gl2.VERTEX_ARRAY_BINDING);
@@ -309,6 +339,7 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     const previousDepthTest = gl2.isEnabled(gl2.DEPTH_TEST);
     const previousCull = gl2.isEnabled(gl2.CULL_FACE);
     const previousDepthMask = gl2.getParameter(gl2.DEPTH_WRITEMASK);
+    const previousDepthFunc = gl2.getParameter(gl2.DEPTH_FUNC);
     const previousBlendSrcRgb = gl2.getParameter(gl2.BLEND_SRC_RGB);
     const previousBlendDstRgb = gl2.getParameter(gl2.BLEND_DST_RGB);
     const previousBlendSrcAlpha = gl2.getParameter(gl2.BLEND_SRC_ALPHA);
@@ -316,21 +347,34 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     const previousActiveTexture = gl2.getParameter(gl2.ACTIVE_TEXTURE);
     const previousTexture = gl2.getParameter(gl2.TEXTURE_BINDING_2D);
 
+    const projection = options.defaultProjectionData;
     gl2.useProgram(program.program);
     gl2.bindVertexArray(this.vao);
     gl2.enable(gl2.BLEND);
     gl2.blendFunc(gl2.ONE, gl2.ONE_MINUS_SRC_ALPHA);
     gl2.enable(gl2.DEPTH_TEST);
+    gl2.depthFunc(gl2.LEQUAL);
     gl2.depthMask(false);
-    gl2.enable(gl2.CULL_FACE);
-    gl2.cullFace(gl2.BACK);
-    gl2.uniformMatrix4fv(
-      program.matrix,
-      false,
-      options.defaultProjectionData.mainMatrix instanceof Float32Array
-        ? options.defaultProjectionData.mainMatrix
-        : new Float32Array(options.defaultProjectionData.mainMatrix),
-    );
+    gl2.disable(gl2.CULL_FACE);
+    if (program.projectionMatrix) {
+      gl2.uniformMatrix4fv(program.projectionMatrix, false, asMat4f32(projection.mainMatrix));
+    }
+    if (program.tileMercator) {
+      gl2.uniform4f(program.tileMercator, ...projection.tileMercatorCoords);
+    }
+    if (program.clippingPlane) {
+      gl2.uniform4f(program.clippingPlane, ...projection.clippingPlane);
+    }
+    if (program.projectionTransition) {
+      gl2.uniform1f(program.projectionTransition, projection.projectionTransition);
+    }
+    if (program.fallbackMatrix) {
+      gl2.uniformMatrix4fv(program.fallbackMatrix, false, asMat4f32(projection.fallbackMatrix));
+    }
+    if (program.clipAntimeridian) {
+      gl2.uniform1i(program.clipAntimeridian, projection.clipAntimeridian ? 1 : 0);
+    }
+    gl2.uniform1f(program.elevation, SHELL_ALTITUDE_METERS);
     gl2.uniform3f(program.sun, this.sun[0], this.sun[1], this.sun[2]);
     gl2.uniform1f(program.opacity, this.opacity);
     gl2.uniform1f(program.lights, this.lights);
@@ -342,7 +386,9 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     gl2.bindTexture(gl2.TEXTURE_2D, previousTexture);
     gl2.activeTexture(previousActiveTexture);
     gl2.depthMask(previousDepthMask);
-    if (!previousCull) gl2.disable(gl2.CULL_FACE);
+    gl2.depthFunc(previousDepthFunc);
+    if (previousCull) gl2.enable(gl2.CULL_FACE);
+    else gl2.disable(gl2.CULL_FACE);
     if (!previousDepthTest) gl2.disable(gl2.DEPTH_TEST);
     if (!previousBlend) gl2.disable(gl2.BLEND);
     else gl2.blendFuncSeparate(previousBlendSrcRgb, previousBlendDstRgb, previousBlendSrcAlpha, previousBlendDstAlpha);
@@ -352,13 +398,13 @@ export class DayNightShadeLayer implements CustomLayerInterface {
 
   onRemove(_map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
     const gl2 = gl as WebGL2RenderingContext;
-    if (this.program) gl2.deleteProgram(this.program.program);
+    for (const program of this.programs.values()) gl2.deleteProgram(program.program);
+    this.programs.clear();
     if (this.vao) gl2.deleteVertexArray(this.vao);
-    if (this.positionBuffer) gl2.deleteBuffer(this.positionBuffer);
+    if (this.mercatorBuffer) gl2.deleteBuffer(this.mercatorBuffer);
     if (this.lnglatBuffer) gl2.deleteBuffer(this.lnglatBuffer);
     if (this.indexBuffer) gl2.deleteBuffer(this.indexBuffer);
     if (this.lightsTexture) gl2.deleteTexture(this.lightsTexture);
-    this.program = null;
     this.vao = null;
     this.map = undefined;
   }
