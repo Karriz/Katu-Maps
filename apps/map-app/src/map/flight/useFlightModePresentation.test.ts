@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { restoreFlightPresentation, restoreTransitOverlay, shouldHideLayerInFlight } from './useFlightModePresentation';
+import { GLOBAL_CYCLING_LAYER_IDS, GLOBAL_HIKING_LAYER_IDS } from '../GlobalMapStyle';
+import { TRAFFIC_CAMERA_LAYER_IDS } from '../TrafficCamerasLayer';
+import { CHARGING_STATION_LAYER_IDS } from '../ChargingStationsLayer';
+import { ROAD_WEATHER_LAYER_IDS } from '../RoadWeatherLayer';
+import { ROAD_TRAFFIC_LAYER_IDS } from '../RoadTrafficLayer';
 
 describe('flight presentation', () => {
   it('hides map POIs, transit, and application overlays', () => {
@@ -19,6 +24,16 @@ describe('flight presentation', () => {
     expect(shouldHideLayerInFlight({ id: 'global-cycling-routes', type: 'line' } as any)).toBe(true);
     expect(shouldHideLayerInFlight({ id: 'global-hiking-routes', type: 'line' } as any)).toBe(true);
     expect(shouldHideLayerInFlight({ id: 'global-hiking-pois', type: 'symbol' } as any)).toBe(true);
+    for (const id of [
+      ...TRAFFIC_CAMERA_LAYER_IDS,
+      ...CHARGING_STATION_LAYER_IDS,
+      ...ROAD_WEATHER_LAYER_IDS,
+      ...ROAD_TRAFFIC_LAYER_IDS,
+      ...GLOBAL_CYCLING_LAYER_IDS,
+      ...GLOBAL_HIKING_LAYER_IDS,
+    ]) {
+      expect(shouldHideLayerInFlight({ id, type: 'line' } as any), id).toBe(true);
+    }
   });
 
   it('keeps the aircraft, trees, and ordinary cartography visible', () => {
