@@ -708,6 +708,19 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .weather-time-slider input[type='range'] { width: 100%; }
 .weather-time-slider-attribution { color: #94a3b8; font-size: 0.62rem; text-decoration: none; }
 .weather-time-slider-attribution:hover { color: var(--color-accent); text-decoration: underline; }
+.day-night-time-phase {
+  align-items: center;
+  color: var(--color-ink);
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  gap: 6px;
+  padding: 6px 4px;
+}
+.day-night-time-phase svg { height: 15px; width: 15px; }
+.day-night-time-slider.with-weather-overlay {
+  bottom: calc(168px + env(safe-area-inset-bottom, 0px));
+}
 .map-tools { align-items: flex-start; display: flex; gap: 16px; left: var(--map-control-edge); pointer-events: none; position: absolute; top: 108px; z-index: 4; }
 .map-tool-dock { display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
 .map-tool-dock button { align-items: center; background: var(--surface-control); border: 1px solid rgb(203 215 228 / 82%); border-radius: 14px; box-shadow: var(--shadow-control); color: #27425e; cursor: pointer; display: flex; height: 56px; justify-content: center; transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease; width: 56px; }
@@ -1146,6 +1159,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
     right: calc(70px + env(safe-area-inset-right, 0px));
     transform: none;
     width: auto;
+  }
+  .day-night-time-slider.with-weather-overlay {
+    bottom: calc(148px + env(safe-area-inset-bottom, 0px));
   }
   .map-camera-actions {
     right: calc(12px + env(safe-area-inset-right, 0px));

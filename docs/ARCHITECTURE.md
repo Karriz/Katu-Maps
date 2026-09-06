@@ -45,6 +45,9 @@ pipeline. Transit provider selection is geographic and centralized in
 - `ChargingStationsLayer.ts` shows Open Charge Map charging stations.
 - `Weather.ts` fetches Open-Meteo point forecasts and a coarse cloud/precip
   grid. `WeatherForecastLayer.ts` paints that grid as a MapLibre image overlay.
+- `DayNightShadeLayer.ts` draws the globe night hemisphere, twilight terminator,
+  and city lights. Close zooms switch to a solar-elevation palette, sun-aligned
+  footprint shades, and Three.js tree lighting.
 - `TransitVehicleModelLayer.ts` renders the close-zoom Three.js vehicle model.
 - `MapView.tsx` coordinates map state, data services, and custom layers.
 - React UI components remain independent of source-layer parsing.

@@ -51,6 +51,10 @@ inland-water polygons provide the blue surface. Between zooms 10 and 12 the
 `globe` preset transitions to Mercator; buildings and procedural trees appear
 at that close-map scale, where the existing 3D rendering remains compatible.
 The Globe control can switch the global view to a conventional Mercator map.
+Optional Day & night lighting adds a globe night shade, city lights, a
+twilight palette at closer zooms, and a time slider. Building footprint
+shades and tree contact shadows follow the sun direction without realtime
+shadow maps.
 
 The experimental terrain configuration caps Mapterhorn DEM tiles at zoom 12.
 MapLibre overzooms that globally available terrain at closer camera zooms,

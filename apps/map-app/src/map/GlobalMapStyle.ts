@@ -2752,7 +2752,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
 /** Recolors the already-loaded style in place. This intentionally avoids
  * setStyle(): custom Three.js layers, sources, camera state, and selections
  * therefore survive an appearance change. */
-export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
+export function applyMapTheme(
+  map: MapLibreMap,
+  theme: 'light' | 'dark',
+  options?: { refresh?: boolean },
+) {
   const originalPaints = mapThemePaints.get(map) ?? new Map<string, Record<string, unknown>>();
   if (!mapThemePaints.has(map)) {
     (map.getStyle().layers ?? []).forEach((layer) => {
@@ -2767,7 +2771,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     if (map.getLayer('global-aerodrome-labels')) map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon');
     if (map.getLayer('location-poi-icons')) map.setPaintProperty('location-poi-icons', 'icon-opacity', 1);
     if (map.getLayer('location-poi-labels')) map.setPaintProperty('location-poi-labels', 'icon-opacity', 1);
-    refreshMapAfterTheme(map);
+    if (options?.refresh !== false) refreshMapAfterTheme(map);
     return;
   }
   const dark = true;
@@ -2816,7 +2820,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon-dark');
   }
   ['location-poi-icons', 'location-poi-labels'].forEach((id) => set(id, 'icon-opacity', 0.78));
-  refreshMapAfterTheme(map);
+  if (options?.refresh !== false) refreshMapAfterTheme(map);
 }
 
 const mapThemePaints = new WeakMap<MapLibreMap, Map<string, Record<string, unknown>>>();

@@ -23,6 +23,7 @@ const OPTIONAL_OVERLAY_PREFIXES = [
   'road-traffic-',
   'global-cycling-',
   'global-hiking-',
+  'day-night-',
 ];
 
 type FlightTransitOverlay = Pick<TransitRouteOverlay, 'setVisibility' | 'update'>;

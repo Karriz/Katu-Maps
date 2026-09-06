@@ -8,7 +8,10 @@ import * as THREE from 'three';
 import {
   CARTOON_AMBIENT_GROUND_COLOR,
   CARTOON_AMBIENT_SKY_COLOR,
+  CARTOON_SUN_AZIMUTH_DEGREES,
   CARTOON_SUN_COLOR,
+  CARTOON_SUN_POLAR_DEGREES,
+  sunCartesian,
 } from './CartoonLighting';
 import type { TransitVehiclePose } from './TransitStopsLayer';
 
@@ -337,6 +340,9 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   private lastFrameTime = 0;
   private currentInitialized = false;
   private darkMode = false;
+  private hemisphereLight?: THREE.HemisphereLight;
+  private sunlight?: THREE.DirectionalLight;
+  private nightMix = 0;
 
   setTheme(dark: boolean) {
     if (this.darkMode === dark) return;
@@ -344,6 +350,30 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
     if (this.pose) {
       this.rebuildModel(this.pose);
       this.applyPose(this.pose);
+    }
+    this.applyVehicleLighting();
+  }
+
+  setDayNightLighting(lighting: {
+    azimuth: number;
+    polar: number;
+    nightMix: number;
+  } | null) {
+    this.nightMix = lighting?.nightMix ?? 0;
+    const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
+    const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
+    const position = sunCartesian(azimuth, polar);
+    this.sunlight?.position.set(position.x, position.y, position.z);
+    this.applyVehicleLighting();
+    this.map?.triggerRepaint();
+  }
+
+  private applyVehicleLighting() {
+    const night = Math.max(this.darkMode ? 0.75 : 0, this.nightMix);
+    if (this.hemisphereLight) this.hemisphereLight.intensity = 0.55 + (1 - night) * 1.65;
+    if (this.sunlight) {
+      this.sunlight.intensity = 0.45 + (1 - night) * 2.35;
+      this.sunlight.color.set(night > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR);
     }
   }
 
@@ -364,14 +394,17 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
     // Models use local metre coordinates: x=east, y=up, z=north.
     this.scene.rotateX(Math.PI / 2);
     this.scene.scale.multiply(new THREE.Vector3(1, 1, -1));
-    this.scene.add(new THREE.HemisphereLight(
+    this.hemisphereLight = new THREE.HemisphereLight(
       CARTOON_AMBIENT_SKY_COLOR,
       CARTOON_AMBIENT_GROUND_COLOR,
       2.2,
-    ));
-    const sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.8);
-    sunlight.position.set(-60, 110, -45);
-    this.scene.add(sunlight);
+    );
+    this.scene.add(this.hemisphereLight);
+    this.sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.8);
+    const position = sunCartesian(CARTOON_SUN_AZIMUTH_DEGREES, CARTOON_SUN_POLAR_DEGREES);
+    this.sunlight.position.set(position.x, position.y, position.z);
+    this.scene.add(this.sunlight);
+    this.applyVehicleLighting();
     this.renderer = new THREE.WebGLRenderer({
       canvas: map.getCanvas(),
       context: gl as WebGL2RenderingContext,
