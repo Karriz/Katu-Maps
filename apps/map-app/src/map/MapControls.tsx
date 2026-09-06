@@ -84,7 +84,6 @@ const layerGroups: LayerGroup[] = [
     layers: [
       { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
       { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
-      { key: 'dayNight', label: 'Day & night', description: 'Sunlight, night shade & city lights', icon: SunMoon },
     ],
   },
   {
@@ -114,9 +113,10 @@ const layerGroups: LayerGroup[] = [
     ],
   },
   {
-    id: 'weather',
-    label: 'Weather',
+    id: 'environment',
+    label: 'Environment',
     layers: [
+      { key: 'dayNight', label: 'Day & night', description: 'Sunlight, night shade & city lights', icon: SunMoon },
       { key: 'clouds', label: 'Clouds', description: 'Global model cloud cover', icon: Cloud },
       { key: 'weather', label: 'Weather', description: 'Forecast for the viewed location', icon: CloudSun },
     ],

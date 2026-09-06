@@ -927,7 +927,7 @@ const scenarios: Scenario[] = [
       await expect(panel.getByRole('heading', { name: 'Transit' })).toBeVisible();
       await expect(panel.getByRole('heading', { name: 'Driving' })).toBeVisible();
       await expect(panel.getByRole('heading', { name: 'Bike & walk' })).toBeVisible();
-      await expect(panel.getByRole('heading', { name: 'Weather' })).toBeVisible();
+      await expect(panel.getByRole('heading', { name: 'Environment' })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /Traffic.*congestion/i })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /^Road weather/i })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /Charging stations/i })).toBeVisible();
