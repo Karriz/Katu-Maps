@@ -15,6 +15,16 @@ const APPLICATION_OVERLAY_PREFIXES = [
   'user-location',
 ];
 
+const OPTIONAL_OVERLAY_PREFIXES = [
+  'transit-',
+  'traffic-cameras-',
+  'charging-stations-',
+  'road-weather-',
+  'road-traffic-',
+  'global-cycling-',
+  'global-hiking-',
+];
+
 type FlightTransitOverlay = Pick<TransitRouteOverlay, 'setVisibility' | 'update'>;
 
 export function restoreTransitOverlay(
@@ -56,7 +66,7 @@ export function restoreFlightPresentation(
 
 export function shouldHideLayerInFlight(layer: Pick<StyleLayer, 'id' | 'type'>) {
   if (layer.id === 'flight-aircraft-model-3d') return false;
-  if (layer.id.startsWith('transit-')) return true;
+  if (OPTIONAL_OVERLAY_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) return true;
   if (APPLICATION_OVERLAY_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) return true;
   return layer.type === 'symbol'
     && (layer.id.includes('poi') || layer.id.includes('transit'));

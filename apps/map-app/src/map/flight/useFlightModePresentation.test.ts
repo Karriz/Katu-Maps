@@ -8,12 +8,27 @@ describe('flight presentation', () => {
     expect(shouldHideLayerInFlight({ id: 'favorite-icons', type: 'symbol' } as any)).toBe(true);
   });
 
+  it('hides enabled transit, driving, and bike-and-walk overlays', () => {
+    expect(shouldHideLayerInFlight({ id: 'transit-bus-stop-icons', type: 'symbol' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'transit-route-overlay-lines', type: 'line' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'transit-vehicle-model-3d', type: 'custom' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'traffic-cameras-icons', type: 'symbol' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'charging-stations-dots', type: 'circle' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'road-weather-icons', type: 'symbol' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'road-traffic-message-lines', type: 'line' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'global-cycling-routes', type: 'line' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'global-hiking-routes', type: 'line' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'global-hiking-pois', type: 'symbol' } as any)).toBe(true);
+  });
+
   it('keeps the aircraft, trees, and ordinary cartography visible', () => {
     expect(shouldHideLayerInFlight({ id: 'flight-aircraft-model-3d', type: 'custom' } as any)).toBe(false);
     expect(shouldHideLayerInFlight({ id: 'tree-models-3d', type: 'custom' } as any)).toBe(false);
     expect(shouldHideLayerInFlight({ id: 'tree-points', type: 'circle' } as any)).toBe(false);
     expect(shouldHideLayerInFlight({ id: 'global-road-labels', type: 'symbol' } as any)).toBe(false);
     expect(shouldHideLayerInFlight({ id: 'global-buildings-3d', type: 'fill-extrusion' } as any)).toBe(false);
+    expect(shouldHideLayerInFlight({ id: 'global-local-transit-lines', type: 'line' } as any)).toBe(false);
+    expect(shouldHideLayerInFlight({ id: 'global-roads', type: 'line' } as any)).toBe(false);
   });
 
   it('restores remaining hidden layers when one restore step fails', () => {
