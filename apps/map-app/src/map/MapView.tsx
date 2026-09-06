@@ -888,7 +888,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       chargingStations: false,
       roadWeather: false,
       roadTraffic: false,
-      weather: true,
+      weather: false,
       clouds: false,
       dayNight: false,
     };

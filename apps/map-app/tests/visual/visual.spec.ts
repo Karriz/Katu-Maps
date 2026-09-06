@@ -889,6 +889,16 @@ const scenarios: Scenario[] = [
     viewport: 'desktop',
     initialView: tampereCityView,
     setup: async page => {
+      await page.getByRole('button', { name: 'Map layers' }).click();
+      const layersPanel = page.locator('#map-layer-panel');
+      await expect(layersPanel).toBeVisible();
+      const weatherToggle = layersPanel.getByRole('switch', { name: /^Weather/ });
+      await expect(weatherToggle).toHaveAttribute('aria-checked', 'false');
+      await weatherToggle.click();
+      await expect(weatherToggle).toHaveAttribute('aria-checked', 'true');
+      await layersPanel.getByRole('button', { name: 'Close map layers' }).click();
+      await expect(layersPanel).toBeHidden();
+
       const chip = page.getByRole('button', { name: /map centre/i });
       await expect(chip).toBeVisible();
       await expect(chip).toContainText(/°|…|—/);
@@ -921,8 +931,10 @@ const scenarios: Scenario[] = [
       await expect(panel.getByRole('switch', { name: /Traffic.*congestion/i })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /^Road weather/i })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /Charging stations/i })).toBeVisible();
+      await expect(panel.getByRole('switch', { name: /Day & night/i })).toBeVisible();
+      await expect(panel.getByRole('switch', { name: /^Clouds/ })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /^Weather/ })).toBeVisible();
-      await expect(panel.getByRole('switch')).toHaveCount(11);
+      await expect(panel.getByRole('switch')).toHaveCount(13);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
