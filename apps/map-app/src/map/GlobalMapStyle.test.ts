@@ -126,6 +126,41 @@ describe('global map overlay styles', () => {
     expect(serializedFilter).not.toContain('sports_centre');
   });
 
+  it('paints parks and site overlays above residential landuse', () => {
+    const layerIds = GLOBAL_MAP_STYLE.layers.map((layer) => layer.id);
+    const indexOf = (layerId: string) => layerIds.indexOf(layerId);
+    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
+
+    expect(indexOf('global-protected-areas')).toBeLessThan(indexOf('global-landuse'));
+    expect(indexOf('global-landuse')).toBeLessThan(indexOf('global-landcover-parks'));
+    expect(indexOf('global-landcover-parks')).toBeLessThan(indexOf('global-landuse-overlays'));
+    expect(indexOf('global-landuse-overlays')).toBeLessThan(indexOf('global-parks'));
+
+    const landcover = layersById.get('global-landcover') as {
+      filter?: unknown[];
+      paint?: Record<string, unknown>;
+    } | undefined;
+    const landcoverParks = layersById.get('global-landcover-parks') as {
+      filter?: unknown;
+      'source-layer'?: string;
+      paint?: Record<string, unknown>;
+    } | undefined;
+    const landuse = layersById.get('global-landuse') as { filter?: unknown[] } | undefined;
+    const overlays = layersById.get('global-landuse-overlays') as {
+      filter?: unknown;
+      layout?: Record<string, unknown>;
+    } | undefined;
+
+    expect(landcover?.filter?.[0]).toBe('!');
+    expect(landuse?.filter?.[0]).toBe('!');
+    expect(landcoverParks?.['source-layer']).toBe('landcover');
+    expect(JSON.stringify(landcoverParks?.filter)).toContain('park');
+    expect(JSON.stringify(landcover?.paint?.['fill-color'])).not.toContain('"park"');
+    expect(JSON.stringify(landcoverParks?.paint?.['fill-color'])).toContain('"park"');
+    expect(JSON.stringify(overlays?.filter)).toContain('pitch');
+    expect(overlays?.layout?.['fill-sort-key']).toBeDefined();
+  });
+
   it('keeps globe and continental zooms free of dense overview geometry', () => {
     const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
     const filterOf = (layerId: string) => JSON.stringify(

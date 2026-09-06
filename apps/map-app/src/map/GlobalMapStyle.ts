@@ -493,6 +493,95 @@ function pathWidthExpression(
   ] as ExpressionSpecification;
 }
 
+// OpenMapTiles/OpenFreeMap put leisure=park in landcover (usually
+// class=grass, subclass=park), not in the park source-layer. That source
+// layer is reserved for national parks and other protected boundaries.
+const LANDCOVER_SITE_SUBCLASSES = [
+  'park',
+  'garden',
+  'flowerbed',
+  'village_green',
+  'recreation_ground',
+  'golf_course',
+  'allotments',
+] as const;
+
+// Schools, pitches, and similar sites are more specific than the broad
+// residential/commercial polygons they often sit inside.
+const LANDUSE_OVERLAY_CLASSES = [
+  'cemetery',
+  'school',
+  'kindergarten',
+  'education',
+  'university',
+  'college',
+  'hospital',
+  'library',
+  'parking',
+  'park',
+  'garden',
+  'allotments',
+  'orchard',
+  'vineyard',
+  'pitch',
+  'playground',
+  'stadium',
+  'track',
+  'theme_park',
+  'zoo',
+  'bus_station',
+] as const;
+
+const LANDCOVER_SITE_FILTER: ExpressionSpecification = [
+  'in',
+  ['get', 'subclass'],
+  ['literal', [...LANDCOVER_SITE_SUBCLASSES]],
+] as ExpressionSpecification;
+
+const LANDUSE_OVERLAY_FILTER: ExpressionSpecification = [
+  'in',
+  ['get', 'class'],
+  ['literal', [...LANDUSE_OVERLAY_CLASSES]],
+] as ExpressionSpecification;
+
+const LANDUSE_FILL_COLOR: ExpressionSpecification = [
+  'match', ['get', 'class'],
+  'residential', MAP_COLORS.urban,
+  'commercial', MAP_COLORS.commercial,
+  'retail', '#eee3cb',
+  'industrial', MAP_COLORS.industrial,
+  'military', '#d6d9b4',
+  'cemetery', '#cae0bc',
+  'school', '#f1e6c7',
+  'kindergarten', '#f1e6c7',
+  'education', '#f1e6c7',
+  'university', '#e4e8cf',
+  'college', '#e4e8cf',
+  'hospital', '#ece6df',
+  'parking', '#e6e4dd',
+  'park', MAP_COLORS.park,
+  'garden', '#b7df96',
+  'allotments', '#c9e2a7',
+  'orchard', '#c4dc96',
+  'vineyard', '#d7dda0',
+  'farmland', MAP_COLORS.farmland,
+  'farmyard', '#e5d9b7',
+  'quarry', '#d9d7d0',
+  'pitch', '#a8d88b',
+  'playground', '#e0e8a6',
+  'stadium', '#d7edbd',
+  'railway', '#dde3df',
+  '#eff1e8',
+] as ExpressionSpecification;
+
+const LANDUSE_FILL_OPACITY: ExpressionSpecification = [
+  'interpolate', ['linear'], ['zoom'],
+  4, 0.12,
+  7, 0.38,
+  10, 0.78,
+  12, 0.94,
+] as ExpressionSpecification;
+
 export const GLOBAL_MAP_STYLE: StyleSpecification = {
   version: 8,
   name: 'Global OpenFreeMap with Mapterhorn terrain',
@@ -558,15 +647,14 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'landcover',
+      filter: ['!', LANDCOVER_SITE_FILTER],
       paint: {
         'fill-color': [
           'case',
-          ['==', ['get', 'subclass'], 'park'], MAP_COLORS.park,
           ['in', ['get', 'subclass'], ['literal', ['scrub', 'shrubbery', 'heath']]], MAP_COLORS.scrub,
           ['in', ['get', 'subclass'], ['literal', ['orchard', 'plant_nursery']]], '#c9dda4',
           ['==', ['get', 'subclass'], 'vineyard'], '#d7dda0',
-          ['in', ['get', 'subclass'], ['literal', ['garden', 'flowerbed']]], '#bfe19c',
-          ['in', ['get', 'subclass'], ['literal', ['meadow', 'grassland', 'village_green']]], MAP_COLORS.meadow,
+          ['in', ['get', 'subclass'], ['literal', ['meadow', 'grassland']]], MAP_COLORS.meadow,
           [
             'match', ['get', 'class'],
             'wood', MAP_COLORS.forest,
@@ -622,43 +710,69 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'landuse',
       minzoom: 5,
+      filter: ['!', LANDUSE_OVERLAY_FILTER],
+      paint: {
+        'fill-color': LANDUSE_FILL_COLOR,
+        'fill-opacity': LANDUSE_FILL_OPACITY,
+      },
+    },
+    {
+      // City parks live in landcover, so they have to paint after the broad
+      // residential/commercial polygons that often cover the same blocks.
+      id: 'global-landcover-parks',
+      type: 'fill',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'landcover',
+      filter: LANDCOVER_SITE_FILTER,
       paint: {
         'fill-color': [
-          'match', ['get', 'class'],
-          'residential', MAP_COLORS.urban,
-          'commercial', MAP_COLORS.commercial,
-          'retail', '#eee3cb',
-          'industrial', MAP_COLORS.industrial,
-          'military', '#d6d9b4',
-          'cemetery', '#cae0bc',
-          'school', '#f1e6c7',
-          'kindergarten', '#f1e6c7',
-          'education', '#f1e6c7',
-          'university', '#e4e8cf',
-          'college', '#e4e8cf',
-          'hospital', '#ece6df',
-          'parking', '#e6e4dd',
-          'park', MAP_COLORS.park,
-          'garden', '#b7df96',
-          'allotments', '#c9e2a7',
-          'orchard', '#c4dc96',
-          'vineyard', '#d7dda0',
-          'farmland', MAP_COLORS.farmland,
-          'farmyard', '#e5d9b7',
-          'quarry', '#d9d7d0',
-          'pitch', '#a8d88b',
-          'playground', '#e0e8a6',
-          'stadium', '#d7edbd',
-          'railway', '#dde3df',
-          '#eff1e8',
+          'case',
+          ['==', ['get', 'subclass'], 'park'], MAP_COLORS.park,
+          ['in', ['get', 'subclass'], ['literal', ['garden', 'flowerbed']]], '#bfe19c',
+          ['==', ['get', 'subclass'], 'village_green'], MAP_COLORS.meadow,
+          [
+            'match', ['get', 'class'],
+            'grass', MAP_COLORS.grass,
+            MAP_COLORS.park,
+          ],
         ],
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
-          4, 0.12,
-          7, 0.38,
+          4, 0.18,
+          7, 0.48,
           10, 0.78,
           12, 0.94,
         ],
+      },
+    },
+    {
+      id: 'global-landuse-overlays',
+      type: 'fill',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'landuse',
+      minzoom: 5,
+      filter: LANDUSE_OVERLAY_FILTER,
+      layout: {
+        'fill-sort-key': [
+          'match', ['get', 'class'],
+          'parking', 1,
+          'pitch', 5,
+          'playground', 5,
+          'track', 5,
+          'stadium', 4,
+          'park', 3,
+          'garden', 3,
+          'allotments', 3,
+          'orchard', 3,
+          'vineyard', 3,
+          'theme_park', 3,
+          'zoo', 3,
+          2,
+        ],
+      },
+      paint: {
+        'fill-color': LANDUSE_FILL_COLOR,
+        'fill-opacity': LANDUSE_FILL_OPACITY,
       },
     },
     {
@@ -2672,8 +2786,8 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
   };
   set('global-background', 'background-color', colors.background);
-  ['global-landcover', 'global-landuse'].forEach((id) => set(id, 'fill-color', colors.land));
-  ['global-protected-areas', 'global-parks'].forEach((id) => set(id, 'fill-color', colors.park));
+  ['global-landcover', 'global-landuse', 'global-landuse-overlays'].forEach((id) => set(id, 'fill-color', colors.land));
+  ['global-protected-areas', 'global-parks', 'global-landcover-parks'].forEach((id) => set(id, 'fill-color', colors.park));
   set('global-aeroway-areas', 'fill-color', '#29465a');
   set('global-aeroway-lines', 'line-color', '#7190a2');
   set('global-aeroway-runways', 'line-color', '#617f92');
