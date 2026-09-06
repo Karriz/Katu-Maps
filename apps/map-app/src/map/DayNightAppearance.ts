@@ -76,26 +76,26 @@ const GOLDEN_PALETTE: DayNightPalette = {
 };
 
 const SUNSET_PALETTE: DayNightPalette = {
-  background: '#b67a62',
-  land: '#c48a6e',
-  park: '#8e6e4a',
+  background: '#9c9c87',
+  land: '#b3ba94',
+  park: '#879568',
   water: '#3e5e86',
   waterEdge: '#2a4668',
   road: '#e8c8a0',
   roadCasing: '#8a6e5a',
   path: '#e2c2a0',
   rail: '#7a6a68',
-  building: '#e6b892',
-  buildingBand: '#c48a68',
+  building: '#ded1b6',
+  buildingBand: '#bca88d',
   label: '#f4e6d8',
   halo: '#5a3a32',
   shadow: '#3a2428',
   boundary: '#8a6a62',
   aeroway: '#c4a090',
-  sky: '#c45a48',
-  horizon: '#ff8a4a',
-  fog: '#d87858',
-  sun: '#ffb070',
+  sky: '#8c91b0',
+  horizon: '#e8b48c',
+  fog: '#b8adb0',
+  sun: '#ffe1b8',
 };
 
 const CIVIL_PALETTE: DayNightPalette = {
@@ -283,9 +283,9 @@ function wrapAzimuth(value: number) {
 export function buildingShadowTranslate(azimuth: number, polar: number): [number, number] {
   const elevation = Math.max(8, 90 - polar) * Math.PI / 180;
   const cartoonElevation = (90 - CARTOON_SUN_POLAR_DEGREES) * Math.PI / 180;
-  const length = Math.hypot(...CARTOON_BUILDING_SHADOW_TRANSLATE)
+  const length = Math.min(2.4, Math.hypot(...CARTOON_BUILDING_SHADOW_TRANSLATE)
     * Math.tan(cartoonElevation)
-    / Math.tan(elevation);
+    / Math.tan(elevation));
   const radians = azimuth * Math.PI / 180;
   return [-Math.sin(radians) * length, Math.cos(radians) * length];
 }
@@ -325,7 +325,8 @@ export function dayNightAppearance(date: Date, latitude: number, longitude: numb
     ],
     treeNightMix: night,
     sunDirection: sunEcefDirection(date),
-    atmosphereBlend: (1 - styleMix) * (0.22 + night * 0.12),
+    // The geographic shade layer owns globe sunlight; MapLibre uses a different light frame.
+    atmosphereBlend: 0,
   };
 }
 

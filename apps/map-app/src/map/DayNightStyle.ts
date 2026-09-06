@@ -5,6 +5,7 @@ import {
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_COLOR,
 } from './CartoonLighting';
+import { globeBiomeColor } from './GlobeBiomeStyle';
 import { GLOBAL_MAP_STYLE, applyMapTheme } from './GlobalMapStyle';
 import type { DayNightAppearance, DayNightPalette } from './DayNightAppearance';
 import { localStyleMix, nightFactor } from './DayNightAppearance';
@@ -31,6 +32,8 @@ function setPaint(map: MapLibreMap, id: string, property: string, value: unknown
 
 function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) {
   setPaint(map, 'global-background', 'background-color', colors.background);
+  setPaint(map, 'global-globe-biomes', 'fill-color',
+    globeBiomeColor(colors.land, localStyleMix(map.getZoom()) * (0.2 + night * 0.65)));
   ['global-landcover', 'global-landuse', 'global-landuse-overlays'].forEach((id) => {
     setPaint(map, id, 'fill-color', colors.land);
   });
@@ -93,7 +96,10 @@ function applyHillshadeDirection(map: MapLibreMap, azimuth: number) {
 }
 
 function applyBuildingShadows(map: MapLibreMap, appearance: DayNightAppearance) {
-  setPaint(map, 'global-building-shadow', 'line-translate', appearance.buildingShadowTranslate);
+  // Match the offset to the outline width so it still overlaps the footprint.
+  const scale = Math.min(1, Math.max(0.45, 0.45 + (map.getZoom() - 13) * 0.275));
+  setPaint(map, 'global-building-shadow', 'line-translate',
+    appearance.buildingShadowTranslate.map((offset) => offset * scale));
   const night = nightFactor(appearance.elevation);
   const opacity = [
     'interpolate', ['linear'], ['zoom'],

@@ -8,10 +8,33 @@ import {
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
 } from './GlobalMapStyle';
 import { HIKING_POI_CLASSES } from './PoiClasses';
+import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
   it('is accepted by the MapLibre style specification', () => {
     expect(validateStyleMin(GLOBAL_MAP_STYLE)).toEqual([]);
+  });
+
+  it('keeps subdued biome colors beneath detailed OSM areas at city scale', () => {
+    const layers = GLOBAL_MAP_STYLE.layers;
+    const index = layers.findIndex((layer) => layer.id === 'global-globe-biomes');
+    expect(index).toBeGreaterThan(0);
+    expect(index).toBeLessThan(layers.findIndex((layer) => layer.id === 'global-water'));
+    expect(layers[index].maxzoom ?? 24).toBeGreaterThan(20);
+    for (const id of ['global-landcover', 'global-landuse', 'global-landuse-overlays']) {
+      expect(index).toBeLessThan(layers.findIndex((layer) => layer.id === id));
+    }
+    const opacity = (layers[index].paint as Record<string, unknown>)['fill-opacity'] as unknown[];
+    const localOpacity = opacity[opacity.length - 1] as number;
+    expect(localOpacity).toBeGreaterThan(0.5);
+    expect(localOpacity).toBeLessThan(0.9);
+    const tintedStyle = {
+      ...GLOBAL_MAP_STYLE,
+      layers: layers.map((layer) => layer.id === 'global-globe-biomes' && layer.type === 'fill'
+        ? { ...layer, paint: { ...layer.paint, 'fill-color': globeBiomeColor('#10253a', 0.8) } }
+        : layer),
+    };
+    expect(validateStyleMin(tintedStyle)).toEqual([]);
   });
 
   it('keeps cycling, hiking, and rail transit emphasis visible at city-scale zooms', () => {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
-import { dayNightAppearance } from './DayNightAppearance';
+import { dayNightAppearance, globeShadeOpacity } from './DayNightAppearance';
 import { DayNightShadeLayer, DAY_NIGHT_SHADE_LAYER_ID } from './DayNightShadeLayer';
 import { applyDayNightStyle, restoreDayNightStyle } from './DayNightStyle';
+import { useGlobeCloudCover } from './useGlobeCloudCover';
 import { timeZoneAt } from './DayNightSun';
 import type { TreeModelLayer } from './TreeModelLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
@@ -16,6 +17,7 @@ export function useDayNightCycle({
   mapRef,
   mapLoaded,
   enabled,
+  cloudsEnabled,
   utcMs,
   flightActive,
   resolvedTheme,
@@ -25,6 +27,7 @@ export function useDayNightCycle({
   mapRef: RefObject<Map | null>;
   mapLoaded: boolean;
   enabled: boolean;
+  cloudsEnabled: boolean;
   utcMs: number;
   flightActive: boolean;
   resolvedTheme: ResolvedTheme;
@@ -56,9 +59,9 @@ export function useDayNightCycle({
       if (wasActiveRef.current && !flightActive) restoreDayNightStyle(map, resolvedTheme);
       wasActiveRef.current = false;
       applyRef.current = () => {};
-      return;
+      if (flightActive) return;
     }
-    wasActiveRef.current = true;
+    wasActiveRef.current = enabled;
     if (!layerRef.current) layerRef.current = new DayNightShadeLayer();
     if (!map.getLayer(DAY_NIGHT_SHADE_LAYER_ID)) {
       const before = firstSymbolLayerId(map);
@@ -73,6 +76,11 @@ export function useDayNightCycle({
       frame = 0;
       const center = map.getCenter();
       const zoom = map.getZoom();
+      if (!enabled) {
+        // Normal mode uses the same blue rim without a terminator or city lights.
+        layerRef.current?.setAppearance([1, 0, 0], globeShadeOpacity(zoom), 0, false);
+        return;
+      }
       const appearance = dayNightAppearance(new Date(utcMsRef.current), center.lat, center.lng, zoom);
       applyDayNightStyle(map, appearance);
       layerRef.current?.setAppearance(appearance.sunDirection, appearance.shadeOpacity, appearance.lightsIntensity);
@@ -83,6 +91,7 @@ export function useDayNightCycle({
         shadowOffset: appearance.treeShadowOffset,
       });
       transitVehicleLayerRef.current?.setDayNightLighting({
+        palette: appearance.palette,
         azimuth: appearance.azimuth,
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,
@@ -113,6 +122,8 @@ export function useDayNightCycle({
     enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
     treeLayerRef, transitVehicleLayerRef,
   ]);
+
+  useGlobeCloudCover(mapRef, layerRef, mapLoaded, flightActive, cloudsEnabled);
 
   useEffect(() => {
     if (enabled && !flightActive) applyRef.current();

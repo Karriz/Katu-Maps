@@ -1,8 +1,9 @@
-/** 3D terrain mesh is rebuilt on zoom. At globe and continental cameras that
- * covers most of the world, which is why wheel-zoom stutters while panning
- * the same view stays smooth. Hillshade remains as the low-zoom relief. */
-export const TERRAIN_3D_ENABLE_ZOOM = 7.25;
-export const TERRAIN_3D_DISABLE_ZOOM = 6.5;
+/** 3D terrain mesh is rebuilt on zoom. Below city-region cameras that covers
+ * a large world area, which is why wheel-zoom stutters while panning the same
+ * view stays smooth. Hillshade stays on whenever the terrain layer is enabled
+ * and provides relief until the mesh is allowed. */
+export const TERRAIN_3D_ENABLE_ZOOM = 10.5;
+export const TERRAIN_3D_DISABLE_ZOOM = 9.75;
 
 export type TerrainController = {
   getZoom: () => number;

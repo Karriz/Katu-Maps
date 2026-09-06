@@ -13,6 +13,7 @@ import {
   CARTOON_SUN_POLAR_DEGREES,
   sunCartesian,
 } from './CartoonLighting';
+import type { DayNightPalette } from './DayNightAppearance';
 import type { TransitVehiclePose } from './TransitStopsLayer';
 
 const MODEL_MIN_ZOOM = 12;
@@ -110,6 +111,9 @@ function createTramSection(
     roughness: 0.72,
     metalness: 0.05,
   });
+  glassMaterial.userData.dayColor = glassMaterial.color.clone();
+  glassMaterial.userData.dayEmissive = glassMaterial.emissive.clone();
+  glassMaterial.userData.dayEmissiveIntensity = glassMaterial.emissiveIntensity;
   const collarMaterial = new THREE.MeshLambertMaterial({ color: 0x30373b });
   const roofMaterial = new THREE.MeshLambertMaterial({ color: 0xabb5b6 });
   const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1bd });
@@ -212,6 +216,9 @@ function createVehicleSection(
     roughness: 0.72,
     metalness: 0.05,
   });
+  glassMaterial.userData.dayColor = glassMaterial.color.clone();
+  glassMaterial.userData.dayEmissive = glassMaterial.emissive.clone();
+  glassMaterial.userData.dayEmissiveIntensity = glassMaterial.emissiveIntensity;
   const collarMaterial = new THREE.MeshLambertMaterial({ color: 0x3a4245 });
   const roofMaterial = new THREE.MeshLambertMaterial({ color: 0xaeb7b7 });
   const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1bd });
@@ -343,6 +350,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
   private nightMix = 0;
+  private dayNightPalette: DayNightPalette | null = null;
 
   setTheme(dark: boolean) {
     if (this.darkMode === dark) return;
@@ -358,23 +366,46 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
     azimuth: number;
     polar: number;
     nightMix: number;
+    palette: DayNightPalette;
   } | null) {
     this.nightMix = lighting?.nightMix ?? 0;
+    this.dayNightPalette = lighting?.palette ?? null;
     const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
     const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
     const position = sunCartesian(azimuth, polar);
     this.sunlight?.position.set(position.x, position.y, position.z);
     this.applyVehicleLighting();
+    this.applyWindowLighting();
     this.map?.triggerRepaint();
   }
 
   private applyVehicleLighting() {
-    const night = Math.max(this.darkMode ? 0.75 : 0, this.nightMix);
-    if (this.hemisphereLight) this.hemisphereLight.intensity = 0.55 + (1 - night) * 1.65;
+    const night = this.dayNightPalette ? this.nightMix : (this.darkMode ? 0.75 : 0);
+    if (this.hemisphereLight) {
+      this.hemisphereLight.intensity = 0.55 + (1 - night) * 1.65;
+      this.hemisphereLight.color.set(CARTOON_AMBIENT_SKY_COLOR);
+      this.hemisphereLight.groundColor.set(CARTOON_AMBIENT_GROUND_COLOR);
+      if (this.dayNightPalette) {
+        this.hemisphereLight.color.lerp(new THREE.Color(this.dayNightPalette.sky), 0.35);
+        this.hemisphereLight.groundColor.lerp(new THREE.Color(this.dayNightPalette.land), 0.25);
+      }
+    }
     if (this.sunlight) {
       this.sunlight.intensity = 0.45 + (1 - night) * 2.35;
-      this.sunlight.color.set(night > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR);
+      this.sunlight.color.set(this.dayNightPalette?.sun ?? (night > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR));
     }
+  }
+
+  private applyWindowLighting() {
+    const night = this.dayNightPalette ? this.nightMix : 0;
+    this.modelGroup?.traverse((child) => {
+      if (!(child instanceof THREE.Mesh) || !(child.material instanceof THREE.MeshStandardMaterial)) return;
+      const material = child.material;
+      if (!material.userData.dayColor) return;
+      material.color.copy(material.userData.dayColor).lerp(new THREE.Color(0x665d42), night);
+      material.emissive.copy(material.userData.dayEmissive).lerp(new THREE.Color(0xd5b15f), night);
+      material.emissiveIntensity = material.userData.dayEmissiveIntensity * (1 - night) + 0.62 * night;
+    });
   }
 
   setPose(pose: TransitVehiclePose | null) {
@@ -452,6 +483,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
       this.modelGroup!.add(section);
       this.sectionRoots.push(section);
     });
+    this.applyWindowLighting();
     this.modelKey = `${pose.mode}:${pose.color}:${pose.parts.length}:${this.darkMode}`;
     this.currentInitialized = false;
   }

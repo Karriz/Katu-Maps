@@ -43,6 +43,19 @@ describe('day/night appearance', () => {
     expect(Math.hypot(...low)).toBeGreaterThan(Math.hypot(...high));
   });
 
+  it('caps low-sun footprint offsets to keep the outline attached', () => {
+    for (const polar of [70, 80, 88, 90]) {
+      expect(Math.hypot(...buildingShadowTranslate(225, polar))).toBeLessThanOrEqual(2.400001);
+    }
+  });
+
+  it('disables competing atmospheric globe lighting throughout the cycle', () => {
+    for (const hour of [0, 6, 12, 18]) {
+      const appearance = dayNightAppearance(new Date(Date.UTC(2024, 5, 21, hour)), 61.5, 23.8, 1.5);
+      expect(appearance.atmosphereBlend).toBe(0);
+    }
+  });
+
   it('returns a night appearance for Tampere at 21:00 UTC in December', () => {
     const appearance = dayNightAppearance(new Date(Date.UTC(2024, 11, 21, 21, 0)), 61.5, 23.8, 14);
     expect(appearance.phase).toBe('night');

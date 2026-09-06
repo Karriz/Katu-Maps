@@ -7,19 +7,20 @@ import {
 } from './MapTerrain';
 
 describe('terrain 3d zoom gating', () => {
-  it('keeps the mesh off at globe and continental zooms', () => {
+  it('keeps the mesh off at globe through mid-regional zooms', () => {
     expect(shouldEnableTerrain3d(true, 2.2, false)).toBe(false);
     expect(shouldEnableTerrain3d(true, 5.5, false)).toBe(false);
+    expect(shouldEnableTerrain3d(true, 8, false)).toBe(false);
     expect(shouldEnableTerrain3d(true, TERRAIN_3D_ENABLE_ZOOM - 0.01, false)).toBe(false);
   });
 
-  it('turns the mesh on once the camera reaches regional zooms', () => {
+  it('turns the mesh on once the camera reaches city-region zooms', () => {
     expect(shouldEnableTerrain3d(true, TERRAIN_3D_ENABLE_ZOOM, false)).toBe(true);
     expect(shouldEnableTerrain3d(true, 14, false)).toBe(true);
   });
 
   it('uses hysteresis so a zoom gesture does not toggle around the cutoff', () => {
-    expect(shouldEnableTerrain3d(true, 7, true)).toBe(true);
+    expect(shouldEnableTerrain3d(true, TERRAIN_3D_ENABLE_ZOOM - 0.25, true)).toBe(true);
     expect(shouldEnableTerrain3d(true, TERRAIN_3D_DISABLE_ZOOM, true)).toBe(true);
     expect(shouldEnableTerrain3d(true, TERRAIN_3D_DISABLE_ZOOM - 0.01, true)).toBe(false);
   });

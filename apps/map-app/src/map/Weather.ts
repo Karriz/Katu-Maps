@@ -437,8 +437,12 @@ export function parseForecastGrid(
   for (const entry of entries) {
     if (!isRecord(entry) || !isRecord(entry.hourly)) return null;
     const cloud = numberSeries(entry.hourly.cloud_cover).map((value) => value ?? 0);
-    const precip = numberSeries(entry.hourly.precipitation).map((value) => value ?? 0);
-    if (cloud.length !== times.length || precip.length !== times.length) return null;
+    if (cloud.length !== times.length) return null;
+    const precipRaw = numberSeries(entry.hourly.precipitation);
+    const precip = precipRaw.length
+      ? precipRaw.map((value) => value ?? 0)
+      : times.map(() => 0);
+    if (precip.length !== times.length) return null;
     cloudCover.push(cloud);
     precipitation.push(precip);
   }
@@ -594,21 +598,38 @@ export async function fetchForecastGrid(
   columns = 5,
   rows = 5,
   signal?: AbortSignal,
+  options?: { forecastDays?: number; hourly?: string },
 ): Promise<ForecastGrid> {
-  const key = [bounds.west, bounds.south, bounds.east, bounds.north, columns, rows]
-    .map((value) => roundViewedCoordinate(value, 2))
+  const forecastDays = options?.forecastDays ?? 2;
+  const hourly = options?.hourly ?? 'cloud_cover,precipitation';
+  const key = [bounds.west, bounds.south, bounds.east, bounds.north, columns, rows, forecastDays, hourly]
+    .map((value) => typeof value === 'number' ? roundViewedCoordinate(value, 2) : value)
     .join(':');
   const cached = gridCache.get(key);
   if (cached && Date.now() - cached.fetchedAt < GRID_TTL_MS) return cached.grid;
   const points = forecastGridPoints(bounds, columns, rows);
-  const url = openMeteoUrl('/v1/forecast', {
+  const params: Record<string, string> = {
     latitude: points.latitudes.join(','),
     longitude: points.longitudes.join(','),
-    hourly: 'cloud_cover,precipitation',
-    forecast_days: '2',
+    hourly,
+    forecast_days: String(forecastDays),
     timezone: 'UTC',
-  });
-  const response = await fetchWithTimeout(url, { signal, headers: { Accept: 'application/json' } });
+  };
+  // Large globe grids exceed common GET URL limits; Open-Meteo accepts the same
+  // fields as a POST body for multi-location requests.
+  const usePost = points.latitudes.length > 200;
+  const url = usePost
+    ? openMeteoUrl('/v1/forecast', {})
+    : openMeteoUrl('/v1/forecast', params);
+  const response = await fetchWithTimeout(url, {
+    signal,
+    method: usePost ? 'POST' : 'GET',
+    headers: {
+      Accept: 'application/json',
+      ...(usePost ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+    },
+    body: usePost ? new URLSearchParams(params) : undefined,
+  }, usePost ? 30_000 : 15_000);
   if (!response.ok) throw apiHttpError(response, 'Open-Meteo');
   const grid = parseForecastGrid(await response.json(), bounds, columns, rows);
   if (!grid) throw new Error('Weather overlay data was empty.');

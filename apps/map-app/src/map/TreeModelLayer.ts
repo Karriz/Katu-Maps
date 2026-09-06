@@ -1015,20 +1015,18 @@ export class TreeModelLayer implements CustomLayerInterface {
         * (isShrub ? 0.58 : isConifer ? 0.27 : 0.27)
         * tree.widthScale;
 
-      // A compact shadow under each crown acts as fake ambient occlusion. It
-      // is deliberately independent of tree height and sun direction so it
-      // matches the centered building-footprint treatment.
+      // Stretch away from the sun while keeping the trunk inside the shadow.
+      const shadowRadius = canopyRadius * 1.18 * growth;
+      const offsetLength = Math.hypot(this.shadowOffsetEast, this.shadowOffsetNorth);
+      const shadowLength = Math.min(offsetLength, shadowRadius * 1.5);
+      const offsetScale = offsetLength > 0 ? shadowLength / offsetLength : 0;
       this.transformHelper.position.set(
-        east + this.shadowOffsetEast,
+        east + this.shadowOffsetEast * offsetScale * 0.5,
         up + 0.06,
-        north + this.shadowOffsetNorth,
+        north + this.shadowOffsetNorth * offsetScale * 0.5,
       );
-      this.transformHelper.rotation.set(0, 0, 0);
-      this.transformHelper.scale.set(
-        canopyRadius * 1.18 * growth,
-        1,
-        canopyRadius * 1.18 * growth,
-      );
+      this.transformHelper.rotation.set(0, Math.atan2(-this.shadowOffsetNorth, this.shadowOffsetEast), 0);
+      this.transformHelper.scale.set(shadowRadius + shadowLength * 0.5, 1, shadowRadius);
       this.transformHelper.updateMatrix();
       shadowMesh.setMatrixAt(shadowCount, this.transformHelper.matrix);
       shadowCount += 1;

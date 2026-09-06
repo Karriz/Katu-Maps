@@ -1,4 +1,6 @@
 import * as maplibregl from 'maplibre-gl';
+import type { ForecastGrid } from './Weather';
+import { globeCloudPixels, globeCloudOpacity } from './GlobeClouds';
 import {
   type CustomLayerInterface,
   type CustomRenderMethodInput,
@@ -16,28 +18,69 @@ const LNGLAT_ATTRIB = 1;
 const FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 in vec2 v_lnglat;
+in vec3 v_normal;
+uniform vec4 u_horizon;
+uniform float u_globe;
+uniform float u_day_night;
+uniform float u_cloud_opacity;
 uniform vec3 u_sun;
 uniform float u_opacity;
 uniform float u_lights;
 uniform sampler2D u_city_lights;
 out vec4 fragColor;
 
+uniform sampler2D u_cloud_cover;
+
 void main() {
-  float lat = clamp(v_lnglat.y, -89.5, 89.5) * 0.017453292519943295;
-  float lng = v_lnglat.x * 0.017453292519943295;
-  vec3 normal = vec3(cos(lat) * cos(lng), cos(lat) * sin(lng), sin(lat));
+  vec3 normal = normalize(v_normal);
+  // MapLibre's globe axes are (east at Greenwich, north pole, Greenwich).
+  float horizon = dot(normal.yzx, u_horizon.xyz) + u_horizon.w;
+  if (u_globe > 0.999 && horizon < 0.0) discard;
   float mu = dot(normal, u_sun);
-  float night = smoothstep(0.12, -0.22, mu);
-  float twilight = smoothstep(0.28, 0.02, mu) * smoothstep(-0.38, -0.02, mu);
-  float dusk = clamp((mu + 0.04) / 0.22, 0.0, 1.0);
-  vec3 twilightRgb = mix(vec3(0.22, 0.08, 0.42), vec3(1.0, 0.48, 0.16), dusk);
+  float night = (1.0 - smoothstep(-0.22, 0.12, mu)) * u_day_night;
+  // Keep the colored twilight close to the horizon instead of washing the night hemisphere.
+  float twilight = (1.0 - smoothstep(0.0, 0.10, mu)) * smoothstep(-0.12, -0.01, mu) * u_day_night;
+  float dusk = smoothstep(-0.06, 0.06, mu);
+  vec3 twilightRgb = mix(vec3(0.06, 0.09, 0.18), vec3(1.0, 0.48, 0.16), dusk);
   vec3 nightRgb = vec3(0.015, 0.04, 0.09);
   vec2 uv = vec2(fract(v_lnglat.x / 360.0 + 0.5), 0.5 - v_lnglat.y / 180.0);
-  vec3 lights = texture(u_city_lights, uv).rgb * night * u_lights;
+  vec3 lights = texture(u_city_lights, uv).rgb * night * u_lights * u_opacity;
   float nightAlpha = night * 0.78 * u_opacity;
-  float twilightAlpha = twilight * 0.55 * u_opacity;
+  float twilightAlpha = twilight * 0.32 * u_opacity;
   vec3 color = nightRgb * nightAlpha + twilightRgb * twilightAlpha + lights;
   float alpha = clamp(nightAlpha + twilightAlpha, 0.0, 1.0);
+  if (u_cloud_opacity > 0.001 && u_globe > 0.001) {
+    vec2 cloudSize = vec2(textureSize(u_cloud_cover, 0));
+    vec2 cloudUv = (uv * (cloudSize - 1.0) + 0.5) / cloudSize;
+    // Tap neighboring texels for soft structure without inventing clear-sky clouds.
+    vec2 texel = 1.0 / cloudSize;
+    float cover = texture(u_cloud_cover, cloudUv).r;
+    float coverE = texture(u_cloud_cover, cloudUv + vec2(texel.x, 0.0)).r;
+    float coverN = texture(u_cloud_cover, cloudUv + vec2(0.0, -texel.y)).r;
+    float coverW = texture(u_cloud_cover, cloudUv - vec2(texel.x, 0.0)).r;
+    float coverS = texture(u_cloud_cover, cloudUv + vec2(0.0, texel.y)).r;
+    float coverSoft = (cover * 2.0 + coverE + coverN + coverW + coverS) / 6.0;
+    float edge = clamp(abs(coverE - coverW) + abs(coverN - coverS), 0.0, 1.0);
+    float body = smoothstep(0.06, 0.72, coverSoft);
+    float wisps = smoothstep(0.18, 0.92, cover) * (0.72 + edge * 0.45);
+    float cloudAlpha = mix(body * 0.55, wisps, 0.62) * u_cloud_opacity * u_globe;
+    float cloudDaylight = mix(1.0, smoothstep(-0.12, 0.25, mu), u_day_night);
+    vec3 sunlit = vec3(0.97, 0.98, 0.96);
+    vec3 shaded = vec3(0.78, 0.82, 0.88);
+    vec3 dayCloud = mix(shaded, sunlit, mix(0.45, 1.0, cloudDaylight) * (1.0 - coverSoft * 0.18));
+    vec3 nightCloud = vec3(0.10, 0.15, 0.23);
+    vec3 cloudRgb = mix(nightCloud, dayCloud, cloudDaylight);
+    cloudRgb = mix(cloudRgb, vec3(0.87, 0.73, 0.61), twilight * 0.22);
+    color = color * (1.0 - cloudAlpha) + cloudRgb * cloudAlpha;
+    alpha = alpha + cloudAlpha * (1.0 - alpha);
+  }
+  // A thin atmospheric rim shares the exact solar direction of the terminator.
+  float rim = (1.0 - smoothstep(0.0, 0.22, max(horizon, 0.0)));
+  float sunlight = mix(1.0, smoothstep(-0.18, 0.25, mu), u_day_night);
+  float glowAlpha = rim * rim * sunlight * 0.38 * u_globe * u_opacity;
+  vec3 glowRgb = mix(vec3(0.35, 0.65, 1.0), vec3(1.0, 0.66, 0.38), twilight * 0.65);
+  color = color * (1.0 - glowAlpha) + glowRgb * glowAlpha;
+  alpha = alpha + glowAlpha * (1.0 - alpha);
   fragColor = vec4(color, alpha);
 }
 `;
@@ -56,6 +99,11 @@ type ShadeProgram = {
   opacity: WebGLUniformLocation | null;
   lights: WebGLUniformLocation | null;
   cityLights: WebGLUniformLocation | null;
+  horizon: WebGLUniformLocation | null;
+  globe: WebGLUniformLocation | null;
+  dayNight: WebGLUniformLocation | null;
+  cloudOpacity: WebGLUniformLocation | null;
+  cloudCover: WebGLUniformLocation | null;
 };
 
 const URBAN_REGIONS: Array<[number, number, number, number]> = [
@@ -120,11 +168,6 @@ const URBAN_REGIONS: Array<[number, number, number, number]> = [
   [174.76, -36.85, 0.35, 1.2],
 ];
 
-function hash2(x: number, y: number) {
-  const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-  return value - Math.floor(value);
-}
-
 export function createCityLightsTexture() {
   const width = 1024;
   const height = 512;
@@ -137,23 +180,20 @@ export function createCityLightsTexture() {
   const { data } = image;
   for (let y = 0; y < height; y += 1) {
     const lat = 90 - (y + 0.5) / height * 180;
-    const latitudeFalloff = Math.max(0, 1 - Math.abs(lat) / 68);
-    const equatorialCut = lat > -38 && lat < 62 ? 1 : 0.18;
     for (let x = 0; x < width; x += 1) {
       const lng = (x + 0.5) / width * 360 - 180;
-      const n1 = hash2(lng * 0.18, lat * 0.22);
-      const n2 = hash2(lng * 0.7, lat * 0.7);
-      const n3 = hash2(lng * 2.3, lat * 2.1);
       let glow = 0;
       for (const [cityLng, cityLat, brightness, radius] of URBAN_REGIONS) {
         const dLng = Math.abs(lng - cityLng);
         const wrapped = Math.min(dLng, 360 - dLng);
-        const distance = Math.hypot(wrapped, lat - cityLat);
-        glow += brightness * Math.exp(-((distance * distance) / (radius * radius * 0.55)));
+        const distance = Math.hypot(wrapped * Math.cos(cityLat * Math.PI / 180), lat - cityLat);
+        // Compact, smooth city glows replace the unmasked global noise field.
+        const extent = radius * 0.16;
+        if (distance >= extent) continue;
+        const falloff = 1 - distance / extent;
+        glow += brightness * falloff * falloff;
       }
-      const speck = n2 > 0.82 && n3 > 0.6 ? (n3 - 0.6) * 1.4 : 0;
-      const field = Math.max(0, n1 * 1.15 - 0.55) ** 1.8;
-      const intensity = Math.min(1, (glow * 1.15 + field * 0.55 + speck * 0.35) * latitudeFalloff * equatorialCut);
+      const intensity = Math.min(0.65, glow * 0.8);
       if (intensity <= 0.02) continue;
       const offset = (y * width + x) * 4;
       data[offset] = Math.round(255 * Math.min(1, intensity * 1.15));
@@ -190,10 +230,18 @@ ${shaderData.define}
 layout(location=${MERCATOR_ATTRIB}) in vec2 a_mercator;
 layout(location=${LNGLAT_ATTRIB}) in vec2 a_lnglat;
 out vec2 v_lnglat;
+out vec3 v_normal;
 uniform float u_elevation;
 void main() {
   v_lnglat = a_lnglat;
+  vec2 angles = radians(a_lnglat);
+  v_normal = vec3(cos(angles.y) * cos(angles.x), cos(angles.y) * sin(angles.x), sin(angles.y));
+#ifdef GLOBE
+  // Direct spherical positions cover the poles without infinite Mercator coordinates.
+  gl_Position = interpolateProjectionFor3D(a_mercator, v_normal.yzx, u_elevation);
+#else
   gl_Position = projectTileFor3D(a_mercator, u_elevation);
+#endif
 }
 `;
 }
@@ -231,18 +279,23 @@ function createShadeProgram(
     opacity: gl.getUniformLocation(program, 'u_opacity'),
     lights: gl.getUniformLocation(program, 'u_lights'),
     cityLights: gl.getUniformLocation(program, 'u_city_lights'),
+    horizon: gl.getUniformLocation(program, 'u_horizon'),
+    globe: gl.getUniformLocation(program, 'u_globe'),
+    dayNight: gl.getUniformLocation(program, 'u_day_night'),
+    cloudOpacity: gl.getUniformLocation(program, 'u_cloud_opacity'),
+    cloudCover: gl.getUniformLocation(program, 'u_cloud_cover'),
   };
 }
 
-function createGlobeMesh() {
+export function createGlobeMesh() {
   const mercators: number[] = [];
   const lnglats: number[] = [];
   const indices: number[] = [];
   for (let latIndex = 0; latIndex <= LAT_SEGMENTS; latIndex += 1) {
-    const lat = 85 - latIndex * (170 / LAT_SEGMENTS);
+    const lat = 90 - latIndex * (180 / LAT_SEGMENTS);
     for (let lngIndex = 0; lngIndex <= LNG_SEGMENTS; lngIndex += 1) {
       const lng = -180 + lngIndex * (360 / LNG_SEGMENTS);
-      const mercator = maplibregl.MercatorCoordinate.fromLngLat({ lng, lat });
+      const mercator = maplibregl.MercatorCoordinate.fromLngLat({ lng, lat: Math.max(-85.05112878, Math.min(85.05112878, lat)) });
       mercators.push(mercator.x, mercator.y);
       lnglats.push(lng, lat);
     }
@@ -273,12 +326,23 @@ export class DayNightShadeLayer implements CustomLayerInterface {
   private lnglatBuffer: WebGLBuffer | null = null;
   private indexBuffer: WebGLBuffer | null = null;
   private lightsTexture: WebGLTexture | null = null;
+  private cloudTexture: WebGLTexture | null = null;
+  private cloudPixels: ReturnType<typeof globeCloudPixels> | null = null;
+  private cloudDirty = false;
+
+  setCloudCover(grid: ForecastGrid | null) {
+    this.cloudPixels = grid ? globeCloudPixels(grid) : null;
+    this.cloudDirty = true;
+    this.map?.triggerRepaint();
+  }
   private indexCount = 0;
   private opacity = 0;
   private lights = 0;
+  private dayNight = true;
   private sun: [number, number, number] = [1, 0, 0];
 
-  setAppearance(sun: [number, number, number], opacity: number, lights: number) {
+  setAppearance(sun: [number, number, number], opacity: number, lights: number, dayNight = true) {
+    this.dayNight = dayNight;
     this.sun = sun;
     this.opacity = opacity;
     this.lights = lights;
@@ -345,7 +409,27 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     const previousBlendSrcAlpha = gl2.getParameter(gl2.BLEND_SRC_ALPHA);
     const previousBlendDstAlpha = gl2.getParameter(gl2.BLEND_DST_ALPHA);
     const previousActiveTexture = gl2.getParameter(gl2.ACTIVE_TEXTURE);
+    gl2.activeTexture(gl2.TEXTURE0);
     const previousTexture = gl2.getParameter(gl2.TEXTURE_BINDING_2D);
+    gl2.activeTexture(gl2.TEXTURE1);
+    const previousCloudTexture = gl2.getParameter(gl2.TEXTURE_BINDING_2D);
+    if (this.cloudDirty) {
+      if (this.cloudPixels) {
+        this.cloudTexture ??= gl2.createTexture();
+        gl2.bindTexture(gl2.TEXTURE_2D, this.cloudTexture);
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE);
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE);
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR);
+        gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR);
+        gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, this.cloudPixels.width, this.cloudPixels.height,
+          0, gl2.RGBA, gl2.UNSIGNED_BYTE, this.cloudPixels.data);
+      } else if (this.cloudTexture) {
+        gl2.deleteTexture(this.cloudTexture);
+        this.cloudTexture = null;
+      }
+      this.cloudDirty = false;
+    }
+    gl2.bindTexture(gl2.TEXTURE_2D, this.cloudTexture ?? this.lightsTexture);
 
     const projection = options.defaultProjectionData;
     gl2.useProgram(program.program);
@@ -374,6 +458,10 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     if (program.clipAntimeridian) {
       gl2.uniform1i(program.clipAntimeridian, projection.clipAntimeridian ? 1 : 0);
     }
+    gl2.uniform4f(program.horizon, ...projection.clippingPlane);
+    gl2.uniform1f(program.globe, projection.projectionTransition);
+    gl2.uniform1f(program.dayNight, this.dayNight ? 1 : 0);
+    gl2.uniform1f(program.cloudOpacity, this.cloudTexture ? globeCloudOpacity(this.map?.getZoom() ?? 6) : 0);
     gl2.uniform1f(program.elevation, SHELL_ALTITUDE_METERS);
     gl2.uniform3f(program.sun, this.sun[0], this.sun[1], this.sun[2]);
     gl2.uniform1f(program.opacity, this.opacity);
@@ -381,9 +469,12 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     gl2.activeTexture(gl2.TEXTURE0);
     gl2.bindTexture(gl2.TEXTURE_2D, this.lightsTexture);
     gl2.uniform1i(program.cityLights, 0);
+    gl2.uniform1i(program.cloudCover, 1);
     gl2.drawElements(gl2.TRIANGLES, this.indexCount, gl2.UNSIGNED_INT, 0);
 
     gl2.bindTexture(gl2.TEXTURE_2D, previousTexture);
+    gl2.activeTexture(gl2.TEXTURE1);
+    gl2.bindTexture(gl2.TEXTURE_2D, previousCloudTexture);
     gl2.activeTexture(previousActiveTexture);
     gl2.depthMask(previousDepthMask);
     gl2.depthFunc(previousDepthFunc);
@@ -405,6 +496,9 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     if (this.lnglatBuffer) gl2.deleteBuffer(this.lnglatBuffer);
     if (this.indexBuffer) gl2.deleteBuffer(this.indexBuffer);
     if (this.lightsTexture) gl2.deleteTexture(this.lightsTexture);
+    if (this.cloudTexture) gl2.deleteTexture(this.cloudTexture);
+    this.cloudTexture = null;
+    this.cloudDirty = Boolean(this.cloudPixels);
     this.vao = null;
     this.map = undefined;
   }

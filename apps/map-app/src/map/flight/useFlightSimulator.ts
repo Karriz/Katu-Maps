@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { LngLat, type Map, type SkySpecification } from 'maplibre-gl';
+import { dayNightAppearance, paletteForElevation, nightFactor } from '../DayNightAppearance';
+import { sunPosition } from '../DayNightSun';
 import type { ResolvedTheme } from '../../theme';
 import { runIndependentRestoreSteps } from './flightCleanup';
 import { FlightModelLayer } from './FlightModelLayer';
@@ -115,9 +117,23 @@ type FlightSimulatorOptions = {
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
   resolvedTheme: ResolvedTheme;
+  dayNightUtcMs?: number;
 };
 
-export function flightSkyForTheme(theme: ResolvedTheme): SkySpecification {
+export function flightSkyForTheme(theme: ResolvedTheme, elevation?: number): SkySpecification {
+  if (elevation !== undefined) {
+    const palette = paletteForElevation(elevation);
+    const night = nightFactor(elevation);
+    return {
+      'sky-color': palette.sky,
+      'horizon-color': palette.horizon,
+      'fog-color': palette.fog,
+      'sky-horizon-blend': 0.7 + night * 0.08,
+      'horizon-fog-blend': 1 - night * 0.45,
+      'fog-ground-blend': 0.72 + night * 0.06,
+      'atmosphere-blend': 0,
+    };
+  }
   if (theme === 'dark') {
     return {
       'sky-color': '#071525',
@@ -211,6 +227,7 @@ export function useFlightSimulator({
   terrainSourceRef,
   terrainEnabledRef,
   resolvedTheme,
+  dayNightUtcMs,
 }: FlightSimulatorOptions) {
   const [active, setActive] = useState(false);
   const [telemetry, setTelemetry] = useState<FlightTelemetry>({
@@ -519,9 +536,34 @@ export function useFlightSimulator({
     if (!active || !mapLoaded) return;
     const map = mapRef.current;
     if (!map) return;
-    applyFlightSky(map, resolvedTheme);
-    modelLayerRef.current?.setTheme(resolvedTheme === 'dark');
-  }, [active, mapLoaded, mapRef, resolvedTheme]);
+    modelLayerRef.current?.setTheme(dayNightUtcMs === undefined && resolvedTheme === 'dark');
+    let previousSky = '';
+    let previousLighting = '';
+    const updateSky = () => {
+      const center = map.getCenter();
+      const elevation = dayNightUtcMs === undefined ? undefined
+        : sunPosition(new Date(dayNightUtcMs), center.lat, center.lng).elevation;
+      // Quantize tiny position changes to avoid rebuilding sky state every flight frame.
+      const sky = flightSkyForTheme(resolvedTheme,
+        elevation === undefined ? undefined : Math.round(elevation * 10) / 10);
+      const appearance = dayNightUtcMs === undefined ? null
+        : dayNightAppearance(new Date(dayNightUtcMs), center.lat, center.lng, 14);
+      const lightingKey = appearance
+        ? `${Math.round(appearance.azimuth * 10)}:${Math.round(appearance.polar * 10)}:${Math.round(appearance.treeNightMix * 1000)}:${appearance.palette.sun}`
+        : 'theme';
+      if (lightingKey !== previousLighting) {
+        previousLighting = lightingKey;
+        modelLayerRef.current?.setDayNightLighting(appearance);
+      }
+      const key = JSON.stringify(sky);
+      if (key === previousSky) return;
+      previousSky = key;
+      map.setSky(sky);
+    };
+    updateSky();
+    map.on('move', updateSky);
+    return () => { map.off('move', updateSky); };
+  }, [active, mapLoaded, mapRef, resolvedTheme, dayNightUtcMs]);
 
   useEffect(() => {
     activeRef.current = active;

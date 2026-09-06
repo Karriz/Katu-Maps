@@ -28,6 +28,7 @@ import {
   Moon,
   Sun,
   CloudSun,
+  Cloud,
   SunMoon,
   Monitor,
   CircleHelp,
@@ -51,6 +52,7 @@ export type MapLayerKey =
   | 'roadWeather'
   | 'roadTraffic'
   | 'weather'
+  | 'clouds'
   | 'dayNight';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
@@ -115,6 +117,7 @@ const layerGroups: LayerGroup[] = [
     id: 'weather',
     label: 'Weather',
     layers: [
+      { key: 'clouds', label: 'Clouds', description: 'Global model cloud cover', icon: Cloud },
       { key: 'weather', label: 'Weather', description: 'Forecast for the viewed location', icon: CloudSun },
     ],
   },

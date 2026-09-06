@@ -9,7 +9,9 @@ import {
   CARTOON_AMBIENT_GROUND_COLOR,
   CARTOON_AMBIENT_SKY_COLOR,
   CARTOON_SUN_COLOR,
+  sunCartesian,
 } from '../CartoonLighting';
+import type { DayNightAppearance } from '../DayNightAppearance';
 import type { FlightState } from './FlightDynamics';
 
 function disposeObject(object: THREE.Object3D | undefined) {
@@ -136,6 +138,13 @@ export class FlightModelLayer implements CustomLayerInterface {
   private previousRenderTime?: number;
   private pose: FlightState | null = null;
   private darkMode = false;
+  private dayNight: DayNightAppearance | null = null;
+
+  setDayNightLighting(appearance: DayNightAppearance | null) {
+    this.dayNight = appearance;
+    this.applySceneLighting();
+    this.map?.triggerRepaint();
+  }
 
   setTheme(dark: boolean) {
     if (this.darkMode === dark) return;
@@ -225,8 +234,31 @@ export class FlightModelLayer implements CustomLayerInterface {
   }
 
   private applySceneLighting() {
-    if (this.hemisphereLight) this.hemisphereLight.intensity = this.darkMode ? 0.55 : 2.2;
-    if (this.sunlight) this.sunlight.intensity = this.darkMode ? 0.45 : 2.8;
+    const appearance = this.dayNight;
+    const night = appearance?.treeNightMix ?? (this.darkMode ? 1 : 0);
+    if (this.hemisphereLight) {
+      this.hemisphereLight.intensity = 0.55 + (1 - night) * 1.65;
+      this.hemisphereLight.color.set(CARTOON_AMBIENT_SKY_COLOR);
+      this.hemisphereLight.groundColor.set(CARTOON_AMBIENT_GROUND_COLOR);
+      if (appearance) {
+        this.hemisphereLight.color.lerp(new THREE.Color(appearance.palette.sky), 0.35);
+        this.hemisphereLight.groundColor.lerp(new THREE.Color(appearance.palette.land), 0.25);
+      }
+    }
+    if (this.sunlight) {
+      this.sunlight.intensity = 0.45 + (1 - night) * 2.35;
+      this.sunlight.color.set(appearance?.palette.sun ?? CARTOON_SUN_COLOR);
+      if (appearance) {
+        const position = sunCartesian(appearance.azimuth, appearance.polar);
+        this.sunlight.position.set(position.x, position.y, position.z);
+      } else this.sunlight.position.set(-60, 110, -45);
+    }
+    this.aircraft?.traverse((child) => {
+      if (!(child instanceof THREE.Mesh) || !(child.material instanceof THREE.MeshStandardMaterial)) return;
+      child.material.color.set(0x79c7e8).lerp(new THREE.Color(0x8a6230), night);
+      child.material.emissive.set(0x3d7a94).lerp(new THREE.Color(0xffc14d), night);
+      child.material.emissiveIntensity = 0.12 + night * 0.83;
+    });
   }
 
   private rebuildAircraft() {
@@ -239,5 +271,6 @@ export class FlightModelLayer implements CustomLayerInterface {
     this.propeller = propeller;
     this.aircraft.visible = Boolean(this.pose);
     this.scene.add(this.aircraft);
+    this.applySceneLighting();
   }
 }

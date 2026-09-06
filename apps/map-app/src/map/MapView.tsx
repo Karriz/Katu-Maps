@@ -889,6 +889,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       roadWeather: false,
       roadTraffic: false,
       weather: true,
+      clouds: false,
       dayNight: false,
     };
     try {
@@ -929,10 +930,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   roadWeatherEnabledRef.current = layerToggles.roadWeather;
   const roadTrafficEnabledRef = useRef(layerToggles.roadTraffic);
   roadTrafficEnabledRef.current = layerToggles.roadTraffic;
+  const [dayNightUtcMs, setDayNightUtcMs] = useState(() => Date.now());
+  const [dayNightFollowNow, setDayNightFollowNow] = useState(true);
   const flight = useFlightSimulator({
     mapRef,
     mapLoaded,
     activeRef: flightActiveRef,
+    dayNightUtcMs: layerToggles.dayNight ? dayNightUtcMs : undefined,
     terrainSourceRef,
     terrainEnabledRef,
     resolvedTheme,
@@ -970,12 +974,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     enabled: layerToggles.weather,
     flightActive: flight.active,
   });
-  const [dayNightUtcMs, setDayNightUtcMs] = useState(() => Date.now());
-  const [dayNightFollowNow, setDayNightFollowNow] = useState(true);
   const dayNight = useDayNightCycle({
     mapRef,
     mapLoaded,
     enabled: layerToggles.dayNight,
+    cloudsEnabled: layerToggles.clouds,
     utcMs: dayNightUtcMs,
     flightActive: flight.active,
     resolvedTheme,
