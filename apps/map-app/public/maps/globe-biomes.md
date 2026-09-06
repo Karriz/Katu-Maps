@@ -12,9 +12,12 @@ https://creativecommons.org/licenses/by/4.0/
 
 Derived from the already simplified OpenLayers GeoJSON. Kept the biome name
 as `biome`, removed other properties and the one unclassified feature, and
-rounded coordinates to three decimals. No geometry was invented. The palette
-is specific to Katu Maps. These regions describe broad ecological biomes,
-not current land use or seasonal vegetation.
+rounded coordinates to three decimals. No ecoregion geometry was invented for
+the RESOLVE regions. Katu adds coarse `Ice Sheets` fills for Greenland and
+Antarctica interiors (plus retagged polar coastal strips) because those
+landmasses are otherwise unpainted and show the green land background. The
+palette is specific to Katu Maps. These regions describe broad ecological
+biomes, not current land use or seasonal vegetation.
 
 The layer softens from 90% opacity at globe scale to 65% at zoom 10 and above,
 below detailed hosted map layers. It provides a regional base where OSM areas

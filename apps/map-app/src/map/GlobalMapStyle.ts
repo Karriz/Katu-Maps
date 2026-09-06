@@ -15,6 +15,7 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 
 export const OPENFREEMAP_SOURCE_ID = 'openfreemap';
 export const MAPTERHORN_SOURCE_ID = 'terrain';
+export const MOUNTAIN_PEAK_ICON_ID = 'mountain-peak-dot';
 
 const browserLanguage = typeof navigator === 'undefined'
   ? 'en'
@@ -2659,20 +2660,6 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
-      id: 'global-mountain-peaks',
-      type: 'circle',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'mountain_peak',
-      minzoom: 12,
-      filter: ['has', 'name'],
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 2, 14, 3.5],
-        'circle-color': '#8c8174',
-        'circle-stroke-color': '#f4f1ea',
-        'circle-stroke-width': 1,
-      },
-    },
-    {
       id: 'global-mountain-peak-labels',
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
@@ -2681,6 +2668,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: ['has', 'name'],
       layout: {
         'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
+        // Keep the peak marker on the same symbol as the label so collision
+        // culling never leaves an unlabeled dot on the map.
+        'icon-image': MOUNTAIN_PEAK_ICON_ID,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.75, 14, 1],
+        'icon-padding': 12,
         'text-field': [
           'concat',
           LOCALIZED_NAME,
@@ -2688,7 +2680,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'text-size': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 12],
         'text-font': ['Noto Sans Regular'],
-        'text-offset': [0, 1],
+        'text-offset': [0, 1.05],
+        'text-anchor': 'top',
         'text-padding': 12,
       },
       paint: {
@@ -2761,6 +2754,37 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     },
   ]),
 };
+
+function createMountainPeakDot() {
+  const size = 14;
+  const data = new Uint8Array(size * size * 4);
+  const center = (size - 1) / 2;
+  const outer = size / 2 - 0.5;
+  const inner = outer - 1.4;
+  const fill = [0x8c, 0x81, 0x74, 0xff] as const;
+  const stroke = [0xf4, 0xf1, 0xea, 0xff] as const;
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const distance = Math.hypot(x - center, y - center);
+      if (distance > outer) continue;
+      const color = distance <= inner ? fill : stroke;
+      const offset = (y * size + x) * 4;
+      data[offset] = color[0];
+      data[offset + 1] = color[1];
+      data[offset + 2] = color[2];
+      data[offset + 3] = color[3];
+    }
+  }
+
+  return { width: size, height: size, data };
+}
+
+/** Registers the peak marker used by `global-mountain-peak-labels`. */
+export function ensureMountainPeakIcon(map: MapLibreMap) {
+  if (map.hasImage(MOUNTAIN_PEAK_ICON_ID)) return;
+  map.addImage(MOUNTAIN_PEAK_ICON_ID, createMountainPeakDot(), { pixelRatio: 2 });
+}
 
 /** Recolors the already-loaded style in place. This intentionally avoids
  * setStyle(): custom Three.js layers, sources, camera state, and selections

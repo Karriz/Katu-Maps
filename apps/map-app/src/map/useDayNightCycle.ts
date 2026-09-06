@@ -4,7 +4,7 @@ import { dayNightAppearance, globeShadeOpacity } from './DayNightAppearance';
 import { DayNightShadeLayer, DAY_NIGHT_SHADE_LAYER_ID } from './DayNightShadeLayer';
 import { applyDayNightStyle, restoreDayNightStyle } from './DayNightStyle';
 import { useGlobeCloudCover } from './useGlobeCloudCover';
-import { timeZoneAt } from './DayNightSun';
+import { screenLockedSunDirection, timeZoneAt } from './DayNightSun';
 import type { TreeModelLayer } from './TreeModelLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { ResolvedTheme } from '../theme';
@@ -49,18 +49,18 @@ export function useDayNightCycle({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    if (!enabled || flightActive) {
+    if (flightActive) {
       if (map.getLayer(DAY_NIGHT_SHADE_LAYER_ID)) {
         map.setLayoutProperty(DAY_NIGHT_SHADE_LAYER_ID, 'visibility', 'none');
       }
       layerRef.current?.setAppearance([1, 0, 0], 0, 0);
       treeLayerRef.current?.setDayNightLighting(null);
       transitVehicleLayerRef.current?.setDayNightLighting(null);
-      if (wasActiveRef.current && !flightActive) restoreDayNightStyle(map, resolvedTheme);
       wasActiveRef.current = false;
       applyRef.current = () => {};
-      if (flightActive) return;
+      return;
     }
+    if (wasActiveRef.current && !enabled) restoreDayNightStyle(map, resolvedTheme);
     wasActiveRef.current = enabled;
     if (!layerRef.current) layerRef.current = new DayNightShadeLayer();
     if (!map.getLayer(DAY_NIGHT_SHADE_LAYER_ID)) {
@@ -77,8 +77,17 @@ export function useDayNightCycle({
       const center = map.getCenter();
       const zoom = map.getZoom();
       if (!enabled) {
-        // Normal mode uses the same blue rim without a terminator or city lights.
-        layerRef.current?.setAppearance([1, 0, 0], globeShadeOpacity(zoom), 0, false);
+        // Decorative terminator locked to the screen, not the real sun.
+        layerRef.current?.setAppearance(
+          screenLockedSunDirection(center.lng, center.lat, map.getBearing()),
+          globeShadeOpacity(zoom),
+          0,
+          true,
+          true,
+        );
+        treeLayerRef.current?.setDayNightLighting(null);
+        transitVehicleLayerRef.current?.setDayNightLighting(null);
+        map.triggerRepaint();
         return;
       }
       const appearance = dayNightAppearance(new Date(utcMsRef.current), center.lat, center.lng, zoom);
@@ -112,10 +121,12 @@ export function useDayNightCycle({
     apply();
     map.on('move', schedule);
     map.on('zoom', schedule);
+    map.on('rotate', schedule);
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       map.off('move', schedule);
       map.off('zoom', schedule);
+      map.off('rotate', schedule);
       applyRef.current = () => {};
     };
   }, [

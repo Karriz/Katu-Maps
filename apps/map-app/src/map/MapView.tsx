@@ -118,7 +118,7 @@ import { useRouteExecution } from './useRouteExecution';
 import { useMapTools } from './useMapTools';
 import { usePanelCoordinator } from './usePanelCoordinator';
 import { useMapLayerVisibility } from './useMapLayerVisibility';
-import { syncTerrain3d } from './MapTerrain';
+import { clearStaleTerrainGesture, installTerrainCameraFollower, isTerrainCameraFollowEvent, syncTerrain3d } from './MapTerrain';
 import { useViewedWeather } from './useViewedWeather';
 import { WeatherChip } from './WeatherChip';
 import { WeatherPanel } from './WeatherPanel';
@@ -154,6 +154,7 @@ import {
   aerowayWidthExpression,
   roadWidthExpression,
   applyMapTheme,
+  ensureMountainPeakIcon,
 } from './GlobalMapStyle';
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const WATER_PATTERN_ID = 'water-surface-pattern';
@@ -889,7 +890,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       roadWeather: false,
       roadTraffic: false,
       weather: false,
-      clouds: false,
+      clouds: true,
       dayNight: false,
     };
     try {
@@ -1954,7 +1955,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         maxZoom: 18,
         attributionControl: {
           compact: true,
-          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
+          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo</a> · <a href="https://clouds.matteason.co.uk/" target="_blank" rel="noreferrer">Cloud maps by Matt Eason / EUMETSAT</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
         },
       });
     } catch (error) {
@@ -1963,6 +1964,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       setMapError(error instanceof Error ? error.message : 'The map could not be created.');
       return;
     }
+    // Peak markers share a symbol with their labels; register the icon before
+    // the first paint so labeled peaks render as a point + name together.
+    ensureMountainPeakIcon(map);
     // Use the explicitly documented key bindings below rather than MapLibre's
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();
@@ -2338,6 +2342,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       vehicleFollowEnabledRef.current = false;
       setVehicleFollowing(false);
     };
+    // Capture before MapLibre's mousedown/touchstart handlers so a pan that
+    // starts during scrollZoom's settle window does not reuse the zoom-start
+    // terrain elevation plane (which causes hyperspeed pans after zoom-out).
+    let cancelTerrainCameraEase = () => {};
+    const clearTerrainGestureBeforePan = () => {
+      if (flightActiveRef.current) return;
+      clearStaleTerrainGesture(map);
+      // Stop elevation easing without snapping to the DEM target.
+      cancelTerrainCameraEase();
+    };
     const cancelLongPress = (event: PointerEvent) => {
       if (supportsLongPress(event) && event.type === 'pointermove' && activeLongPressPointers.size > 1) {
         multiPointerGestureActive = true;
@@ -2637,6 +2651,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.on('contextmenu', handleMapContextMenu);
       const canvas = map.getCanvas();
       canvas.setAttribute('aria-label', 'Interactive map. Use arrow keys to pan, plus or minus to zoom, and Shift+F10 for location actions.');
+      canvas.addEventListener('mousedown', clearTerrainGestureBeforePan, true);
+      canvas.addEventListener('touchstart', clearTerrainGestureBeforePan, { capture: true, passive: true });
       canvas.addEventListener('keydown', handleMapKeyDown);
       canvas.addEventListener('pointerdown', handlePointerDown);
       canvas.addEventListener('wheel', handleWheel, { passive: true });
@@ -2832,8 +2848,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         });
       } catch { /* local storage can be disabled */ }
     };
-    const handleMoveEnd = () => {
-      if (flightActiveRef.current) return;
+    const terrainCameraFollower = installTerrainCameraFollower(map, {
+      isPaused: () => flightActiveRef.current,
+    });
+    cancelTerrainCameraEase = () => terrainCameraFollower.cancel();
+    const handleMoveEnd = (event?: unknown) => {
+      if (flightActiveRef.current || isTerrainCameraFollowEvent(event)) return;
       persistCamera();
       updateGlobalRoadWidths();
       scheduleTreeUpdate();
@@ -2852,8 +2872,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       beforeReload: persistCamera,
       reload: () => window.location.reload(),
     });
-    const handleCameraMove = () => {
-      if (flightActiveRef.current) return;
+    const handleCameraMove = (event?: unknown) => {
+      if (flightActiveRef.current || isTerrainCameraFollowEvent(event)) return;
       const zoom = map.getZoom();
       const pitch = map.getPitch();
       const nextLabelSignature = `${Math.round(zoom * 2) / 2}:${Math.round(pitch / 10) * 10}`;
@@ -2870,8 +2890,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         source: terrainSourceRef.current,
       });
     };
-      map.on('move', handleCameraMove);
-      map.on('moveend', handleMoveEnd);
+    map.on('move', handleCameraMove);
+    map.on('moveend', handleMoveEnd);
     map.on('zoomstart', handleMapGestureStart);
     map.on('dragstart', handleMapGestureStart);
     map.on('sourcedata', handleModelSourceData);
@@ -2904,6 +2924,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     mapRef.current = map;
 
     return () => {
+      terrainCameraFollower.dispose();
       measurementControllerRef.current?.dispose();
       measurementControllerRef.current = null;
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
@@ -2919,6 +2940,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.off('click', handleLocationClick);
       map.off('contextmenu', handleMapContextMenu);
       const canvas = map.getCanvas();
+      canvas.removeEventListener('mousedown', clearTerrainGestureBeforePan, true);
+      canvas.removeEventListener('touchstart', clearTerrainGestureBeforePan, true);
       canvas.removeEventListener('keydown', handleMapKeyDown);
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('wheel', handleWheel);

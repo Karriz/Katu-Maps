@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLIGHT_MIN_CLEARANCE_METERS,
   FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
+  FLIGHT_SKID_CONTACT_OFFSET_METERS,
   FLIGHT_STALL_SPEED_METERS_PER_SECOND,
   advanceFlight,
   createInitialFlightState,
@@ -147,12 +147,71 @@ describe('flight dynamics', () => {
     expect(wrapSignedRadians(state.heading)).toBeCloseTo(0, 2);
   });
 
-  it('clamps clearance and unusually large frame intervals', () => {
+  it('lands at terrain level and brakes to a stop when throttle is cut', () => {
+    let state = {
+      ...createInitialFlightState([0, 0], 100, 0),
+      altitude: 130,
+      pitch: -0.25,
+      throttle: 0.2,
+      speed: 80,
+    };
+    for (let index = 0; index < 120; index += 1) {
+      state = advanceFlight(state, { pitch: 0, roll: 0, throttle: -1 }, 0.05, 100);
+    }
+    expect(state.altitude).toBe(100 + FLIGHT_SKID_CONTACT_OFFSET_METERS);
+    expect(state.throttle).toBe(0);
+    expect(state.isStalling).toBe(false);
+    expect(state.speed).toBe(0);
+  });
+
+  it('can take off again from the ground with pitch and throttle', () => {
+    const terrain = 50;
+    let state = {
+      ...createInitialFlightState([0, 0], terrain, 0),
+      altitude: terrain + FLIGHT_SKID_CONTACT_OFFSET_METERS,
+      speed: 0,
+      throttle: 0,
+      pitch: 0,
+      roll: 0.4,
+    };
+    for (let index = 0; index < 120; index += 1) {
+      state = advanceFlight(state, { pitch: 1, roll: 0, throttle: 1 }, 0.05, terrain);
+    }
+    expect(state.altitude).toBeGreaterThan(terrain + FLIGHT_SKID_CONTACT_OFFSET_METERS);
+    expect(state.speed).toBeGreaterThan(FLIGHT_STALL_SPEED_METERS_PER_SECOND);
+  });
+
+  it('steers on the ground with left and right rudder input', () => {
+    const terrain = 40;
+    const grounded = {
+      ...createInitialFlightState([0, 0], terrain, 0),
+      altitude: terrain + FLIGHT_SKID_CONTACT_OFFSET_METERS,
+      speed: 30,
+      throttle: 0.4,
+      pitch: 0,
+      roll: 0,
+      heading: 0,
+    };
+    let turning = grounded;
+    for (let index = 0; index < 20; index += 1) {
+      turning = advanceFlight(turning, { pitch: 0, roll: 1, throttle: 0 }, 0.05, terrain);
+    }
+    expect(turning.heading).toBeGreaterThan(grounded.heading);
+    expect(turning.altitude).toBe(terrain + FLIGHT_SKID_CONTACT_OFFSET_METERS);
+
+    let straight = grounded;
+    for (let index = 0; index < 20; index += 1) {
+      straight = advanceFlight(straight, { pitch: 0, roll: 0, throttle: 0 }, 0.05, terrain);
+    }
+    expect(straight.heading).toBeCloseTo(0, 8);
+  });
+
+  it('clamps to terrain and unusually large frame intervals', () => {
     const initial = { ...createInitialFlightState([0, 0], 0, 0), altitude: 1 };
     const longFrame = advanceFlight(initial, { pitch: -1, roll: 0, throttle: 0 }, 10, 250);
     const normalFrame = advanceFlight(initial, { pitch: -1, roll: 0, throttle: 0 }, 0.05, 250);
     expect(longFrame).toEqual(normalFrame);
-    expect(longFrame.altitude).toBe(250 + FLIGHT_MIN_CLEARANCE_METERS);
+    expect(longFrame.altitude).toBe(250 + FLIGHT_SKID_CONTACT_OFFSET_METERS);
   });
 
   it('places the chase camera behind and above the aircraft', () => {

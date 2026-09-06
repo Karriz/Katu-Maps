@@ -3,6 +3,8 @@ export const FLIGHT_CRUISE_SPEED_METERS_PER_SECOND = 110;
 export const FLIGHT_STALL_SPEED_METERS_PER_SECOND = 42;
 export const FLIGHT_MAX_SPEED_METERS_PER_SECOND = 160;
 export const FLIGHT_MIN_SPEED_METERS_PER_SECOND = 18;
+/** Distance from the aircraft model origin down to the skid contact plane. */
+export const FLIGHT_SKID_CONTACT_OFFSET_METERS = 1.65;
 
 const EARTH_RADIUS_METERS = 6_378_137;
 const MAX_FRAME_SECONDS = 0.05;
@@ -20,6 +22,14 @@ const CAMERA_LOOK_AHEAD_METERS = 30;
 const CAMERA_CHASE_HEIGHT_METERS = 22;
 const CAMERA_LOOK_HEIGHT_METERS = 4;
 const CAMERA_BANK_OFFSET_METERS = 16;
+const GROUND_CONTACT_EPSILON_METERS = 0.5;
+const GROUND_ATTITUDE_LEVEL_RATE = degreesToRadians(120);
+const GROUND_TAKEOFF_PITCH_RADIANS = degreesToRadians(8);
+const GROUND_ROLLING_DRAG = 5;
+const GROUND_BRAKE_DECELERATION = 36;
+const GROUND_SPEED_DRAG = 8;
+const GROUND_RUDDER_RATE_RADIANS_PER_SECOND = degreesToRadians(55);
+const GROUND_RUDDER_FULL_AUTHORITY_SPEED = 22;
 
 export type FlightState = {
   longitude: number;
@@ -83,6 +93,20 @@ function wrapLongitude(value: number) {
   return ((value + 540) % 360) - 180;
 }
 
+function approachRadians(current: number, target: number, maxStep: number) {
+  const delta = wrapSignedRadians(target - current);
+  if (Math.abs(delta) <= maxStep) return wrapSignedRadians(target);
+  return wrapSignedRadians(current + Math.sign(delta) * maxStep);
+}
+
+function groundedAltitude(terrainElevation: number) {
+  return terrainElevation + FLIGHT_SKID_CONTACT_OFFSET_METERS;
+}
+
+function isOnGround(altitude: number, terrainElevation: number) {
+  return altitude <= groundedAltitude(terrainElevation) + GROUND_CONTACT_EPSILON_METERS;
+}
+
 /** Move a geographic coordinate by local east/north distances in metres. */
 export function offsetCoordinate(
   coordinate: [number, number],
@@ -130,6 +154,10 @@ export function advanceFlight(
     0,
     1,
   );
+
+  if (isOnGround(state.altitude, terrainElevation)) {
+    return advanceGroundFlight(state, input, deltaSeconds, terrainElevation, throttle);
+  }
 
   // Body angular rates: q = body pitch (W/S), p = body roll (A/D), r = coordinated yaw
   const q = clamp(input.pitch, -1, 1) * PITCH_RATE_RADIANS_PER_SECOND;
@@ -193,10 +221,81 @@ export function advanceFlight(
     Math.cos(heading) * horizontalDistance,
   );
 
-  const altitude = Math.max(
-    terrainElevation + FLIGHT_MIN_CLEARANCE_METERS,
-    state.altitude + verticalSpeed * deltaSeconds,
+  const nextAltitude = state.altitude + verticalSpeed * deltaSeconds;
+  const contactAltitude = groundedAltitude(terrainElevation);
+  if (nextAltitude <= contactAltitude) {
+    return {
+      longitude: coordinate[0],
+      latitude: coordinate[1],
+      altitude: contactAltitude,
+      heading,
+      pitch: Math.max(0, wrapSignedRadians(pitch)),
+      roll: approachRadians(roll, 0, GROUND_ATTITUDE_LEVEL_RATE * deltaSeconds),
+      speed,
+      throttle,
+      isStalling: false,
+    };
+  }
+
+  return {
+    longitude: coordinate[0],
+    latitude: coordinate[1],
+    altitude: nextAltitude,
+    heading,
+    pitch,
+    roll,
+    speed,
+    throttle,
+    isStalling,
+  };
+}
+
+/** Simple runway contact: level out, taxi with rudder, brake to a stop when idle. */
+function advanceGroundFlight(
+  state: FlightState,
+  input: FlightInput,
+  deltaSeconds: number,
+  terrainElevation: number,
+  throttle: number,
+): FlightState {
+  const pitchInput = clamp(input.pitch, -1, 1);
+  const desiredPitch = Math.max(0, pitchInput) * degreesToRadians(18);
+  const pitch = approachRadians(state.pitch, desiredPitch, GROUND_ATTITUDE_LEVEL_RATE * deltaSeconds);
+  const roll = approachRadians(state.roll, 0, GROUND_ATTITUDE_LEVEL_RATE * deltaSeconds);
+
+  const thrustAcc = throttle * MAX_THRUST_ACCELERATION * 0.85;
+  const idleFactor = 1 - throttle;
+  const groundDrag = GROUND_ROLLING_DRAG
+    + idleFactor * idleFactor * GROUND_BRAKE_DECELERATION
+    + (state.speed / FLIGHT_CRUISE_SPEED_METERS_PER_SECOND) * GROUND_SPEED_DRAG;
+  const speed = clamp(
+    state.speed + (thrustAcc - groundDrag) * deltaSeconds,
+    0,
+    FLIGHT_MAX_SPEED_METERS_PER_SECOND,
   );
+
+  // A/D steer the nose on the ground; authority grows with taxi speed.
+  const rudder = clamp(input.roll, -1, 1);
+  const rudderAuthority = clamp(speed / GROUND_RUDDER_FULL_AUTHORITY_SPEED, 0, 1);
+  const heading = wrapRadians(
+    state.heading
+      + rudder * GROUND_RUDDER_RATE_RADIANS_PER_SECOND * rudderAuthority * deltaSeconds,
+  );
+
+  const horizontalDistance = speed * deltaSeconds;
+  const coordinate = offsetCoordinate(
+    [state.longitude, state.latitude],
+    Math.sin(heading) * horizontalDistance,
+    Math.cos(heading) * horizontalDistance,
+  );
+
+  let altitude = groundedAltitude(terrainElevation);
+  if (
+    pitch >= GROUND_TAKEOFF_PITCH_RADIANS
+    && speed >= FLIGHT_STALL_SPEED_METERS_PER_SECOND
+  ) {
+    altitude += speed * Math.sin(pitch) * deltaSeconds;
+  }
 
   return {
     longitude: coordinate[0],
@@ -207,7 +306,7 @@ export function advanceFlight(
     roll,
     speed,
     throttle,
-    isStalling,
+    isStalling: false,
   };
 }
 

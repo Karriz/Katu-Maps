@@ -816,20 +816,48 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   position: absolute;
   z-index: 120;
 }
-.flight-hud { align-items: center; backdrop-filter: blur(14px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 15px; box-shadow: var(--flight-shadow); display: flex; gap: 22px; left: max(18px, env(safe-area-inset-left, 18px)); padding: 10px 11px 10px 14px; pointer-events: auto; position: absolute; right: max(18px, env(safe-area-inset-right, 18px)); top: calc(18px + env(safe-area-inset-top, 0px)); }
-.flight-hud-title { align-items: center; display: flex; gap: 10px; min-width: 150px; }
-.flight-hud-title > svg { color: var(--flight-accent); height: 24px; transform: rotate(-12deg); width: 24px; }
-.flight-hud-title div { display: flex; flex-direction: column; gap: 1px; }
-.flight-hud-title strong { font-family: var(--font-heading); font-size: .82rem; }
-.flight-hud-title span { color: var(--flight-muted); font-size: .62rem; }
-.flight-telemetry { display: flex; gap: 24px; margin: 0 auto; }
-.flight-telemetry div { align-items: baseline; display: flex; gap: 7px; }
-.flight-telemetry dt { color: var(--flight-muted); font-size: .58rem; font-weight: 800; letter-spacing: .08em; }
-.flight-telemetry dd { font-size: .76rem; font-variant-numeric: tabular-nums; font-weight: 750; margin: 0; min-width: 58px; }
-.flight-exit { align-items: center; background: var(--color-accent-soft); border: 1px solid color-mix(in srgb, var(--flight-accent) 38%, transparent); border-radius: 9px; color: var(--flight-accent); cursor: pointer; display: flex; font: inherit; font-size: .7rem; font-weight: 750; gap: 7px; min-height: 36px; padding: 7px 10px; }
-.flight-exit:hover { background: var(--flight-surface-hover); }
+.flight-exit {
+  align-items: center;
+  backdrop-filter: blur(12px);
+  background: var(--flight-surface);
+  border: 1px solid var(--flight-border);
+  border-radius: 11px;
+  box-shadow: var(--flight-shadow);
+  color: var(--flight-text);
+  cursor: pointer;
+  display: flex;
+  height: 40px;
+  justify-content: center;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  right: max(18px, env(safe-area-inset-right, 18px));
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  width: 40px;
+}
+.flight-exit svg { height: 20px; width: 20px; }
+.flight-exit:hover { background: var(--flight-surface-hover); border-color: color-mix(in srgb, var(--flight-accent) 46%, transparent); color: var(--flight-accent); }
 .flight-exit:focus-visible { outline: 3px solid color-mix(in srgb, var(--flight-accent) 38%, transparent); outline-offset: 2px; }
-.flight-stall-warning { align-items: center; animation: stall-warning-flash 600ms ease-in-out infinite alternate; background: rgb(220 38 38 / 92%); border: 1px solid rgb(254 202 202 / 50%); border-radius: 999px; box-shadow: 0 4px 18px rgb(220 38 38 / 40%); color: #fff; display: flex; font-family: var(--font-heading); font-size: 0.78rem; font-weight: 850; gap: 8px; left: 50%; letter-spacing: 0.08em; padding: 8px 16px; pointer-events: none; position: absolute; top: calc(76px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 130; }
+.flight-telemetry {
+  backdrop-filter: blur(12px);
+  background: var(--flight-surface);
+  border: 1px solid var(--flight-border);
+  border-radius: 14px;
+  box-shadow: var(--flight-shadow);
+  display: flex;
+  gap: 18px;
+  left: 50%;
+  margin: 0;
+  padding: 8px 14px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%);
+}
+.flight-telemetry div { align-items: baseline; display: flex; gap: 6px; }
+.flight-telemetry dt { color: var(--flight-muted); font-size: .58rem; font-weight: 800; letter-spacing: .08em; }
+.flight-telemetry dd { font-size: .76rem; font-variant-numeric: tabular-nums; font-weight: 750; margin: 0; min-width: 52px; }
+.flight-stall-warning { align-items: center; animation: stall-warning-flash 600ms ease-in-out infinite alternate; background: rgb(220 38 38 / 92%); border: 1px solid rgb(254 202 202 / 50%); border-radius: 999px; box-shadow: 0 4px 18px rgb(220 38 38 / 40%); color: #fff; display: flex; font-family: var(--font-heading); font-size: 0.78rem; font-weight: 850; gap: 8px; left: 50%; letter-spacing: 0.08em; padding: 8px 16px; pointer-events: none; position: absolute; top: calc(68px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 130; }
 .flight-stall-warning svg { height: 18px; width: 18px; }
 @keyframes stall-warning-flash { from { opacity: 0.75; transform: translateX(-50%) scale(0.97); } to { opacity: 1; transform: translateX(-50%) scale(1.03); } }
 .flight-throttle-bar { align-items: center; backdrop-filter: blur(12px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 14px; box-shadow: var(--flight-shadow); display: flex; flex-direction: column; gap: 8px; left: max(18px, env(safe-area-inset-left, 18px)); padding: 12px 10px; pointer-events: none; position: absolute; top: 50%; transform: translateY(-50%); z-index: 125; }
@@ -852,7 +880,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .flight-reticle span::after { bottom: 0; height: 9px; left: 14px; width: 1px; }
 .flight-inputs { align-items: flex-end; bottom: calc(48px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: space-between; left: max(18px, env(safe-area-inset-left, 18px)); pointer-events: none; position: absolute; right: max(18px, env(safe-area-inset-right, 18px)); }
 .flight-input-group { align-items: center; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
-.flight-input-group > span { backdrop-filter: blur(10px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 999px; box-shadow: var(--flight-shadow); color: var(--flight-muted); font-size: .58rem; font-weight: 800; letter-spacing: .08em; padding: 4px 8px; text-transform: uppercase; }
+.flight-input-group > span { backdrop-filter: blur(10px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 999px; box-shadow: var(--flight-shadow); color: var(--flight-muted); font-size: .58rem; font-weight: 800; letter-spacing: .08em; padding: 4px 8px; text-transform: uppercase; user-select: none; }
 .flight-input-group > div { display: flex; gap: 8px; }
 .flight-input-group .flight-throttle-buttons { flex-direction: column; }
 .flight-input-group button { align-items: center; backdrop-filter: blur(12px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 13px; box-shadow: var(--flight-shadow); color: var(--flight-text); cursor: pointer; display: flex; height: 50px; justify-content: center; padding: 0; touch-action: none; user-select: none; width: 56px; }
@@ -909,7 +937,6 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   --flight-text: #eef7ff;
   --flight-shadow: 0 10px 28px rgb(0 8 18 / 36%);
 }
-[data-theme='dark'] .flight-exit { background: rgb(116 184 255 / 14%); }
 [data-theme='dark'] .map-status { background: rgb(18 37 55 / 96%); color: var(--color-ink); border-color: var(--color-line-strong); }
 [data-theme='dark'] .maplibregl-ctrl-attrib { background: rgb(12 29 44 / 94%); box-shadow: 0 1px 4px rgb(0 8 18 / 45%); color: #b8cddd; }
 [data-theme='dark'] .maplibregl-ctrl-attrib a { color: #b8dcff; }
@@ -1023,15 +1050,11 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 
 @media (max-width: 640px) {
   :root { --map-control-edge: 12px; }
-  .flight-hud { display: grid; gap: 8px 10px; grid-template-areas: 'title exit' 'telemetry telemetry'; grid-template-columns: minmax(0, 1fr) auto; left: max(10px, env(safe-area-inset-left, 10px)); padding: 9px 10px; right: max(10px, env(safe-area-inset-right, 10px)); top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .flight-hud-title { grid-area: title; min-width: 0; }
-  .flight-hud-title span { display: none; }
-  .flight-telemetry { border-top: 1px solid var(--flight-border); display: grid; gap: 6px; grid-area: telemetry; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; padding-top: 7px; }
+  .flight-exit { height: 38px; right: max(12px, env(safe-area-inset-right, 12px)); top: calc(12px + env(safe-area-inset-top, 0px)); width: 38px; }
+  .flight-telemetry { gap: 10px; padding: 7px 10px; top: calc(12px + env(safe-area-inset-top, 0px)); }
   .flight-telemetry div { align-items: center; flex-direction: column; gap: 1px; min-width: 0; }
   .flight-telemetry dd { font-size: .68rem; min-width: 0; white-space: nowrap; }
-  .flight-exit { grid-area: exit; min-height: 38px; min-width: 38px; padding: 7px; }
-  .flight-exit span { display: none; }
-  .flight-stall-warning { top: calc(122px + env(safe-area-inset-top, 0px)); }
+  .flight-stall-warning { top: calc(66px + env(safe-area-inset-top, 0px)); }
   .flight-throttle-bar { display: none; }
   .flight-inputs { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 12px)); right: max(12px, env(safe-area-inset-right, 12px)); }
   .flight-input-group button { height: 48px; width: 50px; }
@@ -1235,14 +1258,11 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 }
 
 @media (max-height: 520px) and (orientation: landscape) {
-  .flight-hud { display: flex; gap: 12px; left: max(10px, env(safe-area-inset-left, 10px)); padding: 7px 8px 7px 11px; right: max(10px, env(safe-area-inset-right, 10px)); top: calc(8px + env(safe-area-inset-top, 0px)); }
-  .flight-hud-title { grid-area: auto; min-width: 104px; }
-  .flight-hud-title span, .flight-exit span { display: none; }
-  .flight-telemetry { border-top: 0; display: flex; gap: 12px; grid-area: auto; margin: 0 auto; padding-top: 0; }
-  .flight-telemetry div { align-items: baseline; flex-direction: row; gap: 7px; }
+  .flight-exit { height: 36px; right: max(10px, env(safe-area-inset-right, 10px)); top: calc(8px + env(safe-area-inset-top, 0px)); width: 36px; }
+  .flight-telemetry { gap: 12px; padding: 6px 10px; top: calc(8px + env(safe-area-inset-top, 0px)); }
+  .flight-telemetry div { align-items: baseline; flex-direction: row; gap: 6px; }
   .flight-telemetry dd { min-width: 48px; }
-  .flight-exit { grid-area: auto; min-height: 38px; min-width: 38px; padding: 7px; }
-  .flight-stall-warning { top: calc(64px + env(safe-area-inset-top, 0px)); }
+  .flight-stall-warning { top: calc(56px + env(safe-area-inset-top, 0px)); }
   .flight-throttle-bar { display: none; }
   .flight-inputs { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 12px)); right: max(12px, env(safe-area-inset-right, 12px)); }
   .flight-input-group button { height: 42px; width: 46px; }

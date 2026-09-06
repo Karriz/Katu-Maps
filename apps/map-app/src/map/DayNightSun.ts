@@ -71,6 +71,51 @@ export function sunEcefDirection(date: Date): [number, number, number] {
   ];
 }
 
+function normalize3(x: number, y: number, z: number): [number, number, number] {
+  const length = Math.hypot(x, y, z) || 1;
+  return [x / length, y / length, z / length];
+}
+
+/**
+ * Decorative globe key light locked to the screen: sun stays near the view center
+ * with an upper-left bias so a visible dark crescent sits on the lower-right limb.
+ */
+export function screenLockedSunDirection(
+  longitude: number,
+  latitude: number,
+  bearingDegrees = 0,
+): [number, number, number] {
+  const lat = latitude * DEG;
+  const lng = longitude * DEG;
+  const bearing = bearingDegrees * DEG;
+  const cosLat = Math.cos(lat);
+  const sinLat = Math.sin(lat);
+  const cosLng = Math.cos(lng);
+  const sinLng = Math.sin(lng);
+  const centerX = cosLat * cosLng;
+  const centerY = cosLat * sinLng;
+  const centerZ = sinLat;
+  const eastX = -sinLng;
+  const eastY = cosLng;
+  const northX = -sinLat * cosLng;
+  const northY = -sinLat * sinLng;
+  const northZ = cosLat;
+  const cosBearing = Math.cos(bearing);
+  const sinBearing = Math.sin(bearing);
+  const upX = northX * cosBearing + eastX * sinBearing;
+  const upY = northY * cosBearing + eastY * sinBearing;
+  const upZ = northZ * cosBearing;
+  const rightX = eastX * cosBearing - northX * sinBearing;
+  const rightY = eastY * cosBearing - northY * sinBearing;
+  const rightZ = -northZ * sinBearing;
+  // Strong enough that the terminator crosses the visible disc (not just the backface).
+  return normalize3(
+    centerX - rightX * 0.62 + upX * 0.32,
+    centerY - rightY * 0.62 + upY * 0.32,
+    centerZ - rightZ * 0.62 + upZ * 0.32,
+  );
+}
+
 export function sunPosition(date: Date, latitude: number, longitude: number): SunPosition {
   const subsolar = subsolarPoint(date);
   const lat = latitude * DEG;

@@ -1,6 +1,5 @@
 import * as maplibregl from 'maplibre-gl';
-import type { ForecastGrid } from './Weather';
-import { globeCloudPixels, globeCloudOpacity } from './GlobeClouds';
+import { globeCloudOpacity, type GlobeCloudTexture } from './GlobeClouds';
 import {
   type CustomLayerInterface,
   type CustomRenderMethodInput,
@@ -22,6 +21,7 @@ in vec3 v_normal;
 uniform vec4 u_horizon;
 uniform float u_globe;
 uniform float u_day_night;
+uniform float u_decorative;
 uniform float u_cloud_opacity;
 uniform vec3 u_sun;
 uniform float u_opacity;
@@ -37,15 +37,18 @@ void main() {
   float horizon = dot(normal.yzx, u_horizon.xyz) + u_horizon.w;
   if (u_globe > 0.999 && horizon < 0.0) discard;
   float mu = dot(normal, u_sun);
-  float night = (1.0 - smoothstep(-0.22, 0.12, mu)) * u_day_night;
+  // Decorative mode uses a wider, softer limb falloff locked to the screen sun.
+  float nightLo = mix(-0.22, 0.02, u_decorative);
+  float nightHi = mix(0.12, 0.72, u_decorative);
+  float night = (1.0 - smoothstep(nightLo, nightHi, mu)) * u_day_night;
   // Keep the colored twilight close to the horizon instead of washing the night hemisphere.
-  float twilight = (1.0 - smoothstep(0.0, 0.10, mu)) * smoothstep(-0.12, -0.01, mu) * u_day_night;
+  float twilight = (1.0 - smoothstep(0.0, 0.10, mu)) * smoothstep(-0.12, -0.01, mu) * u_day_night * (1.0 - u_decorative);
   float dusk = smoothstep(-0.06, 0.06, mu);
   vec3 twilightRgb = mix(vec3(0.06, 0.09, 0.18), vec3(1.0, 0.48, 0.16), dusk);
   vec3 nightRgb = vec3(0.015, 0.04, 0.09);
   vec2 uv = vec2(fract(v_lnglat.x / 360.0 + 0.5), 0.5 - v_lnglat.y / 180.0);
   vec3 lights = texture(u_city_lights, uv).rgb * night * u_lights * u_opacity;
-  float nightAlpha = night * 0.78 * u_opacity;
+  float nightAlpha = night * mix(0.78, 0.5, u_decorative) * u_opacity;
   float twilightAlpha = twilight * 0.32 * u_opacity;
   vec3 color = nightRgb * nightAlpha + twilightRgb * twilightAlpha + lights;
   float alpha = clamp(nightAlpha + twilightAlpha, 0.0, 1.0);
@@ -101,8 +104,9 @@ type ShadeProgram = {
   cityLights: WebGLUniformLocation | null;
   horizon: WebGLUniformLocation | null;
   globe: WebGLUniformLocation | null;
-  dayNight: WebGLUniformLocation | null;
-  cloudOpacity: WebGLUniformLocation | null;
+    dayNight: WebGLUniformLocation | null;
+    decorative: WebGLUniformLocation | null;
+    cloudOpacity: WebGLUniformLocation | null;
   cloudCover: WebGLUniformLocation | null;
 };
 
@@ -282,6 +286,7 @@ function createShadeProgram(
     horizon: gl.getUniformLocation(program, 'u_horizon'),
     globe: gl.getUniformLocation(program, 'u_globe'),
     dayNight: gl.getUniformLocation(program, 'u_day_night'),
+    decorative: gl.getUniformLocation(program, 'u_decorative'),
     cloudOpacity: gl.getUniformLocation(program, 'u_cloud_opacity'),
     cloudCover: gl.getUniformLocation(program, 'u_cloud_cover'),
   };
@@ -327,11 +332,11 @@ export class DayNightShadeLayer implements CustomLayerInterface {
   private indexBuffer: WebGLBuffer | null = null;
   private lightsTexture: WebGLTexture | null = null;
   private cloudTexture: WebGLTexture | null = null;
-  private cloudPixels: ReturnType<typeof globeCloudPixels> | null = null;
+  private cloudPixels: GlobeCloudTexture | null = null;
   private cloudDirty = false;
 
-  setCloudCover(grid: ForecastGrid | null) {
-    this.cloudPixels = grid ? globeCloudPixels(grid) : null;
+  setCloudCover(texture: GlobeCloudTexture | null) {
+    this.cloudPixels = texture;
     this.cloudDirty = true;
     this.map?.triggerRepaint();
   }
@@ -339,10 +344,18 @@ export class DayNightShadeLayer implements CustomLayerInterface {
   private opacity = 0;
   private lights = 0;
   private dayNight = true;
+  private decorative = false;
   private sun: [number, number, number] = [1, 0, 0];
 
-  setAppearance(sun: [number, number, number], opacity: number, lights: number, dayNight = true) {
+  setAppearance(
+    sun: [number, number, number],
+    opacity: number,
+    lights: number,
+    dayNight = true,
+    decorative = false,
+  ) {
     this.dayNight = dayNight;
+    this.decorative = decorative;
     this.sun = sun;
     this.opacity = opacity;
     this.lights = lights;
@@ -461,6 +474,7 @@ export class DayNightShadeLayer implements CustomLayerInterface {
     gl2.uniform4f(program.horizon, ...projection.clippingPlane);
     gl2.uniform1f(program.globe, projection.projectionTransition);
     gl2.uniform1f(program.dayNight, this.dayNight ? 1 : 0);
+    gl2.uniform1f(program.decorative, this.decorative ? 1 : 0);
     gl2.uniform1f(program.cloudOpacity, this.cloudTexture ? globeCloudOpacity(this.map?.getZoom() ?? 6) : 0);
     gl2.uniform1f(program.elevation, SHELL_ALTITUDE_METERS);
     gl2.uniform3f(program.sun, this.sun[0], this.sun[1], this.sun[2]);

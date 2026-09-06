@@ -8,11 +8,15 @@ import * as THREE from 'three';
 import {
   CARTOON_AMBIENT_GROUND_COLOR,
   CARTOON_AMBIENT_SKY_COLOR,
+  CARTOON_SHADOW_COLOR,
   CARTOON_SUN_COLOR,
   sunCartesian,
 } from '../CartoonLighting';
 import type { DayNightAppearance } from '../DayNightAppearance';
-import type { FlightState } from './FlightDynamics';
+import { FLIGHT_SKID_CONTACT_OFFSET_METERS, type FlightState } from './FlightDynamics';
+
+const CONTACT_SHADOW_FADE_HEIGHT_METERS = 140;
+const CONTACT_SHADOW_BASE_OPACITY = 0.22;
 
 function disposeObject(object: THREE.Object3D | undefined) {
   object?.traverse((child) => {
@@ -21,6 +25,54 @@ function disposeObject(object: THREE.Object3D | undefined) {
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.forEach((material) => material.dispose());
   });
+}
+
+/** Soft radial alpha map matching tree contact shadows. */
+function createShadowTexture() {
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const normalizedX = (x + 0.5) / size * 2 - 1;
+      const normalizedY = (y + 0.5) / size * 2 - 1;
+      const distance = Math.hypot(normalizedX, normalizedY);
+      const falloff = Math.max(0, Math.min(1, 1 - distance));
+      const strength = falloff * falloff * (3 - 2 * falloff);
+      const offset = (y * size + x) * 4;
+      const value = Math.round(strength * 255);
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createContactShadow(texture: THREE.DataTexture) {
+  const geometry = new THREE.CircleGeometry(1, 24);
+  geometry.rotateX(-Math.PI / 2);
+  const material = new THREE.MeshBasicMaterial({
+    color: CARTOON_SHADOW_COLOR,
+    transparent: true,
+    opacity: CONTACT_SHADOW_BASE_OPACITY,
+    alphaMap: texture,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    fog: false,
+  });
+  const shadow = new THREE.Mesh(geometry, material);
+  // Rough aircraft footprint: wide wings, longer fuselage.
+  shadow.scale.set(7.2, 1, 5.0);
+  shadow.frustumCulled = false;
+  shadow.renderOrder = -1;
+  return shadow;
 }
 
 function createAircraft(dark: boolean) {
@@ -110,6 +162,33 @@ function createAircraft(dark: boolean) {
   propeller.position.z = 6.85;
   aircraft.add(propeller);
 
+  // Landing skids — bottom face sits at -FLIGHT_SKID_CONTACT_OFFSET_METERS.
+  const skidThickness = 0.14;
+  const skidBottom = -FLIGHT_SKID_CONTACT_OFFSET_METERS;
+  const skidCenterY = skidBottom + skidThickness / 2;
+  const skidTrack = 1.15;
+  for (const side of [-1, 1] as const) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.22, skidThickness, 4.6), darkMaterial);
+    skid.position.set(side * skidTrack, skidCenterY, 0.15);
+    aircraft.add(skid);
+
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, skidThickness, 0.85), darkMaterial);
+    tip.position.set(side * skidTrack, skidCenterY + 0.08, 2.55);
+    tip.rotation.x = -0.45;
+    aircraft.add(tip);
+
+    for (const strutZ of [1.1, -1.35] as const) {
+      const strutHeight = Math.abs(skidCenterY) - 0.35;
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.09, strutHeight, 0.09), darkMaterial);
+      strut.position.set(side * (skidTrack * 0.55), skidCenterY + strutHeight / 2, strutZ);
+      strut.rotation.z = side * 0.28;
+      aircraft.add(strut);
+    }
+  }
+  const crossBrace = new THREE.Mesh(new THREE.BoxGeometry(skidTrack * 2, 0.08, 0.1), darkMaterial);
+  crossBrace.position.set(0, skidCenterY + 0.35, -0.2);
+  aircraft.add(crossBrace);
+
   aircraft.traverse((child) => {
     if (child instanceof THREE.Mesh) child.frustumCulled = false;
   });
@@ -132,11 +211,14 @@ export class FlightModelLayer implements CustomLayerInterface {
   private readonly sceneScale = new THREE.Vector3();
   private aircraft?: THREE.Group;
   private propeller?: THREE.Mesh;
+  private contactShadow?: THREE.Mesh;
+  private shadowTexture?: THREE.DataTexture;
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
   private propellerAngle = 0;
   private previousRenderTime?: number;
   private pose: FlightState | null = null;
+  private terrainElevation: number | null = null;
   private darkMode = false;
   private dayNight: DayNightAppearance | null = null;
 
@@ -154,9 +236,13 @@ export class FlightModelLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  setPose(pose: FlightState | null) {
+  setPose(pose: FlightState | null, terrainElevation?: number) {
     this.pose = pose;
+    this.terrainElevation = pose == null
+      ? null
+      : (terrainElevation ?? this.terrainElevation);
     if (this.aircraft) this.aircraft.visible = Boolean(pose);
+    if (this.contactShadow) this.contactShadow.visible = Boolean(pose);
     if (!pose) this.previousRenderTime = undefined;
     this.map?.triggerRepaint();
   }
@@ -178,6 +264,7 @@ export class FlightModelLayer implements CustomLayerInterface {
     this.applySceneLighting();
     this.rebuildAircraft();
     if (this.aircraft) this.aircraft.visible = false;
+    if (this.contactShadow) this.contactShadow.visible = false;
     this.renderer = new THREE.WebGLRenderer({
       canvas: map.getCanvas(),
       context: gl as WebGL2RenderingContext,
@@ -204,6 +291,8 @@ export class FlightModelLayer implements CustomLayerInterface {
     if (this.propeller) this.propeller.rotation.z = this.propellerAngle;
 
     aircraft.rotation.set(-pose.pitch, pose.heading, -pose.roll, 'YXZ');
+    this.updateContactShadow(pose);
+
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
       [pose.longitude, pose.latitude],
       pose.altitude,
@@ -222,15 +311,52 @@ export class FlightModelLayer implements CustomLayerInterface {
 
   onRemove() {
     disposeObject(this.aircraft);
+    disposeObject(this.contactShadow);
+    this.shadowTexture?.dispose();
+    this.shadowTexture = undefined;
     this.scene.clear();
     this.renderer?.dispose();
     this.renderer = undefined;
     this.aircraft = undefined;
     this.propeller = undefined;
+    this.contactShadow = undefined;
     this.hemisphereLight = undefined;
     this.sunlight = undefined;
     this.previousRenderTime = undefined;
+    this.terrainElevation = null;
     this.map = undefined;
+  }
+
+  private updateContactShadow(pose: FlightState) {
+    const shadow = this.contactShadow;
+    if (!shadow) return;
+    const terrainElevation = this.terrainElevation;
+    if (terrainElevation == null) {
+      shadow.visible = false;
+      return;
+    }
+
+    const heightAboveContact = Math.max(
+      0,
+      pose.altitude - terrainElevation - FLIGHT_SKID_CONTACT_OFFSET_METERS,
+    );
+    const fade = Math.max(0, 1 - heightAboveContact / CONTACT_SHADOW_FADE_HEIGHT_METERS);
+    if (fade <= 0.02) {
+      shadow.visible = false;
+      return;
+    }
+
+    shadow.visible = true;
+    // Sit just above the DEM and rely on polygonOffset like tree shadows so
+    // the disc does not z-fight or clip into the terrain mesh.
+    shadow.position.set(0, -(pose.altitude - terrainElevation) + 0.2, 0);
+    shadow.rotation.set(0, pose.heading, 0);
+    const soften = 1 + heightAboveContact * 0.014;
+    shadow.scale.set(7.2 * soften, 1, 5.0 * soften);
+    const material = shadow.material;
+    if (material instanceof THREE.MeshBasicMaterial) {
+      material.opacity = CONTACT_SHADOW_BASE_OPACITY * fade * fade;
+    }
   }
 
   private applySceneLighting() {
@@ -266,10 +392,19 @@ export class FlightModelLayer implements CustomLayerInterface {
       this.scene.remove(this.aircraft);
       disposeObject(this.aircraft);
     }
+    if (this.contactShadow) {
+      this.scene.remove(this.contactShadow);
+      disposeObject(this.contactShadow);
+    }
+    this.shadowTexture?.dispose();
     const { aircraft, propeller } = createAircraft(this.darkMode);
     this.aircraft = aircraft;
     this.propeller = propeller;
+    this.shadowTexture = createShadowTexture();
+    this.contactShadow = createContactShadow(this.shadowTexture);
     this.aircraft.visible = Boolean(this.pose);
+    this.contactShadow.visible = Boolean(this.pose);
+    this.scene.add(this.contactShadow);
     this.scene.add(this.aircraft);
     this.applySceneLighting();
   }

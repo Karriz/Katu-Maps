@@ -117,7 +117,7 @@ const layerGroups: LayerGroup[] = [
     label: 'Environment',
     layers: [
       { key: 'dayNight', label: 'Day & night', description: 'Sunlight, night shade & city lights', icon: SunMoon },
-      { key: 'clouds', label: 'Clouds', description: 'Global model cloud cover', icon: Cloud },
+      { key: 'clouds', label: 'Clouds', description: 'Near-realtime satellite cloud cover', icon: Cloud },
       { key: 'weather', label: 'Weather', description: 'Forecast for the viewed location', icon: CloudSun },
     ],
   },

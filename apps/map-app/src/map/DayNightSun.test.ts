@@ -6,6 +6,7 @@ import {
   subsolarPoint,
   sunEcefDirection,
   sunPosition,
+  screenLockedSunDirection,
   utcMsFromLocalMinutes,
 } from './DayNightSun';
 
@@ -43,6 +44,19 @@ describe('day/night sun model', () => {
   it('keeps the ECEF sun vector on the unit sphere', () => {
     const [x, y, z] = sunEcefDirection(new Date(Date.UTC(2024, 5, 21, 12)));
     expect(Math.hypot(x, y, z)).toBeCloseTo(1, 6);
+  });
+
+  it('locks a decorative sun near the view center with a screen-space bias', () => {
+    const sun = screenLockedSunDirection(0, 0, 0);
+    expect(Math.hypot(...sun)).toBeCloseTo(1, 6);
+    // Facing the Gulf of Guinea: center stays lit, lower-right limb falls into night.
+    const centerMu = sun[0];
+    const limbMu = sun[0] * Math.cos(65 * Math.PI / 180)
+      + sun[1] * Math.sin(65 * Math.PI / 180);
+    expect(centerMu).toBeGreaterThan(0.7);
+    expect(limbMu).toBeLessThan(0.05);
+    const rotated = screenLockedSunDirection(0, 0, 90);
+    expect(rotated[1]).not.toBeCloseTo(sun[1], 2);
   });
 
   it('moves UTC by the local-minute slider delta and wraps midnight', () => {

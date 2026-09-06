@@ -3,10 +3,22 @@ import { closestHourIndex, type ForecastGrid } from './Weather';
 /** Upsample factor so a sparse model grid still samples smoothly on the globe shell. */
 const TEXTURE_SCALE = 4;
 
-/** Current model cloud cover fades away before regional detail takes over. */
+export type GlobeCloudTexture = {
+  data: Uint8Array;
+  width: number;
+  height: number;
+};
+
+/** Clouds are strongest at globe scale and fade before regional detail takes over. */
 export function globeCloudOpacity(zoom: number) {
   const t = Math.min(1, Math.max(0, (zoom - 2.5) / 3));
-  return 0.56 * (1 - t * t * (3 - 2 * t));
+  return 0.95 * (1 - t * t * (3 - 2 * t));
+}
+
+/** Mild contrast so broken cloud fields read more clearly at globe scale. */
+export function shapeGlobeCloudCover(cover: number) {
+  const clamped = Math.max(0, Math.min(100, cover));
+  return clamped < 8 ? 0 : Math.min(100, (clamped - 8) * (100 / 92));
 }
 
 function sampleCover(covers: Float32Array, columns: number, rows: number, x: number, y: number) {
@@ -20,7 +32,7 @@ function sampleCover(covers: Float32Array, columns: number, rows: number, x: num
   return top * (1 - ty) + bottom * ty;
 }
 
-export function globeCloudPixels(grid: ForecastGrid) {
+export function globeCloudPixels(grid: ForecastGrid): GlobeCloudTexture {
   const timeIndex = closestHourIndex(grid.times);
   const { columns, rows } = grid;
   const covers = new Float32Array(columns * rows);
@@ -48,8 +60,7 @@ export function globeCloudPixels(grid: ForecastGrid) {
     for (let col = 0; col < width; col += 1) {
       const x = (col / (width - 1)) * (columns - 1);
       const cover = sampleCover(covers, columns, rows, x, y);
-      // Mild contrast so broken cloud fields read more clearly at globe scale.
-      const shaped = cover < 8 ? 0 : Math.min(100, (cover - 8) * (100 / 92));
+      const shaped = shapeGlobeCloudCover(cover);
       const offset = (row * width + col) * 4;
       data[offset] = Math.round(shaped * 2.55);
       data[offset + 3] = 255;

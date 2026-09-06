@@ -6,6 +6,7 @@ import {
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
+  MOUNTAIN_PEAK_ICON_ID,
 } from './GlobalMapStyle';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
@@ -130,6 +131,19 @@ describe('global map overlay styles', () => {
 
     expect(aerodromeLayer?.['source-layer']).toBe('aerodrome_label');
     expect(layout?.['icon-image']).toBe('location-airport-icon');
+  });
+
+  it('keeps mountain peak markers on the labeled symbol layer', () => {
+    const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-mountain-peak-labels') as {
+      layout?: Record<string, unknown>;
+      'source-layer'?: string;
+    } | undefined;
+    const circleLayer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-mountain-peaks');
+
+    expect(circleLayer).toBeUndefined();
+    expect(layer?.['source-layer']).toBe('mountain_peak');
+    expect(layer?.layout?.['icon-image']).toBe(MOUNTAIN_PEAK_ICON_ID);
+    expect(layer?.layout?.['text-optional']).toBeUndefined();
   });
 
   it('includes leftover outdoor amenities on the hiking POI overlay', () => {

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { globeCloudOpacity, globeCloudPixels } from './GlobeClouds';
+import { globeCloudOpacity, globeCloudPixels, shapeGlobeCloudCover } from './GlobeClouds';
+import { globeCloudPixelsFromAlphaImage, liveCloudImageUrl } from './LiveCloudCover';
 import type { ForecastGrid } from './Weather';
 
 describe('globe cloud fade', () => {
   it('shows clouds at globe scale and removes them before city scale', () => {
-    expect(globeCloudOpacity(1)).toBeGreaterThan(0);
-    expect(globeCloudOpacity(1)).toBeLessThan(0.6);
+    expect(globeCloudOpacity(1)).toBeGreaterThan(0.85);
+    expect(globeCloudOpacity(1)).toBeLessThanOrEqual(1);
     expect(globeCloudOpacity(4)).toBeLessThan(globeCloudOpacity(2));
     expect(globeCloudOpacity(5.5)).toBe(0);
     expect(globeCloudOpacity(14)).toBe(0);
@@ -49,5 +50,39 @@ describe('globe cloud texture', () => {
     expect(pixels.data.length).toBe(pixels.width * pixels.height * 4);
     const mid = ((Math.floor(pixels.height / 2) * pixels.width) + Math.floor(pixels.width / 2)) * 4;
     expect(pixels.data[mid]).toBeGreaterThan(200);
+  });
+
+  it('shapes low cover toward clear sky', () => {
+    expect(shapeGlobeCloudCover(0)).toBe(0);
+    expect(shapeGlobeCloudCover(7)).toBe(0);
+    expect(shapeGlobeCloudCover(54)).toBeCloseTo(50, 5);
+    expect(shapeGlobeCloudCover(100)).toBe(100);
+  });
+});
+
+describe('live cloud cover image', () => {
+  it('points at the hosted equirectangular alpha texture', () => {
+    expect(liveCloudImageUrl()).toContain('clouds.matteason.co.uk');
+    expect(liveCloudImageUrl()).toContain('clouds-alpha.png');
+  });
+
+  it('maps image alpha to cover intensity', () => {
+    const pixels = globeCloudPixelsFromAlphaImage({
+      width: 2,
+      height: 2,
+      data: new Uint8ClampedArray([
+        255, 255, 255, 0,
+        255, 255, 255, 255,
+        255, 255, 255, 64,
+        255, 255, 255, 160,
+      ]),
+    });
+    expect(pixels.width).toBe(2);
+    expect(pixels.height).toBe(2);
+    expect(pixels.data[0]).toBe(0);
+    expect(pixels.data[4]).toBe(255);
+    expect(pixels.data[8]).toBeGreaterThan(0);
+    expect(pixels.data[12]).toBeGreaterThan(pixels.data[8]);
+    expect(pixels.data[12]).toBeLessThan(255);
   });
 });

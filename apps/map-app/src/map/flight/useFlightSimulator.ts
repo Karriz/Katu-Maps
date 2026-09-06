@@ -14,6 +14,7 @@ import {
   smoothFlightCameraRig,
   FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
   FLIGHT_MIN_CLEARANCE_METERS,
+  FLIGHT_SKID_CONTACT_OFFSET_METERS,
   type FlightCameraRig,
   type FlightInput,
   type FlightState,
@@ -199,7 +200,7 @@ export function setFlightControlSource(
 
 function telemetryForState(state: FlightState, terrainElevation: number): FlightTelemetry {
   return {
-    altitude: Math.max(0, state.altitude - terrainElevation),
+    altitude: Math.max(0, state.altitude - terrainElevation - FLIGHT_SKID_CONTACT_OFFSET_METERS),
     heading: (radiansToDegrees(state.heading) + 360) % 360,
     pitch: radiansToDegrees(state.pitch),
     roll: radiansToDegrees(state.roll),
@@ -355,7 +356,6 @@ export function useFlightSimulator({
     map.setMaxPitch(180);
     map.setMaxZoom(22);
     map.setCenterClampedToGround(false);
-    modelLayer.setPose(initialState);
 
     let frame: number | undefined;
     let previousTime = performance.now();
@@ -365,6 +365,7 @@ export function useFlightSimulator({
       initialState.longitude,
       initialState.latitude,
     ], 0);
+    modelLayer.setPose(initialState, lastTerrainElevation);
     // MapLibre's terrain-aware camera math (calculateCameraOptionsFromTo)
     // samples DEM elevation for the current position. While flying into
     // freshly-streamed terrain that sample can transiently fall back to sea
@@ -433,7 +434,7 @@ export function useFlightSimulator({
         );
         previousTime = now;
         flightStateRef.current = next;
-        modelLayer.setPose(next);
+        modelLayer.setPose(next, lastTerrainElevation);
 
         cameraRig = smoothFlightCameraRig(cameraRig, next, elapsedSeconds);
         const camera = flightCameraPose(cameraRig);

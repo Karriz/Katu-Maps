@@ -4,7 +4,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, LogOut, Minus, Plane, Plus } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Plane, Plus, X } from 'lucide-react';
 import type { FlightControl, FlightTelemetry } from './useFlightSimulator';
 
 function HoldControl({
@@ -80,29 +80,23 @@ export function FlightControls({
 
   return (
     <section className="flight-controls" aria-label="Flight simulator controls">
-      <header className="flight-hud">
-        <div className="flight-hud-title">
-          <Plane aria-hidden="true" />
-          <div><strong>Flight mode</strong><span>Realistic aerobatic dynamics</span></div>
-        </div>
-        <dl className="flight-telemetry">
-          <div><dt>ALT</dt><dd>{Math.round(telemetry.altitude)} m</dd></div>
-          <div><dt>SPD</dt><dd>{Math.round(telemetry.speed * 3.6)} km/h</dd></div>
-          <div><dt>THR</dt><dd>{Math.round(telemetry.throttle * 100)}%</dd></div>
-          <div><dt>HDG</dt><dd>{String(Math.round(telemetry.heading) % 360).padStart(3, '0')}°</dd></div>
-        </dl>
-        <button
-          ref={exitButtonRef}
-          className="flight-exit"
-          type="button"
-          aria-label="Exit flight"
-          title="Exit flight"
-          onClick={onExit}
-        >
-          <LogOut aria-hidden="true" />
-          <span>Exit flight</span>
-        </button>
-      </header>
+      <button
+        ref={exitButtonRef}
+        className="flight-exit"
+        type="button"
+        aria-label="Exit flight"
+        title="Exit flight"
+        onClick={onExit}
+      >
+        <X aria-hidden="true" />
+      </button>
+
+      <dl className="flight-telemetry" aria-label="Flight meters">
+        <div><dt>ALT</dt><dd>{Math.round(telemetry.altitude)} m</dd></div>
+        <div><dt>SPD</dt><dd>{Math.round(telemetry.speed * 3.6)} km/h</dd></div>
+        <div><dt>THR</dt><dd>{Math.round(telemetry.throttle * 100)}%</dd></div>
+        <div><dt>HDG</dt><dd>{String(Math.round(telemetry.heading) % 360).padStart(3, '0')}°</dd></div>
+      </dl>
 
       {telemetry.isStalling && (
         <div className="flight-stall-warning" role="alert" aria-live="assertive">
@@ -146,7 +140,7 @@ export function FlightControls({
         </div>
 
         <p className="flight-key-help">
-          <kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>R</kbd><kbd>F</kbd> throttle
+          <kbd>W</kbd><kbd>S</kbd> pitch · <kbd>A</kbd><kbd>D</kbd> roll/rudder · <kbd>R</kbd><kbd>F</kbd> throttle
         </p>
 
         <div className="flight-input-group flight-stick-control" aria-label="Pitch and roll controls">
@@ -171,4 +165,3 @@ export function FlightControls({
     </section>
   );
 }
-

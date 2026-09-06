@@ -3,21 +3,23 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 // Broad ecological regions provide an illustrated globe and a subdued local base.
 const BIOME_COLORS: ExpressionSpecification = [
   'match', ['get', 'biome'],
-  'Deserts & Xeric Shrublands', '#e8ce96',
-  'Tropical & Subtropical Moist Broadleaf Forests', '#8fb58a',
-  'Tropical & Subtropical Dry Broadleaf Forests', '#b3c18a',
-  'Tropical & Subtropical Coniferous Forests', '#a1ba8d',
-  'Temperate Broadleaf & Mixed Forests', '#aec795',
-  'Temperate Conifer Forests', '#9dbb99',
-  'Boreal Forests/Taiga', '#8eb57d',
-  'Tropical & Subtropical Grasslands, Savannas & Shrublands', '#cfce96',
-  'Temperate Grasslands, Savannas & Shrublands', '#cbd4a2',
-  'Flooded Grasslands & Savannas', '#abc9ae',
-  'Montane Grasslands & Shrublands', '#c9c8ae',
-  'Tundra', '#d5ddc9',
-  'Mediterranean Forests, Woodlands & Scrub', '#c5c59a',
-  'Mangroves', '#95b9a4',
-  '#b8d19f',
+  'Deserts & Xeric Shrublands', '#d0c3a5',
+  'Tropical & Subtropical Moist Broadleaf Forests', '#8aaf86',
+  'Tropical & Subtropical Dry Broadleaf Forests', '#aeb989',
+  'Tropical & Subtropical Coniferous Forests', '#9cb58c',
+  'Temperate Broadleaf & Mixed Forests', '#a5be91',
+  'Temperate Conifer Forests', '#9ab797',
+  'Boreal Forests/Taiga', '#9bb59a',
+  'Tropical & Subtropical Grasslands, Savannas & Shrublands', '#c4c395',
+  'Temperate Grasslands, Savannas & Shrublands', '#c0c99e',
+  'Flooded Grasslands & Savannas', '#a6c3a9',
+  'Montane Grasslands & Shrublands', '#c3c2aa',
+  // Vegetated arctic coasts (Norway / Siberia / Canada). Ice interiors use Ice Sheets.
+  'Tundra', '#b5c3b0',
+  'Ice Sheets', '#d8dde0',
+  'Mediterranean Forests, Woodlands & Scrub', '#bebe95',
+  'Mangroves', '#91b4a0',
+  '#adc796',
 ];
 
 export function globeBiomeColor(tint?: string, amount = 0): ExpressionSpecification {
