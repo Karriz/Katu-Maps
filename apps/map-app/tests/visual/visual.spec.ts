@@ -1048,7 +1048,21 @@ async function attachDiagnostics(page: Page, info: TestInfo, scenario: Scenario,
 async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, failed: boolean) {
   if (page.isClosed() || page.url() === 'about:blank') return;
   const screenshotPath = info.outputPath(`${scenario.name}${failed ? '-failure' : ''}.png`);
-  await page.screenshot({ path: screenshotPath, fullPage: false, animations: 'disabled', timeout: 30_000 });
+  // Capture with animations allowed. Playwright's animations: 'disabled' injects a
+  // 0s-duration stylesheet, after which Chromium Page.captureScreenshot can hang
+  // past the timeout once fonts have loaded. Visual tests already emulate
+  // prefers-reduced-motion, and scenarios such as flight keep CSS transitions
+  // (throttle fill) and infinite keyframes (stall warning) in motion.
+  try {
+    await page.evaluate(() => {
+      for (const animation of document.getAnimations()) {
+        try { animation.cancel(); } catch { /* ignore animations that cannot be cancelled */ }
+      }
+    });
+  } catch {
+    // The page may already be tearing down after a scenario failure.
+  }
+  await page.screenshot({ path: screenshotPath, fullPage: false, animations: 'allow', timeout: 30_000 });
   await info.attach('visual-screenshot', { path: screenshotPath, contentType: 'image/png' });
 }
 
