@@ -30,8 +30,8 @@ export type TerrainCameraFollowMap = {
   ) => number | null | undefined;
   isMoving: () => boolean;
   triggerRepaint: () => void;
-  on: (type: string, listener: (...args: never[]) => void) => unknown;
-  off: (type: string, listener: (...args: never[]) => void) => unknown;
+  on: (type: string, listener: (...args: any[]) => void) => unknown;
+  off: (type: string, listener: (...args: any[]) => void) => unknown;
 };
 
 type ElevationTransform = {
@@ -304,20 +304,20 @@ export function installTerrainCameraFollower(
     if (event.dataType === 'source' && event.sourceId === 'terrain') request();
   };
 
-  map.on('terrain', syncFromTerrain as (...args: never[]) => void);
-  map.on('moveend', handleMoveEnd as (...args: never[]) => void);
-  map.on('idle', handleIdle as (...args: never[]) => void);
-  map.on('sourcedata', handleSourceData as (...args: never[]) => void);
+  map.on('terrain', syncFromTerrain);
+  map.on('moveend', handleMoveEnd);
+  map.on('idle', handleIdle);
+  map.on('sourcedata', handleSourceData);
   syncFromTerrain();
 
   return {
     cancel,
     dispose: () => {
       stopFrame();
-      map.off('terrain', syncFromTerrain as (...args: never[]) => void);
-      map.off('moveend', handleMoveEnd as (...args: never[]) => void);
-      map.off('idle', handleIdle as (...args: never[]) => void);
-      map.off('sourcedata', handleSourceData as (...args: never[]) => void);
+      map.off('terrain', syncFromTerrain);
+      map.off('moveend', handleMoveEnd);
+      map.off('idle', handleIdle);
+      map.off('sourcedata', handleSourceData);
       if (following && !isPaused()) {
         following = false;
       }
