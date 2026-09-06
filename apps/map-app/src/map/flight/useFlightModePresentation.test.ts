@@ -23,7 +23,7 @@ describe('flight presentation', () => {
     expect(shouldHideLayerInFlight({ id: 'road-traffic-message-lines', type: 'line' } as any)).toBe(true);
     expect(shouldHideLayerInFlight({ id: 'global-cycling-routes', type: 'line' } as any)).toBe(true);
     expect(shouldHideLayerInFlight({ id: 'global-hiking-routes', type: 'line' } as any)).toBe(true);
-    expect(shouldHideLayerInFlight({ id: 'global-hiking-pois', type: 'symbol' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'day-night-shade', type: 'custom' } as any)).toBe(true);
     for (const id of [
       ...TRAFFIC_CAMERA_LAYER_IDS,
       ...CHARGING_STATION_LAYER_IDS,

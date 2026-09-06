@@ -27,6 +27,7 @@ type MapLayerVisibilityOptions = LayerRefs & {
   mapLoaded: boolean;
   layerToggles: MapLayerState;
   resolvedTheme: 'light' | 'dark';
+  dayNightEnabled: boolean;
   building3dLayerIds: string[];
   buildingShadowLayerIds: string[];
   buildingTransitionFootprintLayerId: string;
@@ -53,7 +54,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 }
 
 export function useMapLayerVisibility({
-  mapRef, mapLoaded, layerToggles, resolvedTheme,
+  mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
   treeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
@@ -105,10 +106,10 @@ export function useMapLayerVisibility({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-    treeLayerRef.current?.setTheme(resolvedTheme === 'dark');
-    transitVehicleLayerRef.current?.setTheme(resolvedTheme === 'dark');
-    if (flightActive || flightActiveRef.current) return;
+    treeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
-  }, [flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, transitVehicleLayerRef, treeLayerRef]);
+  }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, transitVehicleLayerRef, treeLayerRef]);
 }

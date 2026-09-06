@@ -12,6 +12,7 @@ import {
   CARTOON_SUN_AZIMUTH_DEGREES,
   CARTOON_SUN_COLOR,
   CARTOON_SUN_POLAR_DEGREES,
+  sunCartesian,
 } from './CartoonLighting';
 
 
@@ -27,8 +28,6 @@ const MAPPED_TREE_CLEARANCE_METERS = 9;
 const TRUNK_CANOPY_OVERLAP_METERS = 0.25;
 const TREE_GROWTH_DURATION_MS = 600;
 const MAX_GRID_CELLS_PER_POLYGON = 100_000;
-const SUN_AZIMUTH_RADIANS = CARTOON_SUN_AZIMUTH_DEGREES * Math.PI / 180;
-const SUN_POLAR_RADIANS = CARTOON_SUN_POLAR_DEGREES * Math.PI / 180;
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
@@ -688,6 +687,11 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowsEnabled = true;
   private growthAnimationActive = false;
   private darkMode = false;
+  private hemisphereLight?: THREE.HemisphereLight;
+  private sunlight?: THREE.DirectionalLight;
+  private shadowOffsetEast = 0;
+  private shadowOffsetNorth = 0;
+  private nightMix = 0;
 
   constructor(private readonly sources: TreeSourceConfig) {}
 
@@ -721,9 +725,38 @@ export class TreeModelLayer implements CustomLayerInterface {
   }
 
   setTheme(dark: boolean) {
-    if (this.darkMode === dark) return;
+    if (this.darkMode === dark && this.nightMix === 0) return;
     this.darkMode = dark;
-    if (this.map) this.updateTrees();
+    if (this.map) this.writeTreeMeshes(performance.now());
+    this.map?.triggerRepaint();
+  }
+
+  setDayNightLighting(lighting: {
+    azimuth: number;
+    polar: number;
+    nightMix: number;
+    shadowOffset: [number, number];
+  } | null) {
+    const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
+    const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
+    this.nightMix = lighting?.nightMix ?? 0;
+    this.shadowOffsetEast = lighting?.shadowOffset[0] ?? 0;
+    this.shadowOffsetNorth = lighting?.shadowOffset[1] ?? 0;
+    const position = sunCartesian(azimuth, polar);
+    this.sunlight?.position.set(position.x, position.y, position.z);
+    if (this.sunlight) {
+      this.sunlight.intensity = 0.55 + (1 - this.nightMix) * 1.85;
+      this.sunlight.color.set(this.nightMix > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR);
+    }
+    if (this.hemisphereLight) {
+      this.hemisphereLight.intensity = 0.55 + (1 - this.nightMix) * 1.25;
+    }
+    if (this.shadowMesh) {
+      const material = this.shadowMesh.material as THREE.MeshBasicMaterial;
+      material.opacity = treeShadowOpacity(this.map?.getZoom() ?? 14) * (1 - this.nightMix * 0.7);
+    }
+    if (this.displayedTrees.size > 0) this.writeTreeMeshes(performance.now());
+    this.map?.triggerRepaint();
   }
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
@@ -735,20 +768,16 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.scene.rotateX(Math.PI / 2);
     this.scene.scale.multiply(new THREE.Vector3(1, 1, -1));
 
-    this.scene.add(new THREE.HemisphereLight(
+    this.hemisphereLight = new THREE.HemisphereLight(
       CARTOON_AMBIENT_SKY_COLOR,
       CARTOON_AMBIENT_GROUND_COLOR,
       1.8,
-    ));
-    const sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.4);
-    const sunDistance = 140;
-    const sunHorizontalDistance = Math.sin(SUN_POLAR_RADIANS) * sunDistance;
-    sunlight.position.set(
-      Math.sin(SUN_AZIMUTH_RADIANS) * sunHorizontalDistance,
-      Math.cos(SUN_POLAR_RADIANS) * sunDistance,
-      Math.cos(SUN_AZIMUTH_RADIANS) * sunHorizontalDistance,
     );
-    this.scene.add(sunlight);
+    this.scene.add(this.hemisphereLight);
+    this.sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.4);
+    const sunPosition = sunCartesian(CARTOON_SUN_AZIMUTH_DEGREES, CARTOON_SUN_POLAR_DEGREES);
+    this.sunlight.position.set(sunPosition.x, sunPosition.y, sunPosition.z);
+    this.scene.add(this.sunlight);
 
     const trunkGeometry = new THREE.CylinderGeometry(0.28, 0.42, 1, 5, 1);
     trunkGeometry.translate(0, 0.5, 0);
@@ -963,6 +992,7 @@ export class TreeModelLayer implements CustomLayerInterface {
       const trunkHeight = (canopyBase + TRUNK_CANOPY_OVERLAP_METERS) * growth;
       const trunkWidth = tree.widthScale * (0.82 + tree.height / 60);
 
+      const night = Math.max(this.darkMode ? 1 : 0, this.nightMix);
       if (!isShrub) {
         this.transformHelper.position.set(east, up, north);
         this.transformHelper.rotation.set(0, tree.rotation, 0);
@@ -973,7 +1003,7 @@ export class TreeModelLayer implements CustomLayerInterface {
         );
         this.transformHelper.updateMatrix();
         trunkMesh.setMatrixAt(trunkCount, this.transformHelper.matrix);
-        this.color.setHSL(0.075, this.darkMode ? 0.24 : 0.38, (this.darkMode ? 0.07 : 0.27) + tree.colorVariation * (this.darkMode ? 0.015 : 0.06));
+        this.color.setHSL(0.075, 0.38 - night * 0.14, (0.27 - night * 0.2) + tree.colorVariation * (0.06 - night * 0.045));
         trunkMesh.setColorAt(trunkCount, this.color);
         trunkCount += 1;
       }
@@ -985,16 +1015,18 @@ export class TreeModelLayer implements CustomLayerInterface {
         * (isShrub ? 0.58 : isConifer ? 0.27 : 0.27)
         * tree.widthScale;
 
-      // A compact shadow under each crown acts as fake ambient occlusion. It
-      // is deliberately independent of tree height and sun direction so it
-      // matches the centered building-footprint treatment.
-      this.transformHelper.position.set(east, up + 0.06, north);
-      this.transformHelper.rotation.set(0, 0, 0);
-      this.transformHelper.scale.set(
-        canopyRadius * 1.18 * growth,
-        1,
-        canopyRadius * 1.18 * growth,
+      // Stretch away from the sun while keeping the trunk inside the shadow.
+      const shadowRadius = canopyRadius * 1.18 * growth;
+      const offsetLength = Math.hypot(this.shadowOffsetEast, this.shadowOffsetNorth);
+      const shadowLength = Math.min(offsetLength, shadowRadius * 1.5);
+      const offsetScale = offsetLength > 0 ? shadowLength / offsetLength : 0;
+      this.transformHelper.position.set(
+        east + this.shadowOffsetEast * offsetScale * 0.5,
+        up + 0.06,
+        north + this.shadowOffsetNorth * offsetScale * 0.5,
       );
+      this.transformHelper.rotation.set(0, Math.atan2(-this.shadowOffsetNorth, this.shadowOffsetEast), 0);
+      this.transformHelper.scale.set(shadowRadius + shadowLength * 0.5, 1, shadowRadius);
       this.transformHelper.updateMatrix();
       shadowMesh.setMatrixAt(shadowCount, this.transformHelper.matrix);
       shadowCount += 1;
@@ -1014,17 +1046,17 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       if (isConifer) {
         coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
-        this.color.setHSL(0.31, this.darkMode ? 0.32 : 0.54, (this.darkMode ? 0.065 : 0.26) + tree.colorVariation * (this.darkMode ? 0.02 : 0.08));
+        this.color.setHSL(0.31, 0.54 - night * 0.22, (0.26 - night * 0.195) + tree.colorVariation * (0.08 - night * 0.06));
         coniferMesh.setColorAt(coniferCount, this.color);
         coniferCount += 1;
       } else if (isShrub) {
         shrubMesh.setMatrixAt(shrubCount, this.transformHelper.matrix);
-        this.color.setHSL(0.24 + tree.colorVariation * 0.04, this.darkMode ? 0.29 : 0.47, (this.darkMode ? 0.08 : 0.34) + tree.colorVariation * (this.darkMode ? 0.02 : 0.1));
+        this.color.setHSL(0.24 + tree.colorVariation * 0.04, 0.47 - night * 0.18, (0.34 - night * 0.26) + tree.colorVariation * (0.1 - night * 0.08));
         shrubMesh.setColorAt(shrubCount, this.color);
         shrubCount += 1;
       } else {
         broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
-        this.color.setHSL(0.29 + tree.colorVariation * 0.04, this.darkMode ? 0.32 : 0.53, (this.darkMode ? 0.09 : 0.36) + tree.colorVariation * (this.darkMode ? 0.02 : 0.1));
+        this.color.setHSL(0.29 + tree.colorVariation * 0.04, 0.53 - night * 0.21, (0.36 - night * 0.27) + tree.colorVariation * (0.1 - night * 0.08));
         broadleafMesh.setColorAt(broadleafCount, this.color);
         broadleafCount += 1;
       }

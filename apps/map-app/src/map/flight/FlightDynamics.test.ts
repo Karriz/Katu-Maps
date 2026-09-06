@@ -178,18 +178,56 @@ describe('flight dynamics', () => {
     expect(bankedCamera.roll).toBeCloseTo(45, 8);
   });
 
-  it('raises the chase camera during climbs to keep terrain in view', () => {
-    const climbingState = {
-      ...createInitialFlightState([0, 0], 0, 0),
-      pitch: Math.PI / 9,
+  it('keeps the same body-relative chase framing when pitching up or down', () => {
+    const level = createInitialFlightState([0, 0], 0, 0);
+    const up = { ...level, pitch: Math.PI / 6 };
+    const down = { ...level, pitch: -Math.PI / 6 };
+    const levelCamera = flightCameraPose(level);
+    const upCamera = flightCameraPose(up);
+    const downCamera = flightCameraPose(down);
+
+    const chaseRadius = Math.hypot(58, 22);
+    const metersPerDegree = (Math.PI / 180) * 6_378_137;
+    const distanceFromAircraft = (camera: ReturnType<typeof flightCameraPose>, state: typeof level) => {
+      const north = (camera.from[1] - state.latitude) * metersPerDegree;
+      const east = (camera.from[0] - state.longitude) * metersPerDegree;
+      const upOffset = camera.fromAltitude - state.altitude;
+      return Math.hypot(east, north, upOffset);
     };
-    const climbing = flightCameraPose(climbingState);
-    expect(climbing.target[1]).toBeGreaterThan(climbingState.latitude);
-    expect(climbing.targetAltitude).toBeCloseTo(
-      climbingState.altitude + 8 * Math.sin(climbingState.pitch),
-      8,
-    );
-    expect(climbing.fromAltitude).toBeGreaterThan(climbing.targetAltitude);
+
+    // Chase sits at a fixed body offset, so world distance to the aircraft
+    // does not change with pitch the way the old climb-only path did.
+    expect(distanceFromAircraft(upCamera, up)).toBeCloseTo(chaseRadius, 6);
+    expect(distanceFromAircraft(downCamera, down)).toBeCloseTo(chaseRadius, 6);
+    expect(distanceFromAircraft(levelCamera, level)).toBeCloseTo(chaseRadius, 6);
+
+    const mapPitch = (camera: ReturnType<typeof flightCameraPose>) => {
+      const vertical = camera.targetAltitude - camera.fromAltitude;
+      const north = (camera.target[1] - camera.from[1]) * metersPerDegree;
+      const east = (camera.target[0] - camera.from[0]) * metersPerDegree;
+      return 90 + (Math.atan2(vertical, Math.hypot(east, north)) * 180) / Math.PI;
+    };
+    // Pitch-up and pitch-down are symmetric about the level chase pitch.
+    expect(mapPitch(upCamera) + mapPitch(downCamera))
+      .toBeCloseTo(2 * mapPitch(levelCamera), 5);
+
+    expect(upCamera.fromAltitude).toBeLessThan(upCamera.targetAltitude);
+    expect(downCamera.fromAltitude).toBeGreaterThan(downCamera.targetAltitude);
+  });
+
+  it('looks above the horizon in a steep climb while staying behind the nose', () => {
+    const steep = {
+      ...createInitialFlightState([0, 0], 0, 0),
+      pitch: Math.PI / 3,
+    };
+    const camera = flightCameraPose(steep);
+    expect(camera.from[1]).toBeLessThan(steep.latitude);
+    expect(camera.target[1]).toBeGreaterThan(steep.latitude);
+    expect(camera.fromAltitude).toBeLessThan(camera.targetAltitude);
+    const vertical = camera.targetAltitude - camera.fromAltitude;
+    const north = (camera.target[1] - camera.from[1]) * (Math.PI / 180) * 6_378_137;
+    const mapPitchDegrees = 90 + (Math.atan2(vertical, Math.abs(north)) * 180) / Math.PI;
+    expect(mapPitchDegrees).toBeGreaterThan(90);
   });
 
   it('smooths the chase camera toward the aircraft heading, including wraps', () => {

@@ -28,6 +28,8 @@ import {
   Moon,
   Sun,
   CloudSun,
+  Cloud,
+  SunMoon,
   Monitor,
   CircleHelp,
   type LucideIcon,
@@ -49,7 +51,9 @@ export type MapLayerKey =
   | 'chargingStations'
   | 'roadWeather'
   | 'roadTraffic'
-  | 'weather';
+  | 'weather'
+  | 'clouds'
+  | 'dayNight';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -80,6 +84,7 @@ const layerGroups: LayerGroup[] = [
     layers: [
       { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
       { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
+      { key: 'dayNight', label: 'Day & night', description: 'Sunlight, night shade & city lights', icon: SunMoon },
     ],
   },
   {
@@ -112,6 +117,7 @@ const layerGroups: LayerGroup[] = [
     id: 'weather',
     label: 'Weather',
     layers: [
+      { key: 'clouds', label: 'Clouds', description: 'Global model cloud cover', icon: Cloud },
       { key: 'weather', label: 'Weather', description: 'Forecast for the viewed location', icon: CloudSun },
     ],
   },

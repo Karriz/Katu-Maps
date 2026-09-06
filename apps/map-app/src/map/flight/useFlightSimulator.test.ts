@@ -21,6 +21,18 @@ describe('flight control sources', () => {
 });
 
 describe('flight sky', () => {
+  it('uses solar elevation over the theme when the time slider is enabled', () => {
+    const day = flightSkyForTheme('dark', 40);
+    const sunset = flightSkyForTheme('light', 1.5);
+    const night = flightSkyForTheme('light', -20);
+    expect(day['sky-color']).toBe('#7ec8ea');
+    expect(night['sky-color']).toBe('#071525');
+    expect(sunset['sky-color']).not.toBe(day['sky-color']);
+    expect(sunset['horizon-color']).not.toBe(night['horizon-color']);
+    expect(flightSkyForTheme('dark', 1.5)).toEqual(sunset);
+    expect(sunset['atmosphere-blend']).toBe(0);
+  });
+
   it('replaces the night sky instead of keeping dark-mode colors in light mode', () => {
     const night = flightSkyForTheme('dark');
     const day = flightSkyForTheme('light');

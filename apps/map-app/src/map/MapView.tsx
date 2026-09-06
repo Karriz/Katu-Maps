@@ -123,6 +123,8 @@ import { useViewedWeather } from './useViewedWeather';
 import { WeatherChip } from './WeatherChip';
 import { WeatherPanel } from './WeatherPanel';
 import { WeatherTimeSlider, weatherSliderTimes } from './WeatherTimeSlider';
+import { DayNightTimeSlider } from './DayNightTimeSlider';
+import { useDayNightCycle } from './useDayNightCycle';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, isMeaningfullyBetterLocation, locationZoomForAccuracy, markerFeatureCollection, normalizedLocationAccuracy } from './LocationMarkers';
 import { installPersistedMapViewFlush, loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
@@ -161,7 +163,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-contact-shadow',
 ];
 const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
-const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider';
+const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider, .day-night-time-slider';
 
 function closeRangeCameraOffset(): [number, number] {
   if (window.innerWidth > 760) return [0, 0];
@@ -886,7 +888,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       chargingStations: false,
       roadWeather: false,
       roadTraffic: false,
-      weather: true,
+      weather: false,
+      clouds: false,
+      dayNight: false,
     };
     try {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
@@ -926,10 +930,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   roadWeatherEnabledRef.current = layerToggles.roadWeather;
   const roadTrafficEnabledRef = useRef(layerToggles.roadTraffic);
   roadTrafficEnabledRef.current = layerToggles.roadTraffic;
+  const [dayNightUtcMs, setDayNightUtcMs] = useState(() => Date.now());
+  const [dayNightFollowNow, setDayNightFollowNow] = useState(true);
   const flight = useFlightSimulator({
     mapRef,
     mapLoaded,
     activeRef: flightActiveRef,
+    dayNightUtcMs: layerToggles.dayNight ? dayNightUtcMs : undefined,
     terrainSourceRef,
     terrainEnabledRef,
     resolvedTheme,
@@ -939,6 +946,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     mapLoaded,
     layerToggles,
     resolvedTheme,
+    dayNightEnabled: layerToggles.dayNight,
     treeLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
@@ -966,6 +974,23 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     enabled: layerToggles.weather,
     flightActive: flight.active,
   });
+  const dayNight = useDayNightCycle({
+    mapRef,
+    mapLoaded,
+    enabled: layerToggles.dayNight,
+    cloudsEnabled: layerToggles.clouds,
+    utcMs: dayNightUtcMs,
+    flightActive: flight.active,
+    resolvedTheme,
+    treeLayerRef,
+    transitVehicleLayerRef,
+  });
+  useEffect(() => {
+    if (!layerToggles.dayNight || !dayNightFollowNow) return;
+    setDayNightUtcMs(Date.now());
+    const timer = window.setInterval(() => setDayNightUtcMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [dayNightFollowNow, layerToggles.dayNight]);
   useFlightModePresentation({
     mapRef,
     mapLoaded,
@@ -3636,10 +3661,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               }
             }}
             layers={layerToggles}
-            onLayerChange={(key, enabled) => setLayerToggles((current) => ({
-              ...current,
-              [key]: enabled,
-            }))}
+            onLayerChange={(key, enabled) => {
+              setLayerToggles((current) => ({
+                ...current,
+                [key]: enabled,
+              }));
+              if (key === 'dayNight' && enabled) {
+                setDayNightFollowNow(true);
+                setDayNightUtcMs(Date.now());
+              }
+            }}
             is3dMode={is3dMode}
             onToggle3dMode={() => setLayerToggles((current) => {
               const enabled = !(current.terrain && current.buildings && current.trees && current.transitModels);
@@ -3710,6 +3741,23 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               onVariableChange={viewedWeather.setOverlayVariable}
               onTimeChange={viewedWeather.setOverlayTime}
               onClose={viewedWeather.closeOverlay}
+            />
+          )}
+          {!flight.active && layerToggles.dayNight && !routeOpen && !layersOpen && (
+            <DayNightTimeSlider
+              appearance={dayNight.appearance}
+              timeZone={dayNight.timeZone}
+              followNow={dayNightFollowNow}
+              weatherOverlayOpen={viewedWeather.overlayOpen && viewedWeather.viewUsable}
+              onTimeChange={(utcMs) => {
+                setDayNightFollowNow(false);
+                setDayNightUtcMs(utcMs);
+              }}
+              onFollowNow={() => {
+                setDayNightFollowNow(true);
+                setDayNightUtcMs(Date.now());
+              }}
+              onClose={() => setLayerToggles((current) => ({ ...current, dayNight: false }))}
             />
           )}
           {routeContextMenu && (

@@ -19,3 +19,18 @@ export const CARTOON_MAP_LIGHT_POSITION: [number, number, number] = [
 // A small map-anchored offset gives buildings direction while the separate
 // contact line keeps their bases visually attached to the ground.
 export const CARTOON_BUILDING_SHADOW_TRANSLATE: [number, number] = [1.4, -1.4];
+
+export function sunCartesian(
+  azimuthDegrees: number,
+  polarDegrees: number,
+  distance = 140,
+) {
+  const azimuth = azimuthDegrees * Math.PI / 180;
+  const polar = polarDegrees * Math.PI / 180;
+  const horizontal = Math.sin(polar) * distance;
+  return {
+    x: Math.sin(azimuth) * horizontal,
+    y: Math.cos(polar) * distance,
+    z: Math.cos(azimuth) * horizontal,
+  };
+}

@@ -8,6 +8,7 @@ import {
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
+import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
@@ -587,15 +588,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
   name: 'Global OpenFreeMap with Mapterhorn terrain',
   projection: { type: 'globe' },
   sky: {
-    // Keep just enough atmosphere to describe the globe's rim. Stronger
-    // blending bleaches the daylight hemisphere at world zooms.
-    'atmosphere-blend': [
-      'interpolate', ['linear'], ['zoom'],
-      0, 0.32,
-      2.5, 0.22,
-      5, 0.06,
-      7, 0,
-    ],
+    // The custom globe layer owns the atmospheric rim in every map mode.
+    'atmosphere-blend': 0,
   },
   light: {
     // The Three.js model layers derive their sun from these same shared
@@ -607,6 +601,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
   },
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
   sources: {
+    'globe-biomes': {
+      type: 'geojson',
+      data: `${import.meta.env.BASE_URL}maps/globe-biomes.geojson`,
+      maxzoom: 6,
+      tolerance: 1,
+      attribution: '<a href="https://doi.org/10.1093/biosci/bix014">RESOLVE Ecoregions 2017</a> · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>',
+    },
     [OPENFREEMAP_SOURCE_ID]: {
       type: 'vector',
       url: 'https://tiles.openfreemap.org/planet',
@@ -640,6 +641,18 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           3, '#b8d19f',
           6, MAP_COLORS.ground,
         ],
+      },
+    },
+    {
+      id: 'global-globe-biomes',
+      type: 'fill',
+      source: 'globe-biomes',
+      paint: {
+        'fill-color': globeBiomeColor(),
+        'fill-antialias': false,
+        // Keep a quiet regional base in unmapped areas at close zooms.
+        // Detailed OSM land cover and land use paint over it below.
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0.9, 4, 0.9, 6, 0.75, 10, 0.65],
       },
     },
     {
@@ -2752,7 +2765,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
 /** Recolors the already-loaded style in place. This intentionally avoids
  * setStyle(): custom Three.js layers, sources, camera state, and selections
  * therefore survive an appearance change. */
-export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
+export function applyMapTheme(
+  map: MapLibreMap,
+  theme: 'light' | 'dark',
+  options?: { refresh?: boolean },
+) {
   const originalPaints = mapThemePaints.get(map) ?? new Map<string, Record<string, unknown>>();
   if (!mapThemePaints.has(map)) {
     (map.getStyle().layers ?? []).forEach((layer) => {
@@ -2767,7 +2784,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     if (map.getLayer('global-aerodrome-labels')) map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon');
     if (map.getLayer('location-poi-icons')) map.setPaintProperty('location-poi-icons', 'icon-opacity', 1);
     if (map.getLayer('location-poi-labels')) map.setPaintProperty('location-poi-labels', 'icon-opacity', 1);
-    refreshMapAfterTheme(map);
+    if (options?.refresh !== false) refreshMapAfterTheme(map);
     return;
   }
   const dark = true;
@@ -2786,6 +2803,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
   };
   set('global-background', 'background-color', colors.background);
+  set('global-globe-biomes', 'fill-color', globeBiomeColor(colors.land, 0.8));
   ['global-landcover', 'global-landuse', 'global-landuse-overlays'].forEach((id) => set(id, 'fill-color', colors.land));
   ['global-protected-areas', 'global-parks', 'global-landcover-parks'].forEach((id) => set(id, 'fill-color', colors.park));
   set('global-aeroway-areas', 'fill-color', '#29465a');
@@ -2816,7 +2834,7 @@ export function applyMapTheme(map: MapLibreMap, theme: 'light' | 'dark') {
     map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon-dark');
   }
   ['location-poi-icons', 'location-poi-labels'].forEach((id) => set(id, 'icon-opacity', 0.78));
-  refreshMapAfterTheme(map);
+  if (options?.refresh !== false) refreshMapAfterTheme(map);
 }
 
 const mapThemePaints = new WeakMap<MapLibreMap, Map<string, Record<string, unknown>>>();
