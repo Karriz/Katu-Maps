@@ -295,12 +295,12 @@ export function dayNightAppearance(date: Date, latitude: number, longitude: numb
   const localPalette = paletteForElevation(sun.elevation);
   const styleMix = localStyleMix(zoom);
   const palette = mixPalette(DAY_PALETTE, localPalette, styleMix);
-  const polar = sun.elevation > 0
+  const night = nightFactor(sun.elevation);
+  const polar = sun.elevation >= 0
     ? Math.min(88, 90 - sun.elevation)
-    : 88;
+    : 88 - night * 30;
   const azimuth = sun.elevation > 0 ? sun.azimuth : wrapAzimuth(sun.azimuth + 180);
   const shadeOpacity = globeShadeOpacity(zoom);
-  const night = nightFactor(sun.elevation);
   const shadowTranslate = buildingShadowTranslate(azimuth, polar);
   const shadowScale = 0.55 + (1 - night) * 0.45;
   return {
