@@ -455,6 +455,15 @@ describe('clustered bridge decks', () => {
     expect(shouldMeshClusterLines([arm, branch, spur], [], surfaces)).toBe(false);
   });
 
+  it('does not inflate radial footbridges into one triangular deck', () => {
+    const arms: BridgeDrawable[] = [
+      [{ east: 0, north: 0 }, { east: 35, north: 0 }],
+      [{ east: 0, north: 0 }, { east: -17.5, north: 30.3 }],
+      [{ east: 0, north: 0 }, { east: -17.5, north: -30.3 }],
+    ].map((plan) => ({ ...path, plan }));
+    expect(clusterBridgeDrawables(arms)).toHaveLength(3);
+  });
+
   it('extends overhanging lines as stubs instead of replacing the deck', () => {
     const stubs = lineOverhangStubs({
       ...path,
@@ -716,6 +725,53 @@ describe('pierStations', () => {
 });
 
 describe('BridgeModelLayer', () => {
+  const terrainViewMap = () => ({
+    getBounds: () => ({
+      getWest: () => 23.75,
+      getSouth: () => 61.49,
+      getEast: () => 23.77,
+      getNorth: () => 61.51,
+    }),
+    getZoom: () => 15,
+    getPitch: () => 40,
+    getTerrain: () => ({}),
+    triggerRepaint: vi.fn(),
+  });
+
+  it('keeps the 2D bridge visible while the first terrain sample is pending', () => {
+    const layer = new BridgeModelLayer();
+    const map = terrainViewMap();
+    const setDrapedVisible = vi.fn();
+    (layer as any).map = map;
+    (layer as any).sampleVisibleBridges = vi.fn(() => ({ bridges: [{}], pending: true }));
+    (layer as any).setDrapedVisible = setDrapedVisible;
+    (layer as any).writeMeshes = vi.fn();
+
+    layer.updateBridges();
+
+    expect((layer as any).sampledBridges).toEqual([]);
+    expect(setDrapedVisible).toHaveBeenCalledWith(true);
+    expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+  });
+
+  it('retains the last complete bridge mesh while terrain resampling is pending', () => {
+    const layer = new BridgeModelLayer();
+    const map = terrainViewMap();
+    const previous = { complete: true };
+    const setDrapedVisible = vi.fn();
+    (layer as any).map = map;
+    (layer as any).sampledBridges = [previous];
+    (layer as any).sampleVisibleBridges = vi.fn(() => ({ bridges: [{}], pending: true }));
+    (layer as any).setDrapedVisible = setDrapedVisible;
+    (layer as any).writeMeshes = vi.fn();
+
+    layer.updateBridges();
+
+    expect((layer as any).sampledBridges).toEqual([previous]);
+    expect(setDrapedVisible).not.toHaveBeenCalled();
+    expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+  });
+
   it('does not render when terrain is off', () => {
     const layer = new BridgeModelLayer();
     const map = {

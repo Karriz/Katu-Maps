@@ -1028,7 +1028,7 @@ function compactPathJunctionSurface(drawables: BridgeDrawable[]): DeckSurface | 
   if (hullArea < MIN_POLYGON_MESH_AREA_METRES) return null;
   if (hullArea > INTERCHANGE_DECK_AREA_METRES) return null;
   if (!deckAreaAllowed(hull)) return null;
-  if (partArea > 0 && hullArea > partArea * 5 && hullArea - partArea > 1_800) return null;
+  if (partArea > 0 && (hullArea > partArea * 5 || hullArea - partArea > 1_800)) return null;
   return { outer: hull, holes: [] };
 }
 
@@ -1968,14 +1968,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     const sampled = this.sampleVisibleBridges(map, view);
-    if (sampled.pending && sampled.bridges.length === 0 && this.sampledBridges.length === 0) {
+    if (sampled.pending) {
       this.pendingElevation = true;
-      this.setDrapedVisible(true);
+      if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
       map.triggerRepaint();
       return;
     }
-    this.pendingElevation = sampled.pending;
-    if (!sampled.pending || sampled.bridges.length > 0) this.sampledBridges = sampled.bridges;
+    this.pendingElevation = false;
+    this.sampledBridges = sampled.bridges;
 
     this.sceneOrigin = map.getCenter();
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
@@ -2262,10 +2262,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     const coordinates = meshPoints.map((point) => planToLngLat(point, origin));
-    const sampledGround = this.sampleGround(map, coordinates, terrainZoomBucket);
-    if (sampledGround.ground.length < 3) return null;
-    const ground = sampledGround.ground;
-    if (sampledGround.pending) this.pendingElevation = true;
+    const ground = this.sampleGround(map, coordinates, terrainZoomBucket);
+    if (ground === null) {
+      this.pendingElevation = true;
+      return null;
+    }
+    if (ground.length < 3) return null;
 
     const startSamples = meshT.flatMap((t, index) => (t <= 0.08 ? [ground[index]] : []));
     const endSamples = meshT.flatMap((t, index) => (t >= 0.92 ? [ground[index]] : []));
@@ -2310,18 +2312,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
   private sampleGround(map: MaplibreMap, coordinates: Array<[number, number]>, terrainZoomBucket: number) {
     const ground: number[] = [];
-    let pending = false;
-    const fallback = this.sceneOriginElevation;
     for (const [longitude, latitude] of coordinates) {
       const elevation = this.sampleElevation(map, longitude, latitude, terrainZoomBucket);
-      if (elevation == null) {
-        pending = true;
-        ground.push(fallback);
-        continue;
-      }
+      if (elevation == null) return null;
       ground.push(elevation);
     }
-    return { ground, pending };
+    return ground;
   }
 
   private toLocal(longitude: number, latitude: number, elevation: number): LocalPoint {
