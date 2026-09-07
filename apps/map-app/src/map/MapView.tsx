@@ -156,9 +156,13 @@ import {
 } from './GlobalMapStyle';
 import {
   GRASS_PATTERN_ID,
+  PITCH_PATTERN_ID,
   SAND_PATTERN_ID,
+  WOOD_PATTERN_ID,
   createGrassPattern,
+  createPitchPattern,
   createSandPattern,
+  createWoodPattern,
   streetSurfacePatternLayers,
 } from './StreetSurfacePatterns';
 
@@ -641,8 +645,8 @@ function searchResultIconExpression() {
 
 function createWaterPattern(size: number) {
   const data = new Uint8ClampedArray(size * size * 4);
-  const shadow = [92, 171, 194];
-  const highlight = [157, 216, 227];
+      const shadow = [68, 148, 176];
+      const highlight = [186, 232, 240];
   const tau = Math.PI * 2;
 
   for (let y = 0; y < size; y += 1) {
@@ -651,9 +655,9 @@ function createWaterPattern(size: number) {
       const vertical = (y / size) * tau;
       // Integer-frequency waves meet at every edge, making the generated
       // image seamless when MapLibre repeats it across water polygons.
-      const broad = Math.sin(horizontal + vertical * 2) * 0.29;
-      const crossing = Math.cos(horizontal * 2 - vertical) * 0.14;
-      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.07;
+      const broad = Math.sin(horizontal + vertical * 2) * 0.42;
+      const crossing = Math.cos(horizontal * 2 - vertical) * 0.22;
+      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.12;
       const shade = Math.max(0, Math.min(1, 0.5 + broad + crossing + detail));
       const offset = (y * size + x) * 4;
 
@@ -682,9 +686,9 @@ function globalWaterPatternLayer(): FillLayerSpecification {
         'interpolate', ['linear'], ['zoom'],
         6, 0,
         7, 0.025,
-        10, 0.08,
-        14, 0.12,
-        18, 0.22,
+        10, 0.1,
+        14, 0.2,
+        18, 0.36,
       ],
     },
   };
@@ -2366,12 +2370,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       lastUserInteractionRef.current = Date.now();
     };
     map.once('load', async () => {
-      // MapLibre uses image pixelRatio when determining pattern spacing. A
-      // 512px image at 0.5 therefore repeats every 1024 logical pixels,
-      // providing broad variation at every zoom without a custom shader.
-      map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
-      map.addImage(GRASS_PATTERN_ID, createGrassPattern(), { pixelRatio: 0.5 });
-      map.addImage(SAND_PATTERN_ID, createSandPattern(), { pixelRatio: 0.5 });
+      // MapLibre uses image pixelRatio when determining pattern spacing.
+      // A 256–512px image at 1 repeats at a miniature-city scale in close views.
+      map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 1 });
+      map.addImage(GRASS_PATTERN_ID, createGrassPattern(), { pixelRatio: 1 });
+      map.addImage(SAND_PATTERN_ID, createSandPattern(), { pixelRatio: 1 });
+      map.addImage(WOOD_PATTERN_ID, createWoodPattern(), { pixelRatio: 1 });
+      map.addImage(PITCH_PATTERN_ID, createPitchPattern(), { pixelRatio: 1 });
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
       streetSurfacePatternLayers().forEach((layer) => {
         map.addLayer(layer, 'global-water-edge-shade');

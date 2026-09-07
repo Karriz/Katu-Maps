@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   createGrassPattern,
+  createPitchPattern,
   createSandPattern,
+  createWoodPattern,
   STREET_SURFACE_PATTERN_LAYER_IDS,
   streetSurfacePatternLayers,
 } from './StreetSurfacePatterns';
@@ -20,8 +22,12 @@ describe('street surface patterns', () => {
     expect(pixel(grass, 8, 8)).not.toEqual(pixel(grass, 40, 28));
   });
 
-  it('keeps sand variation restrained', () => {
+  it('keeps sand variation restrained and pitch stripes distinct', () => {
     expect(pixel(createSandPattern(64), 4, 4)[0]).toBeGreaterThan(200);
+    const pitch = createPitchPattern(64);
+    expect(pixel(pitch, 4, 4)).not.toEqual(pixel(pitch, 4, 20));
+    const wood = createWoodPattern(64);
+    expect(pixel(wood, 8, 8)).not.toEqual(pixel(wood, 40, 28));
   });
 
   it('fades grass and sand overlays in only at close zoom', () => {

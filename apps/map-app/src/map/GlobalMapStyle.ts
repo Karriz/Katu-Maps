@@ -1010,7 +1010,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           18, ['literal', [2.5, -2.5]],
         ],
         'fill-translate-anchor': 'map',
-        'fill-opacity': 0.1,
+        'fill-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          6, 0.08,
+          12, 0.12,
+          16, 0.16,
+          18, 0.2,
+        ],
       },
     },
     {
@@ -1032,7 +1038,25 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['==', ['geometry-type'], 'Polygon'],
         ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]],
       ],
-      paint: { 'fill-color': '#eee9dc', 'fill-opacity': 0.92 },
+      paint: { 'fill-color': '#eadfcb', 'fill-opacity': 0.94 },
+    },
+    {
+      id: 'global-plaza-edges',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 13,
+      filter: [
+        'all',
+        ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]],
+        ['!', ['==', ['get', 'brunnel'], 'tunnel']],
+      ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#d2ccc0',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.4, 16, 0.65, 18, 0.85],
+        'line-opacity': 0.5,
+      },
     },
     {
       id: 'global-pier-area-shadow',
@@ -1486,6 +1510,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'all',
         ['==', ['geometry-type'], 'LineString'],
         ['in', ['get', 'class'], ['literal', ['path', 'track']]],
+        ['!', ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]]],
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
@@ -1563,7 +1588,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: [
         'all',
         ['==', ['get', 'class'], 'path'],
-        ['in', ['get', 'subclass'], ['literal', ['footway', 'pedestrian', 'path', 'platform', 'corridor', 'bridleway']]],
+        ['in', ['get', 'subclass'], ['literal', ['footway', 'path', 'corridor', 'bridleway']]],
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
@@ -3091,6 +3116,7 @@ export function applyMapTheme(
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
+  set('global-plaza-edges', 'line-color', colors.roadCasing);
   ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
   ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
