@@ -8,6 +8,7 @@ import {
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
 } from './CartoonLighting';
+import { mixHex } from './DayNightAppearance';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
 import { HIKING_POI_CLASSES } from './PoiClasses';
@@ -245,6 +246,9 @@ const BRIDGE_OVERLAY_LAYER_IDS = new Set([
   'global-railway-bridge-shadow',
   'global-railway-bridge-casing',
   'global-railway-bridges',
+  'global-railway-bridge-sleepers',
+  'global-railway-bridge-rail-left',
+  'global-railway-bridge-rail-right',
 ]);
 
 function orderBridgeLayers(layers: StyleSpecification['layers']): StyleSpecification['layers'] {
@@ -354,6 +358,63 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
 
 const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
 const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
+
+function buildingColorVariants(base: string, alt: string) {
+  return [
+    base,
+    mixHex(base, alt, 0.45),
+    mixHex(base, '#ece8df', 0.35),
+    alt,
+    mixHex(base, '#ffffff', 0.28),
+  ] as const;
+}
+
+function buildingIdVariantIndex(variantCount: number): ExpressionSpecification {
+  return [
+    '%',
+    ['floor', ['/', ['abs', ['to-number', ['id'], 0]], 10]],
+    variantCount,
+  ] as ExpressionSpecification;
+}
+
+function matchColorVariants(variants: readonly string[]): ExpressionSpecification {
+  return [
+    'match',
+    buildingIdVariantIndex(variants.length),
+    ...variants.slice(0, -1).flatMap((color, index) => [index, color]),
+    variants[variants.length - 1],
+  ] as ExpressionSpecification;
+}
+
+export function buildingBodyColorExpression(
+  base: string = GLOBAL_BUILDING_COLOR,
+  alt: string = MAP_COLORS.buildingAlt,
+): ExpressionSpecification {
+  const variants = buildingColorVariants(base, alt);
+  return [
+    'case',
+    ['has', 'colour'],
+    ['to-color', ['get', 'colour'], base],
+    matchColorVariants(variants),
+  ] as ExpressionSpecification;
+}
+
+export function buildingGroundColorExpression(
+  base: string = GLOBAL_BUILDING_COLOR,
+  band: string = GLOBAL_BUILDING_GROUND_COLOR,
+): ExpressionSpecification {
+  const variants = buildingColorVariants(base, band).map((color) => mixHex(color, band, 0.62));
+  return [
+    'case',
+    ['has', 'colour'],
+    [
+      'interpolate', ['linear'], 0.32,
+      0, ['to-color', ['get', 'colour'], base],
+      1, band,
+    ],
+    matchColorVariants(variants),
+  ] as ExpressionSpecification;
+}
 
 const WATER_COLOR: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
@@ -477,7 +538,7 @@ export function aerowayWidthExpression(latitude: number): ExpressionSpecificatio
   ] as ExpressionSpecification;
 }
 
-function pathWidthExpression(
+export function pathWidthExpression(
   widthMetres: number | ExpressionSpecification,
   latitude: number,
   casing = false,
@@ -493,6 +554,94 @@ function pathWidthExpression(
     16, ['*', renderedWidthMetres, pixelsPerMetre(16, latitude)],
     18, ['*', renderedWidthMetres, pixelsPerMetre(18, latitude) * 0.82],
   ] as ExpressionSpecification;
+}
+
+export function lineOffsetExpression(
+  offsetMetres: number,
+  latitude: number,
+): ExpressionSpecification {
+  return [
+    'interpolate', ['exponential', 2], ['zoom'],
+    14, offsetMetres * pixelsPerMetre(14, latitude) * 0.45,
+    16, offsetMetres * pixelsPerMetre(16, latitude),
+    18, offsetMetres * pixelsPerMetre(18, latitude) * 0.82,
+  ] as ExpressionSpecification;
+}
+
+const ESTIMATED_RAIL_BED_WIDTH_METRES: ExpressionSpecification = [
+  'match', ['get', 'class'],
+  'transit', 3.4,
+  4,
+] as ExpressionSpecification;
+
+const RAIL_GAUGE_OFFSET_METRES = 0.72;
+
+const PATH_WIDTH_BY_LAYER: Array<{
+  id: string;
+  width: number | ExpressionSpecification;
+  casing?: boolean;
+}> = [
+  {
+    id: 'global-path-casing',
+    width: ['case', ['==', ['get', 'class'], 'track'], 3, 1.8] as ExpressionSpecification,
+    casing: true,
+  },
+  { id: 'global-cycleway-casing', width: 2.5, casing: true },
+  { id: 'global-cycleways', width: 2.5 },
+  { id: 'global-footways', width: 1.8 },
+  { id: 'global-tracks', width: 3 },
+  { id: 'global-other-paths', width: 1.5 },
+  { id: 'global-steps', width: 1.5 },
+  { id: 'global-paths-under-construction', width: 1.6 },
+  { id: 'global-path-bridge-shadow', width: BRIDGE_PATH_WIDTH_METRES, casing: true },
+  { id: 'global-path-bridge-edge', width: BRIDGE_PATH_WIDTH_METRES, casing: true },
+];
+
+function setLinePaint(
+  map: MapLibreMap,
+  layerId: string,
+  property: 'line-width' | 'line-offset',
+  value: ExpressionSpecification,
+) {
+  if (map.getLayer(layerId)) map.setPaintProperty(layerId, property, value);
+}
+
+export function applyLatitudeScaledLineWidths(map: MapLibreMap, latitude: number) {
+  GLOBAL_ROAD_CASING_LAYER_IDS.forEach((layerId) => {
+    setLinePaint(map, layerId, 'line-width', roadWidthExpression(latitude, true));
+  });
+  GLOBAL_ROAD_LAYER_IDS.forEach((layerId) => {
+    setLinePaint(map, layerId, 'line-width', roadWidthExpression(latitude));
+  });
+  setLinePaint(map, 'global-aeroway-lines', 'line-width', aerowayWidthExpression(latitude));
+  setLinePaint(map, 'global-aeroway-runways', 'line-width', aerowayWidthExpression(latitude));
+  PATH_WIDTH_BY_LAYER.forEach(({ id, width, casing }) => {
+    setLinePaint(map, id, 'line-width', pathWidthExpression(width, latitude, casing));
+  });
+  const railBedWidth = pathWidthExpression(ESTIMATED_RAIL_BED_WIDTH_METRES, latitude);
+  const railSleeperWidth = pathWidthExpression(
+    ['+', ESTIMATED_RAIL_BED_WIDTH_METRES, 0.5] as ExpressionSpecification,
+    latitude,
+  );
+  const railStrokeWidth = pathWidthExpression(0.18, latitude);
+  [
+    'global-railway-bed',
+    'global-railway-bridge-casing',
+  ].forEach((layerId) => setLinePaint(map, layerId, 'line-width', railBedWidth));
+  [
+    'global-railway-sleepers',
+    'global-railway-bridge-sleepers',
+  ].forEach((layerId) => setLinePaint(map, layerId, 'line-width', railSleeperWidth));
+  [
+    'global-railway-rail-left',
+    'global-railway-rail-right',
+    'global-railway-bridge-rail-left',
+    'global-railway-bridge-rail-right',
+  ].forEach((layerId) => setLinePaint(map, layerId, 'line-width', railStrokeWidth));
+  setLinePaint(map, 'global-railway-rail-left', 'line-offset', lineOffsetExpression(-RAIL_GAUGE_OFFSET_METRES, latitude));
+  setLinePaint(map, 'global-railway-rail-right', 'line-offset', lineOffsetExpression(RAIL_GAUGE_OFFSET_METRES, latitude));
+  setLinePaint(map, 'global-railway-bridge-rail-left', 'line-offset', lineOffsetExpression(-RAIL_GAUGE_OFFSET_METRES, latitude));
+  setLinePaint(map, 'global-railway-bridge-rail-right', 'line-offset', lineOffsetExpression(RAIL_GAUGE_OFFSET_METRES, latitude));
 }
 
 // OpenMapTiles/OpenFreeMap put leisure=park in landcover (usually
@@ -1413,7 +1562,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'unpaved', '#a99578',
           '#a99c86',
         ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.65, 18, 3],
+        'line-width': pathWidthExpression(3, 61.4981),
         'line-dasharray': [2.5, 1.4],
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.56],
       },
@@ -1473,7 +1622,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': '#968a78',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1, 18, 4],
+        'line-width': pathWidthExpression(1.5, 61.4981),
         'line-dasharray': [0.45, 0.55],
       },
     },
@@ -1491,7 +1640,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#a99c86',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.5],
+        'line-width': pathWidthExpression(1.5, 61.4981),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.5],
       },
     },
@@ -1504,7 +1653,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: ['==', ['get', 'class'], 'path_construction'],
       paint: {
         'line-color': '#b5a997',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.55, 18, 2.5],
+        'line-width': pathWidthExpression(1.6, 61.4981),
         'line-dasharray': [1.5, 1.5],
         'line-opacity': 0.46,
       },
@@ -1606,7 +1755,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'transit', '#c0c5c2',
           '#c0c5c2',
         ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 14, 2.4, 18, 8],
+        'line-width': pathWidthExpression(ESTIMATED_RAIL_BED_WIDTH_METRES, 61.4981),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 8.5, 0, 10, 0.82],
       },
     },
@@ -1624,7 +1773,10 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': '#e7ebe7',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 15, 2.4, 18, 9],
+        'line-width': pathWidthExpression(
+          ['+', ESTIMATED_RAIL_BED_WIDTH_METRES, 0.5] as ExpressionSpecification,
+          61.4981,
+        ),
         'line-dasharray': [0.18, 1.15],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1660,6 +1812,56 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'interpolate', ['linear'], ['zoom'],
           8.5, 0,
           10, ['match', ['get', 'class'], 'transit', 0.9, 0.86],
+          16.2, ['match', ['get', 'class'], 'transit', 0.9, 0.86],
+          17.4, 0,
+        ],
+      },
+    },
+    {
+      id: 'global-railway-rail-left',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 15,
+      filter: [
+        'all',
+        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+        ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
+      ],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#6f797b',
+        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-offset': lineOffsetExpression(-RAIL_GAUGE_OFFSET_METRES, 61.4981),
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          16.4, 0.88,
+          18, 0.96,
+        ],
+      },
+    },
+    {
+      id: 'global-railway-rail-right',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 15,
+      filter: [
+        'all',
+        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+        ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
+      ],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#6f797b',
+        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-offset': lineOffsetExpression(RAIL_GAUGE_OFFSET_METRES, 61.4981),
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          16.4, 0.88,
+          18, 0.96,
         ],
       },
     },
@@ -1697,7 +1899,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': '#87918d',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 18, 6],
+        'line-width': pathWidthExpression(ESTIMATED_RAIL_BED_WIDTH_METRES, 61.4981),
         'line-opacity': 0.84,
       },
     },
@@ -1722,6 +1924,87 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'interpolate', ['linear'], ['zoom'],
           9, 0.8,
           18, ['match', ['get', 'class'], 'transit', 2.6, 2.2],
+        ],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          9, 1,
+          16.2, 1,
+          17.4, 0,
+        ],
+      },
+    },
+    {
+      id: 'global-railway-bridge-sleepers',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 15,
+      filter: [
+        'all',
+        ['==', ['get', 'class'], 'rail'],
+        ['==', ['get', 'brunnel'], 'bridge'],
+      ],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#dfe4e0',
+        'line-width': pathWidthExpression(
+          ['+', ESTIMATED_RAIL_BED_WIDTH_METRES, 0.5] as ExpressionSpecification,
+          61.4981,
+        ),
+        'line-dasharray': [0.18, 1.15],
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          16.5, 0.52,
+          18, 0.66,
+        ],
+      },
+    },
+    {
+      id: 'global-railway-bridge-rail-left',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 15,
+      filter: [
+        'all',
+        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+        ['==', ['get', 'brunnel'], 'bridge'],
+      ],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#5f696b',
+        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-offset': lineOffsetExpression(-RAIL_GAUGE_OFFSET_METRES, 61.4981),
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          16.4, 0.9,
+          18, 0.97,
+        ],
+      },
+    },
+    {
+      id: 'global-railway-bridge-rail-right',
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'transportation',
+      minzoom: 15,
+      filter: [
+        'all',
+        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
+        ['==', ['get', 'brunnel'], 'bridge'],
+      ],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#5f696b',
+        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-offset': lineOffsetExpression(RAIL_GAUGE_OFFSET_METRES, 61.4981),
+        'line-opacity': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          16.4, 0.9,
+          18, 0.97,
         ],
       },
     },
@@ -1782,7 +2065,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 12,
       maxzoom: 13.75,
       paint: {
-        'fill-color': GLOBAL_BUILDING_COLOR,
+        'fill-color': buildingBodyColorExpression(),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0.78,
@@ -1803,7 +2086,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // This is the persistent flat representation used when 3D buildings
         // are disabled. It gains a little definition at close zooms without
         // trying to imitate extrusion lighting.
-        'fill-color': '#fffef9',
+        'fill-color': buildingBodyColorExpression(),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           12, 0,
@@ -1896,7 +2179,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
       ],
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_GROUND_COLOR,
+        'fill-extrusion-color': buildingGroundColorExpression(),
         // Keep the real height present while the layer fades in. The opacity
         // transition below handles the low-zoom handoff from footprints;
         // animating height here makes pitched, distant buildings look flat.
@@ -1919,7 +2202,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 13,
       filter: GLOBAL_BUILDING_3D_FILTER,
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_COLOR,
+        'fill-extrusion-color': buildingBodyColorExpression(),
         'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,
         // Multi-storey buildings begin above the darker ground floor. Short
         // buildings remain a single extrusion from their normal base.
@@ -2842,10 +3125,13 @@ export function applyMapTheme(
   ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
   ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
-  ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
-  ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', colors.building); set(id, 'fill-outline-color', colors.boundary); });
-  set('global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
-  set('global-buildings', 'fill-extrusion-color', colors.building);
+  ['global-tracks', 'global-railways', 'global-overview-railways', 'global-railway-rail-left', 'global-railway-rail-right', 'global-railway-bridge-rail-left', 'global-railway-bridge-rail-right'].forEach((id) => set(id, 'line-color', colors.rail));
+  ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
+    set(id, 'fill-color', buildingBodyColorExpression(colors.building, colors.buildingBand));
+    set(id, 'fill-outline-color', colors.boundary);
+  });
+  set('global-building-ground-storeys', 'fill-extrusion-color', buildingGroundColorExpression(colors.building, colors.buildingBand));
+  set('global-buildings', 'fill-extrusion-color', buildingBodyColorExpression(colors.building, colors.buildingBand));
   set('global-building-ground-storeys', 'fill-extrusion-vertical-gradient', false);
   set('global-buildings', 'fill-extrusion-vertical-gradient', false);
   ['global-building-shadow', 'global-building-contact-shadow'].forEach((id) => set(id, 'line-color', colors.shadow));

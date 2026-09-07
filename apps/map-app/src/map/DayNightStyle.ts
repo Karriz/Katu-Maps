@@ -6,7 +6,7 @@ import {
   CARTOON_SUN_COLOR,
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
-import { GLOBAL_MAP_STYLE, applyMapTheme } from './GlobalMapStyle';
+import { GLOBAL_MAP_STYLE, applyMapTheme, buildingBodyColorExpression, buildingGroundColorExpression } from './GlobalMapStyle';
 import type { DayNightAppearance, DayNightPalette } from './DayNightAppearance';
 import { localStyleMix, nightFactor } from './DayNightAppearance';
 
@@ -65,15 +65,15 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) 
     'global-path-casing', 'global-cycleway-casing', 'global-footways',
     'global-steps', 'global-other-paths',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.path));
-  ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => {
+  ['global-tracks', 'global-railways', 'global-overview-railways', 'global-railway-rail-left', 'global-railway-rail-right', 'global-railway-bridge-rail-left', 'global-railway-bridge-rail-right'].forEach((id) => {
     setPaint(map, id, 'line-color', colors.rail);
   });
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
-    setPaint(map, id, 'fill-color', colors.building);
+    setPaint(map, id, 'fill-color', buildingBodyColorExpression(colors.building, colors.buildingBand));
     setPaint(map, id, 'fill-outline-color', colors.boundary);
   });
-  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
-  setPaint(map, 'global-buildings', 'fill-extrusion-color', colors.building);
+  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', buildingGroundColorExpression(colors.building, colors.buildingBand));
+  setPaint(map, 'global-buildings', 'fill-extrusion-color', buildingBodyColorExpression(colors.building, colors.buildingBand));
   const verticalGradient = night < 0.55;
   setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-vertical-gradient', verticalGradient);
   setPaint(map, 'global-buildings', 'fill-extrusion-vertical-gradient', verticalGradient);

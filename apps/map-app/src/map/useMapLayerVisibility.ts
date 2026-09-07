@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
 import type { TreeModelLayer } from './TreeModelLayer';
+import type { BuildingFacadeLayer } from './BuildingFacadeLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { MapLayerState } from './MapControls';
@@ -13,6 +14,7 @@ import { ROAD_TRAFFIC_LAYER_IDS } from './RoadTrafficLayer';
 
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
+  buildingFacadeLayerRef: RefObject<BuildingFacadeLayer | null>;
   transitRouteOverlayRef: RefObject<TransitRouteOverlay | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   treeRefreshRef: RefObject<(() => void) | null>;
@@ -55,7 +57,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
+  treeLayerRef, buildingFacadeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
@@ -82,6 +84,8 @@ export function useMapLayerVisibility({
     setVisibility([buildingTransitionFootprintLayerId], layerToggles.buildings);
     setVisibility([building2dLayerId], !layerToggles.buildings);
     setVisibility(buildingShadowLayerIds, layerToggles.buildings);
+    buildingFacadeLayerRef.current?.setEnabled(layerToggles.buildings);
+    setVisibility(['building-facades-3d'], layerToggles.buildings);
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees);
     setVisibility(cyclingLayerIds, layerToggles.cycling);
     setVisibility(hikingLayerIds, layerToggles.hiking);
@@ -101,7 +105,7 @@ export function useMapLayerVisibility({
     if (!layerToggles.chargingStations) onChargingStationsDisabled();
     if (!layerToggles.roadWeather) onRoadWeatherDisabled();
     if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
-  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
+  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, buildingFacadeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
 
   useEffect(() => {
     const map = mapRef.current;

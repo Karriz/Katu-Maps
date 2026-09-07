@@ -7,6 +7,7 @@ import {
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
+  pathWidthExpression,
 } from './GlobalMapStyle';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
@@ -220,5 +221,41 @@ describe('global map overlay styles', () => {
     expect(layersById.get('global-locality-labels')?.minzoom).toBe(11);
     expect(filterOf('global-place-labels')).toContain('city');
     expect(filterOf('global-place-labels')).not.toContain('village');
+  });
+
+  it('keeps supplied building colours and a deterministic ivory fallback', () => {
+    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
+    const colorOf = (layerId: string) => JSON.stringify(
+      (layersById.get(layerId)?.paint as Record<string, unknown> | undefined)?.['fill-extrusion-color']
+      ?? (layersById.get(layerId)?.paint as Record<string, unknown> | undefined)?.['fill-color'],
+    );
+
+    expect(colorOf('global-buildings')).toContain('colour');
+    expect(colorOf('global-building-ground-storeys')).toContain('colour');
+    expect(colorOf('global-buildings')).toContain('fffdf8');
+    expect(colorOf('global-building-ground-storeys')).toContain('dedad1');
+  });
+
+  it('draws dual rail strokes over a physical track bed at close zoom', () => {
+    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
+    const layerIds = GLOBAL_MAP_STYLE.layers.map((layer) => layer.id);
+
+    expect(layersById.get('global-railway-rail-left')?.minzoom).toBe(15);
+    expect(layersById.get('global-railway-rail-right')?.minzoom).toBe(15);
+    expect(layerIds.indexOf('global-railway-rail-left')).toBeGreaterThan(layerIds.indexOf('global-railway-bed'));
+    expect(layerIds.indexOf('global-railways')).toBeGreaterThan(layerIds.indexOf('global-railway-sleepers'));
+    const railsPaint = layersById.get('global-railways')?.paint as Record<string, unknown> | undefined;
+    expect(JSON.stringify(railsPaint?.['line-opacity'])).toContain('17.4');
+  });
+
+  it('uses physical widths for close-up footpaths, cycleways and tracks', () => {
+    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
+    const widthOf = (layerId: string) => (
+      layersById.get(layerId)?.paint as Record<string, unknown> | undefined
+    )?.['line-width'];
+
+    expect(widthOf('global-footways')).toEqual(pathWidthExpression(1.8, 61.4981));
+    expect(widthOf('global-cycleways')).toEqual(pathWidthExpression(2.5, 61.4981));
+    expect(widthOf('global-tracks')).toEqual(pathWidthExpression(3, 61.4981));
   });
 });
