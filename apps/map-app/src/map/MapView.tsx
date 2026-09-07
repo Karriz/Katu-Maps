@@ -149,14 +149,19 @@ import {
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
-  GLOBAL_ROAD_CASING_LAYER_IDS,
-  GLOBAL_ROAD_LAYER_IDS,
   OPENFREEMAP_SOURCE_ID,
-  aerowayWidthExpression,
-  roadWidthExpression,
+  applyLatitudeScaledLineWidths,
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
+import {
+  GRASS_PATTERN_ID,
+  SAND_PATTERN_ID,
+  createGrassPattern,
+  createSandPattern,
+  streetSurfacePatternLayers,
+} from './StreetSurfacePatterns';
+
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
@@ -679,7 +684,7 @@ function globalWaterPatternLayer(): FillLayerSpecification {
         7, 0.025,
         10, 0.08,
         14, 0.12,
-        18, 0.17,
+        18, 0.22,
       ],
     },
   };
@@ -2026,22 +2031,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       const latitude = map.getCenter().lat;
       if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
       roadWidthLatitude = latitude;
-      GLOBAL_ROAD_CASING_LAYER_IDS.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude, true));
-        }
-      });
-      GLOBAL_ROAD_LAYER_IDS.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude));
-        }
-      });
-      if (map.getLayer('global-aeroway-lines')) {
-        map.setPaintProperty('global-aeroway-lines', 'line-width', aerowayWidthExpression(latitude));
-      }
-      if (map.getLayer('global-aeroway-runways')) {
-        map.setPaintProperty('global-aeroway-runways', 'line-width', aerowayWidthExpression(latitude));
-      }
+      applyLatitudeScaledLineWidths(map, latitude);
     };
     const updateGlobalLabelDensity = () => {
       if (!map.isStyleLoaded()) return;
@@ -2380,7 +2370,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
       // providing broad variation at every zoom without a custom shader.
       map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
+      map.addImage(GRASS_PATTERN_ID, createGrassPattern(), { pixelRatio: 0.5 });
+      map.addImage(SAND_PATTERN_ID, createSandPattern(), { pixelRatio: 0.5 });
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
+      streetSurfacePatternLayers().forEach((layer) => {
+        map.addLayer(layer, 'global-water-edge-shade');
+      });
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
       try {
