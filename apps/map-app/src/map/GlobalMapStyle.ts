@@ -1,5 +1,6 @@
 import type {
   ExpressionSpecification,
+  FilterSpecification,
   StyleSpecification,
 } from 'maplibre-gl';
 import {
@@ -263,6 +264,115 @@ function orderBridgeLayers(layers: StyleSpecification['layers']): StyleSpecifica
     ...bridgeOverlayLayers,
     ...layersWithoutBridgeGeometry.slice(railwayIndex + 1),
   ];
+}
+
+const ROAD_CENTER_MARKINGS_LAYER_ID = 'global-road-center-markings';
+
+const ROAD_CENTER_MARKING_FILTER: FilterSpecification = [
+  'all',
+  ROAD_FILTER,
+  ['!', ['==', ['get', 'brunnel'], 'tunnel']],
+  ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
+  ['!', ['in', ['get', 'surface'], ['literal', ['unpaved', 'gravel', 'dirt', 'ground', 'sand']]]],
+];
+
+const ROAD_CENTER_MARKING_FILTER_WITHOUT_BRIDGES: FilterSpecification = [
+  'all',
+  ROAD_CENTER_MARKING_FILTER,
+  ['!', ['==', ['get', 'brunnel'], 'bridge']],
+];
+
+const NOT_BRIDGE: FilterSpecification = ['!', ['==', ['get', 'brunnel'], 'bridge']];
+
+function excludingBridges(filter: FilterSpecification): FilterSpecification {
+  return ['all', filter, NOT_BRIDGE];
+}
+
+const PATH_CASING_FILTER: FilterSpecification = [
+  'all',
+  ['==', ['geometry-type'], 'LineString'],
+  ['in', ['get', 'class'], ['literal', ['path', 'track']]],
+];
+const CYCLEWAY_FILTER: FilterSpecification = [
+  'all',
+  ['==', ['get', 'class'], 'path'],
+  ['==', ['get', 'subclass'], 'cycleway'],
+];
+const TRACK_FILTER: FilterSpecification = ['==', ['get', 'class'], 'track'];
+const FOOTWAY_FILTER: FilterSpecification = [
+  'all',
+  ['==', ['get', 'class'], 'path'],
+  ['in', ['get', 'subclass'], ['literal', ['footway', 'pedestrian', 'path', 'platform', 'corridor', 'bridleway']]],
+];
+const STEPS_FILTER: FilterSpecification = [
+  'all',
+  ['==', ['get', 'class'], 'path'],
+  ['==', ['get', 'subclass'], 'steps'],
+];
+const OTHER_PATH_FILTER: FilterSpecification = [
+  'all',
+  ['==', ['get', 'class'], 'path'],
+  ['!', ['in', ['get', 'subclass'], ['literal', ['cycleway', 'footway', 'pedestrian', 'path', 'platform', 'corridor', 'bridleway', 'steps']]]],
+];
+const PATH_CONSTRUCTION_FILTER: FilterSpecification = ['==', ['get', 'class'], 'path_construction'];
+
+const SURFACE_PATH_LAYER_FILTERS: Array<[string, FilterSpecification]> = [
+  ['global-path-casing', PATH_CASING_FILTER],
+  ['global-cycleway-casing', CYCLEWAY_FILTER],
+  ['global-tracks', TRACK_FILTER],
+  ['global-cycleways', CYCLEWAY_FILTER],
+  ['global-footways', FOOTWAY_FILTER],
+  ['global-steps', STEPS_FILTER],
+  ['global-other-paths', OTHER_PATH_FILTER],
+  ['global-paths-under-construction', PATH_CONSTRUCTION_FILTER],
+];
+
+/** Draped bridge strokes replaced by the 3D deck layer. */
+export const GLOBAL_ELEVATED_BRIDGE_LINE_LAYER_IDS = [
+  'global-road-bridge-shadow',
+  'global-road-bridge-casing',
+  'global-road-bridges',
+  'global-railway-bridge-shadow',
+  'global-railway-bridge-casing',
+  'global-railway-bridges',
+  'global-path-bridge-shadow',
+  'global-path-bridge-edge',
+] as const;
+
+const GLOBAL_BRIDGE_DECK_LAYER_IDS = [
+  'global-bridge-deck-shadow',
+  'global-bridge-decks',
+  'global-bridge-deck-edge',
+] as const;
+
+type BridgeStyleMap = {
+  getLayer: (layerId: string) => unknown;
+  setLayoutProperty: (layerId: string, property: 'visibility', value: 'visible' | 'none') => unknown;
+  setFilter: (layerId: string, filter: FilterSpecification | null) => unknown;
+};
+
+/** Hide draped bridge paint while the 3D deck layer is showing those features. */
+export function setDrapedElevatedBridgeLayersVisible(map: BridgeStyleMap, drapedVisible: boolean) {
+  GLOBAL_ELEVATED_BRIDGE_LINE_LAYER_IDS.forEach((layerId) => {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', drapedVisible ? 'visible' : 'none');
+    }
+  });
+  GLOBAL_BRIDGE_DECK_LAYER_IDS.forEach((layerId) => {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', drapedVisible ? 'visible' : 'none');
+    }
+  });
+  SURFACE_PATH_LAYER_FILTERS.forEach(([layerId, filter]) => {
+    if (!map.getLayer(layerId)) return;
+    map.setFilter(layerId, drapedVisible ? filter : excludingBridges(filter));
+  });
+  if (map.getLayer(ROAD_CENTER_MARKINGS_LAYER_ID)) {
+    map.setFilter(
+      ROAD_CENTER_MARKINGS_LAYER_ID,
+      drapedVisible ? ROAD_CENTER_MARKING_FILTER : ROAD_CENTER_MARKING_FILTER_WITHOUT_BRIDGES,
+    );
+  }
 }
 
 export const GLOBAL_ROAD_CASING_LAYER_IDS = [
@@ -1294,18 +1404,12 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
-      id: 'global-road-center-markings',
+      id: ROAD_CENTER_MARKINGS_LAYER_ID,
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 15,
-      filter: [
-        'all',
-        ROAD_FILTER,
-        ['!', ['==', ['get', 'brunnel'], 'tunnel']],
-        ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
-        ['!', ['in', ['get', 'surface'], ['literal', ['unpaved', 'gravel', 'dirt', 'ground', 'sand']]]],
-      ],
+      filter: ROAD_CENTER_MARKING_FILTER,
       layout: {
         'line-cap': 'butt',
         'line-join': 'round',
@@ -1364,11 +1468,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 12.5,
-      filter: [
-        'all',
-        ['==', ['geometry-type'], 'LineString'],
-        ['in', ['get', 'class'], ['literal', ['path', 'track']]],
-      ],
+      filter: PATH_CASING_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#d8d4ca',
@@ -1386,11 +1486,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 10.5,
-      filter: [
-        'all',
-        ['==', ['get', 'class'], 'path'],
-        ['==', ['get', 'subclass'], 'cycleway'],
-      ],
+      filter: CYCLEWAY_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#f3f0e9',
@@ -1404,7 +1500,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 12,
-      filter: ['==', ['get', 'class'], 'track'],
+      filter: TRACK_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': [
@@ -1424,11 +1520,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 10.5,
-      filter: [
-        'all',
-        ['==', ['get', 'class'], 'path'],
-        ['==', ['get', 'subclass'], 'cycleway'],
-      ],
+      filter: CYCLEWAY_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#b99a91',
@@ -1442,11 +1534,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 12.5,
-      filter: [
-        'all',
-        ['==', ['get', 'class'], 'path'],
-        ['in', ['get', 'subclass'], ['literal', ['footway', 'pedestrian', 'path', 'platform', 'corridor', 'bridleway']]],
-      ],
+      filter: FOOTWAY_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': [
@@ -1465,11 +1553,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 13,
-      filter: [
-        'all',
-        ['==', ['get', 'class'], 'path'],
-        ['==', ['get', 'subclass'], 'steps'],
-      ],
+      filter: STEPS_FILTER,
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': '#968a78',
@@ -1483,11 +1567,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 12,
-      filter: [
-        'all',
-        ['==', ['get', 'class'], 'path'],
-        ['!', ['in', ['get', 'subclass'], ['literal', ['cycleway', 'footway', 'pedestrian', 'path', 'platform', 'corridor', 'bridleway', 'steps']]]],
-      ],
+      filter: OTHER_PATH_FILTER,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#a99c86',
@@ -1501,7 +1581,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'transportation',
       minzoom: 12,
-      filter: ['==', ['get', 'class'], 'path_construction'],
+      filter: PATH_CONSTRUCTION_FILTER,
       paint: {
         'line-color': '#b5a997',
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.55, 18, 2.5],

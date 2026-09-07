@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
 import type { TreeModelLayer } from './TreeModelLayer';
+import type { BridgeModelLayer } from './BridgeModelLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { MapLayerState } from './MapControls';
@@ -13,6 +14,7 @@ import { ROAD_TRAFFIC_LAYER_IDS } from './RoadTrafficLayer';
 
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
+  bridgeLayerRef: RefObject<BridgeModelLayer | null>;
   transitRouteOverlayRef: RefObject<TransitRouteOverlay | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   treeRefreshRef: RefObject<(() => void) | null>;
@@ -55,7 +57,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
+  treeLayerRef, bridgeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
@@ -107,9 +109,10 @@ export function useMapLayerVisibility({
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     treeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    bridgeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
-  }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, transitVehicleLayerRef, treeLayerRef]);
+  }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, bridgeLayerRef, transitVehicleLayerRef, treeLayerRef]);
 }
