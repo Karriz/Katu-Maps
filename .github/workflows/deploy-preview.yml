@@ -1,0 +1,117 @@
+name: Deploy preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Same-repository branch, commit SHA, or PR number (must include preview support)'
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+# Shared with tag deployment: never compose against a release being replaced.
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: actions/github-script@v8
+        id: target
+        env:
+          TARGET: ${{ inputs.target }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const target = process.env.TARGET.trim();
+            let sha;
+            if (/^[0-9]+$/.test(target)) {
+              const {data: pr} = await github.rest.pulls.get({owner, repo, pull_number: Number(target)});
+              if (pr.head.repo?.full_name !== `${owner}/${repo}`) throw new Error('Only same-repository PRs are supported');
+              sha = pr.head.sha;
+            } else {
+              const {data} = await github.rest.repos.getCommit({owner, repo, ref: target});
+              sha = data.sha;
+            }
+            core.setOutput('sha', sha);
+
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Check preview support
+        run: test -f apps/map-app/src/lib/Deployment.ts
+      - name: Install and build without deployment credentials or provider secrets
+        working-directory: apps/map-app
+        env:
+          VITE_APP_PREVIEW: 'true'
+          VITE_PREVIEW_LABEL: Preview · ${{ inputs.target }} · ${{ needs.resolve.outputs.sha }}
+          VITE_APP_VERSION: preview-${{ needs.resolve.outputs.sha }}
+          PREVIEW_BASE: /${{ github.event.repository.name }}/preview/
+        run: |
+          npm ci
+          npm run build -- --base="$PREVIEW_BASE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-build
+          path: apps/map-app/dist
+
+  deploy:
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.base_url }}/preview/
+    steps:
+      # Trusted workflow revision, never the selected PR's publishing scripts.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/configure-pages@v5
+        id: pages
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-build
+          path: preview-build
+      - name: Retrieve the exact currently deployed production release
+        env:
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          curl --fail --silent --show-error --location "$SITE_URL/deployment.json?run=$GITHUB_RUN_ID" -o deployed.json
+          TAG=$(jq -er '.tag | select(test("^v[0-9][A-Za-z0-9._-]*$"))' deployed.json)
+          ASSET=$(jq -er '.asset | select(test("^production-[0-9]+-[0-9]+\\.tar\\.gz$"))' deployed.json)
+          mkdir archive
+          gh release download "$TAG" --pattern "$ASSET" --dir archive
+          python scripts/pages-site.py "archive/$ASSET" preview-build site deployed.json
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - uses: actions/deploy-pages@v4
+      - name: Preview link
+        env:
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+          PREVIEW_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          printf 'Preview: %s/preview/\n\nCommit: %s\n' "$SITE_URL" "$PREVIEW_SHA" >> "$GITHUB_STEP_SUMMARY"

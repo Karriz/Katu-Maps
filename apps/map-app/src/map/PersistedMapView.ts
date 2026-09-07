@@ -1,4 +1,5 @@
-export const MAP_VIEW_STORAGE_KEY = 'maps-viewport-v1';
+import { deploymentStorageKey } from '../lib/Deployment';
+export const MAP_VIEW_STORAGE_KEY = deploymentStorageKey('maps-viewport-v1');
 
 export type PersistedMapView = {
   center: [number, number];

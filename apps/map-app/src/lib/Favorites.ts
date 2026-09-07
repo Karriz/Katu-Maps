@@ -1,3 +1,4 @@
+import { deploymentStorageKey } from './Deployment';
 export type FavoriteKind = 'home' | 'work' | 'favorite';
 export type FavoriteEntityType = 'place' | 'transit-stop' | 'position';
 
@@ -24,7 +25,7 @@ export type Favorite = {
   createdAt: number;
 };
 
-export const FAVORITES_STORAGE_KEY = 'maps-favorites-v1';
+export const FAVORITES_STORAGE_KEY = deploymentStorageKey('maps-favorites-v1');
 
 export function isValidFavoriteCoordinates(coordinates: unknown): coordinates is [number, number] {
   return Array.isArray(coordinates)

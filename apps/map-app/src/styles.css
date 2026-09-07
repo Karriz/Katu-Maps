@@ -1361,3 +1361,5 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .transit-journey-detail .transit-transfer-marker { margin: 6px 0 8px 1px; }
   .transit-departures-panel.mobile-bottom-sheet[data-snap='collapsed'] .transit-panel-header { overflow: hidden; }
 }
+
+.preview-build-label { position: fixed; inset: 0 0 auto; height: 26px; z-index: 10000; background: #17344b; color: white; font: 12px/26px system-ui; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 8px; }
