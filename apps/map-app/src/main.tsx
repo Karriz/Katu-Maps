@@ -1,3 +1,4 @@
+import { isPreview } from './lib/Deployment';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { setWorkerUrl } from 'maplibre-gl';
@@ -17,7 +18,7 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+if ('serviceWorker' in navigator && import.meta.env.PROD && !isPreview) {
   window.addEventListener('load', () => {
     void navigator.serviceWorker.register('./sw.js');
   });

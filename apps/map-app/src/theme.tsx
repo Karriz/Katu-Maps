@@ -1,8 +1,9 @@
+import { deploymentStorageKey } from './lib/Deployment';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
-export const THEME_STORAGE_KEY = 'katu-maps-theme';
+export const THEME_STORAGE_KEY = deploymentStorageKey('katu-maps-theme');
 
 export function resolveThemePreference(preference: ThemePreference, system: ResolvedTheme): ResolvedTheme {
   return preference === 'system' ? system : preference;

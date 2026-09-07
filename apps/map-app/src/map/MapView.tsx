@@ -1,3 +1,4 @@
+import { deploymentStorageKey } from '../lib/Deployment';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import {
@@ -163,7 +164,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-shadow',
   'global-building-contact-shadow',
 ];
-const LAYER_STORAGE_KEY = 'tampere-map-layer-options';
+const LAYER_STORAGE_KEY = deploymentStorageKey('tampere-map-layer-options');
 const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider, .day-night-time-slider';
 
 function closeRangeCameraOffset(): [number, number] {

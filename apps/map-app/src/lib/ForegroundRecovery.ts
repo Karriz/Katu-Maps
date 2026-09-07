@@ -1,7 +1,8 @@
+import { deploymentStorageKey } from './Deployment';
 export const BACKGROUND_RECOVERY_DELAY_MS = 15_000;
 export const AUTOMATIC_RELOAD_GUARD_MS = 60_000;
 
-const LAST_AUTOMATIC_RELOAD_KEY = 'map:last-automatic-reload';
+const LAST_AUTOMATIC_RELOAD_KEY = deploymentStorageKey('map:last-automatic-reload');
 
 type EventSource = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
 type VisibilitySource = EventSource & Pick<Document, 'hidden'>;

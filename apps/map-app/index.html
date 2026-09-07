@@ -4,7 +4,7 @@
     <script>
       (function () {
         try {
-          var saved = localStorage.getItem('katu-maps-theme');
+          var saved = localStorage.getItem(('%VITE_APP_PREVIEW%' === 'true' ? 'katu-preview:' : '') + 'katu-maps-theme');
           var dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
           document.documentElement.dataset.theme = dark ? 'dark' : 'light';
           document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
