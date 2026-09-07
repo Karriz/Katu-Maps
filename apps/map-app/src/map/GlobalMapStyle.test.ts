@@ -232,7 +232,8 @@ describe('global map overlay styles', () => {
 
     expect(colorOf('global-buildings')).toContain('colour');
     expect(colorOf('global-building-ground-storeys')).toContain('colour');
-    expect(colorOf('global-buildings')).toContain('0.78');
+    expect(colorOf('global-buildings')).toContain('0.88');
+    expect(colorOf('global-buildings')).toContain('interpolate-hcl');
     expect(colorOf('global-buildings')).toContain('fffdf8');
     expect(colorOf('global-building-ground-storeys')).toContain('dedad1');
   });

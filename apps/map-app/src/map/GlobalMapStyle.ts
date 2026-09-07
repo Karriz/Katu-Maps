@@ -388,7 +388,7 @@ function matchColorVariants(variants: readonly string[]): ExpressionSpecificatio
 
 function pastelMappedBuildingColour(base: string): ExpressionSpecification {
   return [
-    'interpolate', ['linear'], BUILDING_PASTEL_MIX,
+    'interpolate-hcl', ['linear'], BUILDING_PASTEL_MIX,
     0, ['to-color', ['get', 'colour'], base],
     1, base,
   ] as ExpressionSpecification;

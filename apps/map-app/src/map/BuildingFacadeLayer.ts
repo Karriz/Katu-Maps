@@ -5,7 +5,7 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
-import { MAP_COLORS, pastelizeBuildingHex } from './MapPalette';
+import { pastelizeBuildingHex } from './MapPalette';
 
 const FACADE_MIN_ZOOM = 15;
 const MAX_WALL_COUNT = 3_200;
@@ -241,7 +241,7 @@ export function uniqueBuildingWalls(features: SourceFeature[]): WallSegment[] {
     const mappedColour = parseBuildingColour(feature.properties?.colour ?? feature.properties?.color);
     const seed = buildingColourSeed(id, centroid[0], centroid[1]);
     const wallColour = mappedColour !== undefined
-      ? pastelizeBuildingHex(mappedColour, MAP_COLORS.building)
+      ? pastelizeBuildingHex(mappedColour)
       : fallbackBuildingColour(seed);
     const group = groups.get(groupKey) ?? {
       edges: [],
@@ -340,7 +340,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   varying float vDistance;
 
   void main() {
-    float distanceFade = smoothstep(260.0, 70.0, vDistance);
+    float distanceFade = smoothstep(380.0, 90.0, vDistance);
     float story = mod(vV, uStoryHeight);
     float ground = step(vV, uStoryHeight + 0.05);
 

@@ -76,8 +76,10 @@ describe('building façade walls', () => {
     const pastel = pastelizeBuildingHex(raw!);
     expect(pastel).not.toBe(raw);
     expect(walls.every((wall) => wall.color === pastel)).toBe(true);
-    expect((pastel >> 16) & 255).toBeGreaterThan(220);
-    expect((pastel >> 8) & 255).toBeGreaterThan(190);
+    expect((pastel >> 16) & 255).toBeGreaterThan(210);
+    expect((pastel >> 8) & 255).toBeGreaterThan(200);
+    const loudGreen = pastelizeBuildingHex(0x00ff00);
+    expect(((loudGreen >> 8) & 255) - ((loudGreen >> 16) & 255)).toBeLessThan(40);
     expect(walls).toHaveLength(4);
   });
 
