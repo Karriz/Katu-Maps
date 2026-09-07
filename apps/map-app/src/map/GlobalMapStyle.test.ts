@@ -248,7 +248,8 @@ describe('global map overlay styles', () => {
     expect(widthOf('global-tracks')).toEqual(pathWidthExpression(3, 61.4981));
     expect(JSON.stringify((layersById.get('global-footways') as { filter?: unknown })?.filter)).toContain('pedestrian');
     expect(JSON.stringify((layersById.get('global-footways') as { filter?: unknown })?.filter)).toContain('LineString');
-    expect(JSON.stringify((layersById.get('global-path-casing') as { filter?: unknown })?.filter)).toContain('pedestrian');
+    expect(JSON.stringify((layersById.get('global-path-casing') as { filter?: unknown })?.filter)).not.toContain('footway');
+    expect(JSON.stringify((layersById.get('global-path-casing') as { filter?: unknown })?.filter)).toContain('track');
     const plazaEdge = layersById.get('global-plaza-edges')?.paint as Record<string, unknown> | undefined;
     expect(JSON.stringify(plazaEdge?.['line-width'])).toContain('0.45');
     expect(JSON.stringify((layersById.get('global-plaza-edges') as { filter?: unknown })?.filter)).toContain('Polygon');

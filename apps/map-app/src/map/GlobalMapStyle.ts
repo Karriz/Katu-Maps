@@ -1510,8 +1510,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: [
         'all',
         ['==', ['geometry-type'], 'LineString'],
-        ['in', ['get', 'class'], ['literal', ['path', 'track']]],
-        ['!', ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]]],
+        ['any',
+          ['==', ['get', 'class'], 'track'],
+          ['all',
+            ['==', ['get', 'class'], 'path'],
+            ['==', ['get', 'subclass'], 'path'],
+          ],
+        ],
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
@@ -1596,12 +1601,12 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'surface'],
-          'paved', '#9ca4a1',
-          'unpaved', '#a99578',
-          '#a99c86',
+          'paved', '#c9c4bb',
+          'unpaved', '#d6c4a0',
+          '#d0c6b4',
         ],
         'line-width': pathWidthExpression(1.8, 61.4981),
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13.5, 0.5],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13.5, 0.7],
       },
     },
     {
@@ -1635,7 +1640,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#a99c86',
+        'line-color': '#d0c6b4',
         'line-width': pathWidthExpression(1.5, 61.4981),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.5],
       },
