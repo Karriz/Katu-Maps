@@ -2083,7 +2083,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const modelUpdateSignature = () => {
       const bounds = map.getBounds();
-      return treeViewportSignature(
+      return `${modelDataRevision}:${treeViewportSignature(
         {
           west: bounds.getWest(),
           south: bounds.getSouth(),
@@ -2095,7 +2095,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         terrainSourceRef.current,
         terrainEnabledRef.current,
         Math.floor(map.getZoom() + 1e-6),
-      );
+      )}`;
     };
     const updateTreeModels = () => {
       treeUpdateTimer = undefined;

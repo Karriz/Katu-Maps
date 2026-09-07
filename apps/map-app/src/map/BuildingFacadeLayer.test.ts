@@ -78,10 +78,10 @@ describe('building façade walls', () => {
   it('measures wall length in metres and fades façade detail with zoom', () => {
     expect(wallLengthMeters([23.76, 61.4981], [23.7601, 61.4981])).toBeGreaterThan(4);
     expect(shouldRenderFacadesForViewport({
-      west: 23.76, south: 61.498, east: 23.761, north: 61.499,
+      west: 23.76, south: 61.498, east: 23.80, north: 61.53,
     }, 14.8)).toBe(false);
     expect(shouldRenderFacadesForViewport({
-      west: 23.76, south: 61.498, east: 23.761, north: 61.499,
+      west: 23.76, south: 61.498, east: 23.80, north: 61.53,
     }, 16.2)).toBe(true);
     expect(facadeDetailOpacity(15)).toBe(0);
     expect(facadeDetailOpacity(16.8)).toBe(1);

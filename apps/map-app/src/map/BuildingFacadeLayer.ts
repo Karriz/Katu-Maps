@@ -7,10 +7,9 @@ import {
 import * as THREE from 'three';
 
 const FACADE_MIN_ZOOM = 15;
-const FACADE_MAX_VIEWPORT_METERS = 900;
 const MAX_WALL_COUNT = 3_200;
 const MIN_WALL_LENGTH_METERS = 0.9;
-const WALL_OFFSET_METERS = 0.07;
+const WALL_OFFSET_METERS = 0.14;
 const STORY_HEIGHT_METERS = 3;
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
@@ -99,21 +98,14 @@ export function wallLengthMeters(start: LngLatPoint, end: LngLatPoint) {
   return Math.hypot(east, north);
 }
 
-function viewportSpanMeters(bounds: { west: number; south: number; east: number; north: number }) {
-  const southWest = toMetricPoint([bounds.west, bounds.south]);
-  const northEast = toMetricPoint([bounds.east, bounds.north]);
-  const averageLatitude = (bounds.south + bounds.north) * 0.5;
-  const xSpan = Math.abs(northEast[0] - southWest[0]) * longitudeScale(averageLatitude);
-  const ySpan = Math.abs(northEast[1] - southWest[1]);
-  return Math.max(xSpan, ySpan);
-}
-
 export function shouldRenderFacadesForViewport(
-  bounds: { west: number; south: number; east: number; north: number },
+  _bounds: { west: number; south: number; east: number; north: number },
   zoom: number,
 ) {
-  if (zoom < FACADE_MIN_ZOOM) return false;
-  return viewportSpanMeters(bounds) <= FACADE_MAX_VIEWPORT_METERS;
+  // Pitched chase/driver cameras stretch geographic bounds far beyond the
+  // nearby street. Keep the overlay on street zooms and let wall budgets plus
+  // fragment distance fading limit cost to the neighbourhood in front of the camera.
+  return zoom >= FACADE_MIN_ZOOM;
 }
 
 export function facadeDetailOpacity(zoom: number) {
@@ -313,7 +305,7 @@ function localEastNorth(
 }
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 color;
+  attribute vec3 wallColor;
   attribute float wallU;
   attribute float wallV;
   attribute float wallSeed;
@@ -324,7 +316,7 @@ const VERTEX_SHADER = /* glsl */ `
   varying float vDistance;
 
   void main() {
-    vColor = color;
+    vColor = wallColor;
     vU = wallU;
     vV = wallV;
     vSeed = wallSeed;
@@ -334,7 +326,6 @@ const VERTEX_SHADER = /* glsl */ `
 `;
 
 const FRAGMENT_SHADER = /* glsl */ `
-  #include <common>
   uniform float uOpacity;
   uniform float uNight;
   uniform float uStoryHeight;
@@ -368,16 +359,15 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     float windowMask = max(inWindow * (1.0 - ground), storefront);
     float alpha = uOpacity * distanceFade * (
-      windowMask * mix(0.28, 0.4, uNight)
-      + floorLine * 0.14
-      + ground * 0.05
+      windowMask * mix(0.36, 0.5, uNight)
+      + floorLine * 0.16
+      + ground * 0.06
     );
     if (alpha < 0.01) discard;
 
-    vec3 windowColor = mix(vColor * 0.62, vec3(0.42, 0.46, 0.4), 0.35 + uNight * 0.25);
+    vec3 windowColor = mix(vColor * 0.55, vec3(0.36, 0.4, 0.36), 0.42 + uNight * 0.2);
     vec3 color = mix(vColor * 0.88, windowColor, windowMask);
     gl_FragColor = vec4(color, alpha);
-    #include <colorspace_fragment>
   }
 `;
 
@@ -398,6 +388,7 @@ export class BuildingFacadeLayer implements CustomLayerInterface {
   private mesh?: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private enabled = true;
   private nightMix = 0;
+  lastWallCount = 0;
   private readonly elevationCache = new Map<string, number>();
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
@@ -416,11 +407,11 @@ export class BuildingFacadeLayer implements CustomLayerInterface {
       transparent: true,
       depthTest: true,
       depthWrite: false,
-      vertexColors: true,
-      side: THREE.FrontSide,
+      vertexColors: false,
+      side: THREE.DoubleSide,
       polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
       toneMapped: false,
     });
     const geometry = new THREE.BufferGeometry();
@@ -468,13 +459,19 @@ export class BuildingFacadeLayer implements CustomLayerInterface {
 
     if (!this.enabled || !shouldRenderFacadesForViewport(viewport, zoom) || opacity <= 0) {
       this.clearGeometry();
+      this.lastWallCount = 0;
       map.triggerRepaint();
       return;
     }
 
     this.sceneOrigin = map.getCenter();
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
-    const features = this.sourceFeatures();
+    const features = this.sourceFeatures().filter((feature) => {
+      const rings = ringCoordinates(feature.geometry);
+      const centroid = featureCentroid(rings);
+      if (!centroid) return false;
+      return wallLengthMeters(centroid, [this.sceneOrigin.lng, this.sceneOrigin.lat]) < 420;
+    });
     const walls = uniqueBuildingWalls(features)
       .map((wall) => {
         const mid: LngLatPoint = [
@@ -490,6 +487,7 @@ export class BuildingFacadeLayer implements CustomLayerInterface {
       .slice(0, MAX_WALL_COUNT);
 
     this.writeGeometry(walls);
+    this.lastWallCount = walls.length;
     map.triggerRepaint();
   }
 
@@ -562,7 +560,7 @@ export class BuildingFacadeLayer implements CustomLayerInterface {
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('wallColor', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('wallU', new THREE.BufferAttribute(wallU, 1));
     geometry.setAttribute('wallV', new THREE.BufferAttribute(wallV, 1));
     geometry.setAttribute('wallSeed', new THREE.BufferAttribute(wallSeed, 1));
