@@ -341,34 +341,18 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     float distanceFade = smoothstep(380.0, 90.0, vDistance);
-    float story = mod(vV, uStoryHeight);
     float ground = step(vV, uStoryHeight + 0.05);
 
-    // Wrapping window bands: a dark grey stripe per storey, with thin mullions.
-    float bandBottom = mix(0.82, 0.98, fract(vSeed * 3.71));
-    float bandTop = mix(2.12, 2.28, fract(vSeed * 9.13));
-    float upperBand = (1.0 - ground)
-      * step(bandBottom, story)
-      * step(story, bandTop);
-    float mullionPeriod = mix(3.8, 4.6, fract(vSeed * 12.9898));
-    float mullion = step(0.16, mod(vU + vSeed * 1.7, mullionPeriod));
-    float windowBand = upperBand * mullion;
-
-    // Taller, darker storefront wrapping the ground floor.
+    // Upper-floor window bands stay off for now; keep the ground-floor band.
     float storefront = ground
       * step(0.32, vV)
       * step(vV, 2.62);
 
-    float bandMask = max(windowBand, storefront);
-    float alpha = uOpacity * distanceFade * (
-      storefront * mix(0.58, 0.7, uNight)
-      + windowBand * mix(0.46, 0.6, uNight)
-    );
+    float alpha = uOpacity * distanceFade * storefront * mix(0.58, 0.7, uNight);
     if (alpha < 0.01) discard;
 
-    vec3 bandColor = mix(vec3(0.40, 0.42, 0.42), vec3(0.32, 0.34, 0.34), storefront);
-    bandColor = mix(bandColor, bandColor * 0.72, uNight);
-    gl_FragColor = vec4(mix(vColor * 0.92, bandColor, bandMask), alpha);
+    vec3 bandColor = mix(vec3(0.32, 0.34, 0.34), vec3(0.24, 0.25, 0.25), uNight);
+    gl_FragColor = vec4(mix(vColor * 0.92, bandColor, storefront), alpha);
   }
 `;
 

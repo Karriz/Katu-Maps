@@ -2387,7 +2387,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.addImage(PAVING_PATTERN_ID, createPavingPattern(), { pixelRatio: 1 });
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
       streetSurfacePatternLayers().forEach((layer) => {
-        const before = layer.id === 'global-paving-pattern' || layer.id === 'global-parking-pattern'
+        const before = layer.id === 'global-parking-pattern'
           ? 'global-pier-area-shadow'
           : 'global-water-edge-shade';
         map.addLayer(layer, before);

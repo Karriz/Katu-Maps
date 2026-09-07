@@ -38,7 +38,7 @@ export const MAP_COLORS = {
 } as const;
 
 /** Mix toward ivory for OSM-mapped building colours (0 = raw, 1 = ivory). */
-export const BUILDING_PASTEL_MIX = 0.88;
+export const BUILDING_PASTEL_MIX = 0.72;
 
 function rgbToHsl(r: number, g: number, b: number) {
   const red = r / 255;
@@ -87,11 +87,11 @@ export function pastelizeBuildingHex(
   const hsl = rgbToHsl((hex >> 16) & 255, (hex >> 8) & 255, hex & 255);
   const [softR, softG, softB] = hslToRgb(
     hsl.h,
-    Math.min(hsl.s, 0.16),
-    Math.min(0.92, Math.max(hsl.l, 0.84)),
+    Math.min(hsl.s, 0.24),
+    Math.min(0.9, Math.max(hsl.l, 0.78)),
   );
   const ivory = Number.parseInt(ivoryHex.replace('#', ''), 16);
-  const unify = 0.42;
+  const unify = 0.28;
   const mixChannel = (from: number, to: number) => Math.round(from + (to - from) * unify);
   const r = mixChannel(softR, (ivory >> 16) & 255);
   const g = mixChannel(softG, (ivory >> 8) & 255);

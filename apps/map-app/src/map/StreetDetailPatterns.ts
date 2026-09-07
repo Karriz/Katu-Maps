@@ -8,7 +8,6 @@ export const SAND_PATTERN_ID = 'street-sand-pattern';
 export const STREET_SURFACE_PATTERN_LAYER_IDS = [
   'global-grass-pattern',
   'global-sand-pattern',
-  'global-paving-pattern',
   'global-parking-pattern',
 ] as const;
 
@@ -153,22 +152,6 @@ export function streetSurfacePatternLayers(): FillLayerSpecification[] {
       paint: {
         'fill-pattern': SAND_PATTERN_ID,
         'fill-opacity': closeRangePatternOpacity(0.2),
-      },
-    },
-    {
-      id: 'global-paving-pattern',
-      type: 'fill',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'transportation',
-      minzoom: 14,
-      filter: [
-        'all',
-        ['==', ['geometry-type'], 'Polygon'],
-        ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform', 'footway']]],
-      ],
-      paint: {
-        'fill-pattern': PAVING_PATTERN_ID,
-        'fill-opacity': closeRangePatternOpacity(0.32),
       },
     },
     {
