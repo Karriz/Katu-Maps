@@ -53,7 +53,7 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) 
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => {
     setPaint(map, id, 'fill-color', colors.land);
   });
-  setPaint(map, 'global-plaza-edges', 'line-color', colors.roadCasing);
+  setPaint(map, 'global-plaza-edges', 'line-color', colors.boundary);
   [
     'global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing',
     'global-overview-road-casing', 'global-overview-regional-road-casing',

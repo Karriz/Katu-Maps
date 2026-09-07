@@ -1013,9 +1013,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           6, 0.08,
-          12, 0.12,
-          16, 0.16,
-          18, 0.2,
+          12, 0.14,
+          16, 0.2,
+          18, 0.28,
         ],
       },
     },
@@ -1048,14 +1048,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 13,
       filter: [
         'all',
+        ['==', ['geometry-type'], 'Polygon'],
         ['in', ['get', 'subclass'], ['literal', ['pedestrian', 'platform']]],
         ['!', ['==', ['get', 'brunnel'], 'tunnel']],
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#d2ccc0',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.4, 16, 0.65, 18, 0.85],
-        'line-opacity': 0.5,
+        'line-color': '#e6dfd4',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.2, 16, 0.32, 18, 0.45],
+        'line-opacity': 0.32,
       },
     },
     {
@@ -1587,8 +1588,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 12.5,
       filter: [
         'all',
+        ['==', ['geometry-type'], 'LineString'],
         ['==', ['get', 'class'], 'path'],
-        ['in', ['get', 'subclass'], ['literal', ['footway', 'path', 'corridor', 'bridleway']]],
+        ['in', ['get', 'subclass'], ['literal', ['footway', 'path', 'corridor', 'bridleway', 'pedestrian']]],
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
@@ -3116,7 +3118,7 @@ export function applyMapTheme(
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
-  set('global-plaza-edges', 'line-color', colors.roadCasing);
+  set('global-plaza-edges', 'line-color', colors.boundary);
   ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
   ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
