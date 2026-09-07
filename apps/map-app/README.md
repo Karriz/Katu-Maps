@@ -36,14 +36,14 @@ request controls, remaining risks, and suggested scale checkpoints.
 The map retains MapLibre terrain, hillshade, OpenMapTiles building
 extrusions, water styling, and deterministic procedural trees sampled from
 `landcover`, `landuse`, and `park`. Building colours use mapped facade colours
-where available and a stable ivory/pale-grey palette otherwise. Ordinary buildings use
-a darker ground-floor band, and a shared Three.js overlay adds world-metre
-window rhythm and floor lines on nearby façades at close zoom. Untagged parts
-created together share a coarsened deterministic colour seed. Close views also
-add soft grass, sand and paving patterns plus dual rail strokes over a clearer
-track bed. The style distinguishes road and rail bridges, tunnels, transport
-hierarchy, airports, ranked labels, peaks, parks, stations, and close-zoom
-house numbers.
+where available and a stable facade-material palette otherwise. Ordinary buildings use
+one non-overlapping set of estimated three-metre storey slices at every building
+zoom; only their alternating detail colours fade in at close zooms. Short and
+structures over 100 metres stay on a single extrusion because OpenFreeMap does
+not expose storey counts or parent-building IDs. Untagged parts created together
+share a coarsened deterministic colour seed. The style also distinguishes road and rail bridges,
+tunnels, transport hierarchy, airports, ranked labels, peaks, parks, stations,
+and close-zoom house numbers.
 
 The style starts at world scale using MapLibre's adaptive globe
 projection. Continents use a continuous green base while OpenMapTiles ocean and

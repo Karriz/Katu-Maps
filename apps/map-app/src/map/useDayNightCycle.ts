@@ -6,7 +6,6 @@ import { applyDayNightStyle, restoreDayNightStyle } from './DayNightStyle';
 import { useGlobeCloudCover } from './useGlobeCloudCover';
 import { screenLockedSunDirection, timeZoneAt } from './DayNightSun';
 import type { TreeModelLayer } from './TreeModelLayer';
-import type { BuildingFacadeLayer } from './BuildingFacadeLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { ResolvedTheme } from '../theme';
 
@@ -23,7 +22,6 @@ export function useDayNightCycle({
   flightActive,
   resolvedTheme,
   treeLayerRef,
-  buildingFacadeLayerRef,
   transitVehicleLayerRef,
 }: {
   mapRef: RefObject<Map | null>;
@@ -34,7 +32,6 @@ export function useDayNightCycle({
   flightActive: boolean;
   resolvedTheme: ResolvedTheme;
   treeLayerRef: RefObject<TreeModelLayer | null>;
-  buildingFacadeLayerRef: RefObject<BuildingFacadeLayer | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
 }) {
   const layerRef = useRef<DayNightShadeLayer | null>(null);
@@ -58,7 +55,6 @@ export function useDayNightCycle({
       }
       layerRef.current?.setAppearance([1, 0, 0], 0, 0);
       treeLayerRef.current?.setDayNightLighting(null);
-      buildingFacadeLayerRef.current?.setNightMix(0);
       transitVehicleLayerRef.current?.setDayNightLighting(null);
       wasActiveRef.current = false;
       applyRef.current = () => {};
@@ -90,7 +86,6 @@ export function useDayNightCycle({
           true,
         );
         treeLayerRef.current?.setDayNightLighting(null);
-        buildingFacadeLayerRef.current?.setNightMix(0);
         transitVehicleLayerRef.current?.setDayNightLighting(null);
         map.triggerRepaint();
         return;
@@ -104,7 +99,6 @@ export function useDayNightCycle({
         nightMix: appearance.treeNightMix,
         shadowOffset: appearance.treeShadowOffset,
       });
-      buildingFacadeLayerRef.current?.setNightMix(appearance.treeNightMix);
       transitVehicleLayerRef.current?.setDayNightLighting({
         palette: appearance.palette,
         azimuth: appearance.azimuth,
@@ -137,7 +131,7 @@ export function useDayNightCycle({
     };
   }, [
     enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
-    treeLayerRef, buildingFacadeLayerRef, transitVehicleLayerRef,
+    treeLayerRef, transitVehicleLayerRef,
   ]);
 
   useGlobeCloudCover(mapRef, layerRef, mapLoaded, flightActive, cloudsEnabled);

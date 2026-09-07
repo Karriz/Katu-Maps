@@ -149,27 +149,17 @@ import {
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
+  GLOBAL_ROAD_CASING_LAYER_IDS,
+  GLOBAL_ROAD_LAYER_IDS,
   OPENFREEMAP_SOURCE_ID,
-  applyLatitudeScaledLineWidths,
+  aerowayWidthExpression,
+  roadWidthExpression,
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
-import {
-  BuildingFacadeLayer,
-} from './BuildingFacadeLayer';
-import {
-  GRASS_PATTERN_ID,
-  PAVING_PATTERN_ID,
-  SAND_PATTERN_ID,
-  STREET_SURFACE_PATTERN_LAYER_IDS,
-  createGrassPattern,
-  createPavingPattern,
-  createSandPattern,
-  streetSurfacePatternLayers,
-} from './StreetDetailPatterns';
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const WATER_PATTERN_ID = 'water-surface-pattern';
-const WATER_EFFECT_LAYER_IDS = ['global-water-pattern', ...STREET_SURFACE_PATTERN_LAYER_IDS];
+const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
 const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-shadow',
   'global-building-contact-shadow',
@@ -689,8 +679,7 @@ function globalWaterPatternLayer(): FillLayerSpecification {
         7, 0.025,
         10, 0.08,
         14, 0.12,
-        16, 0.16,
-        18, 0.2,
+        18, 0.17,
       ],
     },
   };
@@ -703,7 +692,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const mapRef = useRef<Map | null>(null);
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
-  const buildingFacadeLayerRef = useRef<BuildingFacadeLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
   const roadWeatherLayerRef = useRef<RoadWeatherLayer | null>(null);
@@ -962,7 +950,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     resolvedTheme,
     dayNightEnabled: layerToggles.dayNight,
     treeLayerRef,
-    buildingFacadeLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
     treeRefreshRef,
@@ -998,7 +985,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     flightActive: flight.active,
     resolvedTheme,
     treeLayerRef,
-    buildingFacadeLayerRef,
     transitVehicleLayerRef,
   });
   useEffect(() => {
@@ -1994,8 +1980,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       biomeLayer: 'global-globe-biomes',
     });
     treeLayerRef.current = treeLayer;
-    const buildingFacadeLayer = new BuildingFacadeLayer();
-    buildingFacadeLayerRef.current = buildingFacadeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
     const transitStopsLayer = new TransitStopsLayer((pose) => {
@@ -2042,7 +2026,22 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       const latitude = map.getCenter().lat;
       if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
       roadWidthLatitude = latitude;
-      applyLatitudeScaledLineWidths(map, latitude);
+      GLOBAL_ROAD_CASING_LAYER_IDS.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude, true));
+        }
+      });
+      GLOBAL_ROAD_LAYER_IDS.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude));
+        }
+      });
+      if (map.getLayer('global-aeroway-lines')) {
+        map.setPaintProperty('global-aeroway-lines', 'line-width', aerowayWidthExpression(latitude));
+      }
+      if (map.getLayer('global-aeroway-runways')) {
+        map.setPaintProperty('global-aeroway-runways', 'line-width', aerowayWidthExpression(latitude));
+      }
     };
     const updateGlobalLabelDensity = () => {
       if (!map.isStyleLoaded()) return;
@@ -2083,7 +2082,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const modelUpdateSignature = () => {
       const bounds = map.getBounds();
-      return `${modelDataRevision}:${treeViewportSignature(
+      return treeViewportSignature(
         {
           west: bounds.getWest(),
           south: bounds.getSouth(),
@@ -2095,7 +2094,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         terrainSourceRef.current,
         terrainEnabledRef.current,
         Math.floor(map.getZoom() + 1e-6),
-      )}`;
+      );
     };
     const updateTreeModels = () => {
       treeUpdateTimer = undefined;
@@ -2106,7 +2105,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       const nextSignature = modelUpdateSignature();
       if (nextSignature === lastModelUpdateSignature) return;
       treeLayer.updateTrees();
-      buildingFacadeLayer.updateFacades();
       lastModelUpdateSignature = nextSignature;
     };
     const scheduleTreeUpdate = () => {
@@ -2382,17 +2380,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
       // providing broad variation at every zoom without a custom shader.
       map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
-      map.addImage(GRASS_PATTERN_ID, createGrassPattern(), { pixelRatio: 0.5 });
-      map.addImage(SAND_PATTERN_ID, createSandPattern(), { pixelRatio: 0.5 });
-      map.addImage(PAVING_PATTERN_ID, createPavingPattern(), { pixelRatio: 1 });
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
-      streetSurfacePatternLayers().forEach((layer) => {
-        const before = layer.id === 'global-parking-pattern'
-          ? 'global-pier-area-shadow'
-          : 'global-water-edge-shade';
-        map.addLayer(layer, before);
-      });
-      map.addLayer(buildingFacadeLayer, 'global-road-labels');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
       try {
