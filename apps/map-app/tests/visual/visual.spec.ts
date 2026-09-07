@@ -1067,6 +1067,10 @@ async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, 
   // (throttle fill) and infinite keyframes (stall warning) in motion.
   try {
     await page.evaluate(() => {
+      // Stop continuous WebGL/flight updates only after scenario assertions.
+      // CSS animation cancellation alone leaves the software GPU rendering
+      // continuously and can starve Chromium's screenshot capture.
+      (window as Window & { freezeVisualFrames?: () => void }).freezeVisualFrames?.();
       for (const animation of document.getAnimations()) {
         try { animation.cancel(); } catch { /* ignore animations that cannot be cancelled */ }
       }
@@ -1079,6 +1083,30 @@ async function attachScreenshot(page: Page, info: TestInfo, scenario: Scenario, 
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const request = window.requestAnimationFrame.bind(window);
+    const cancel = window.cancelAnimationFrame.bind(window);
+    const pending = new Set<number>();
+    let frozen = false;
+    window.requestAnimationFrame = callback => {
+      if (frozen) return 0;
+      const id = request(time => {
+        pending.delete(id);
+        if (!frozen) callback(time);
+      });
+      pending.add(id);
+      return id;
+    };
+    window.cancelAnimationFrame = id => {
+      pending.delete(id);
+      cancel(id);
+    };
+    (window as Window & { freezeVisualFrames?: () => void }).freezeVisualFrames = () => {
+      frozen = true;
+      for (const id of pending) cancel(id);
+      pending.clear();
+    };
+  });
   await installVisualProviderFixtures(page);
 });
 

@@ -8,6 +8,8 @@ export default defineConfig({
   workers: process.env.CI ? 2 : 1,
   reporter: [['line'], ['./tests/visual/report-reporter.ts']],
   use: {
+    // Service workers can bypass page.route provider fixtures in production builds.
+    serviceWorkers: 'block',
     baseURL: 'http://127.0.0.1:4173', locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light', reducedMotion: 'reduce',
     launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] },
   },
