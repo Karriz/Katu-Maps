@@ -230,6 +230,14 @@ export function lineLengthMetres(coordinates: Array<[number, number]>) {
   return length;
 }
 
+function planLineLength(plan: PlanPoint[]) {
+  let length = 0;
+  for (let index = 1; index < plan.length; index += 1) {
+    length += Math.hypot(plan[index].east - plan[index - 1].east, plan[index].north - plan[index - 1].north);
+  }
+  return length;
+}
+
 export function densifyLine(coordinates: Array<[number, number]>, spacingMeters: number) {
   if (coordinates.length < 2) return coordinates.slice();
   const densified: Array<[number, number]> = [coordinates[0]];
@@ -721,7 +729,9 @@ export function clusterBridgeDrawables(drawables: BridgeDrawable[]) {
   for (const line of lines) {
     if (!assigned.has(line)) groups.push([line]);
   }
-  return regroupParallelLineClusters(groups.flatMap(splitInterchangeCluster)).filter(keepDeckGroup);
+  return regroupCompactPathJunctions(
+    regroupParallelLineClusters(groups.flatMap(splitInterchangeCluster)),
+  ).filter(keepDeckGroup);
 }
 
 function isPathClass(className: string) {
@@ -791,31 +801,42 @@ function regroupParallelLineClusters(groups: BridgeDrawable[][]) {
     group.length > 0 && group.every((drawable) => drawable.kind === 'line')
   ));
   if (lineGroups.length <= 1) return groups;
-  const parent = lineGroups.map((_, index) => index);
+  return [...withPolygons, ...unionDrawableGroups(lineGroups, (left, right) => (
+    left.some((first) => right.some((second) => linesFormParallelBundle(first, second)))
+  ))];
+}
+
+function regroupCompactPathJunctions(groups: BridgeDrawable[][]) {
+  return unionDrawableGroups(groups, pathClustersFormCompactJunction);
+}
+
+function unionDrawableGroups(
+  groups: BridgeDrawable[][],
+  shouldMerge: (left: BridgeDrawable[], right: BridgeDrawable[]) => boolean,
+) {
+  if (groups.length <= 1) return groups;
+  const parent = groups.map((_, index) => index);
   const find = (index: number): number => {
     if (parent[index] === index) return index;
     parent[index] = find(parent[index]);
     return parent[index];
   };
-  for (let left = 0; left < lineGroups.length; left += 1) {
-    for (let right = left + 1; right < lineGroups.length; right += 1) {
-      const matches = lineGroups[left].some((first) => (
-        lineGroups[right].some((second) => linesFormParallelBundle(first, second))
-      ));
-      if (!matches) continue;
+  for (let left = 0; left < groups.length; left += 1) {
+    for (let right = left + 1; right < groups.length; right += 1) {
+      if (!shouldMerge(groups[left], groups[right])) continue;
       const rootLeft = find(left);
       const rootRight = find(right);
       if (rootLeft !== rootRight) parent[rootRight] = rootLeft;
     }
   }
   const merged = new Map<number, BridgeDrawable[]>();
-  lineGroups.forEach((group, index) => {
+  groups.forEach((group, index) => {
     const root = find(index);
     const current = merged.get(root);
     if (current) current.push(...group);
     else merged.set(root, [...group]);
   });
-  return [...withPolygons, ...merged.values()];
+  return [...merged.values()];
 }
 
 function drawableArea(drawable: BridgeDrawable) {
@@ -868,6 +889,7 @@ function keepDeckGroup(group: BridgeDrawable[], _index: number, groups: BridgeDr
   const lines = group.filter((drawable) => drawable.kind === 'line');
   if (polygons.length === 0 || lines.length > 0) return true;
   const otherLines = groups.flatMap((other) => other.filter((drawable) => drawable.kind === 'line'));
+  if (polygonLooksLikeWideDeck(polygons, otherLines)) return true;
   return !polygons.every((polygon) => otherLines.some((line) => polygonCoveredByLine(polygon, line)));
 }
 
@@ -895,14 +917,19 @@ function mergeDeckFragments(polygons: BridgeDrawable[]): DeckSurface[] {
 
 export function clusterSurfaces(drawables: BridgeDrawable[]): DeckSurface[] {
   const polygons = drawables.filter((drawable) => drawable.kind === 'polygon' && drawable.plan.length >= 3);
-  if (polygons.length > 0) {
+  const lines = drawables.filter((drawable) => drawable.kind === 'line' && drawable.plan.length >= 2);
+  if (polygons.length > 0 && polygonLooksLikeWideDeck(polygons, lines)) {
     return mergeDeckFragments(polygons);
   }
-  const lines = drawables.filter((drawable) => drawable.kind === 'line' && drawable.plan.length >= 2);
+  const pathDeck = compactPathJunctionSurface(drawables);
+  if (pathDeck) return [pathDeck];
   if (lines.length >= 2 && !linesDiverge(lines)) {
     const ribbon = parallelBundleRibbon(lines);
     const outer = ribbonToRing(ribbon);
     if (outer.length >= 3) return [{ outer, holes: [] }];
+  }
+  if (polygons.length > 0) {
+    return mergeDeckFragments(polygons);
   }
   return lines
     .map((line) => ({
@@ -912,15 +939,108 @@ export function clusterSurfaces(drawables: BridgeDrawable[]): DeckSurface[] {
     .filter((surface) => surface.outer.length >= 3);
 }
 
+function polygonWidthMetres(outer: PlanPoint[]) {
+  if (outer.length < 2) return 0;
+  const axis = spanAxis(outer);
+  const perp = { east: -axis.north, north: axis.east };
+  const projections = outer.map((point) => point.east * perp.east + point.north * perp.north);
+  return Math.max(...projections) - Math.min(...projections);
+}
+
+function lineMostlyCoveredByPolygons(line: BridgeDrawable, polygons: BridgeDrawable[]) {
+  const samples = densifyPlanLine(line.plan, SAMPLE_SPACING_METERS);
+  if (samples.length === 0) return false;
+  const reach = Math.max(2, line.width / 2 + 1.5);
+  const covered = samples.filter((point) => (
+    polygons.some((polygon) => coveredByPolygon(point, polygon, reach))
+  )).length;
+  return covered >= Math.ceil(samples.length * 0.8);
+}
+
+function polygonLooksLikeWideDeck(polygons: BridgeDrawable[], lines: BridgeDrawable[]) {
+  const area = polygons.reduce((sum, polygon) => sum + drawableArea(polygon), 0);
+  if (area < MIN_POLYGON_MESH_AREA_METRES) return false;
+  if (lines.length > 0 && lines.every((line) => lineMostlyCoveredByPolygons(line, polygons))) return true;
+  const width = Math.max(...polygons.map((polygon) => polygonWidthMetres(polygon.plan)));
+  const polygonSpan = surfaceSpanLength(polygons.map(deckSurfaceFromPolygon));
+  const lineSpan = lines.length > 0
+    ? Math.max(...lines.map((line) => lineLengthMetres(line.coordinates)))
+    : 0;
+  if (lineSpan > polygonSpan + 30 && lineSpan > polygonSpan * 1.2) return false;
+  if (width >= 14) return true;
+  if (width >= 8 && (lines.length === 0 || lineSpan <= polygonSpan * 1.45)) return true;
+  return false;
+}
+
+function isPathOnlyCluster(drawables: BridgeDrawable[]) {
+  return drawables.length > 0
+    && drawables.every((drawable) => isPathClass(drawable.properties.className));
+}
+
+function linesConnectAtJunction(lines: BridgeDrawable[]) {
+  const usable = lines.filter((line) => line.kind === 'line' && line.plan.length >= 2);
+  for (let left = 0; left < usable.length; left += 1) {
+    for (let right = left + 1; right < usable.length; right += 1) {
+      const first = usable[left].plan;
+      const second = usable[right].plan;
+      const ends = [first[0], first[first.length - 1]];
+      const otherEnds = [second[0], second[second.length - 1]];
+      if (ends.some((end) => otherEnds.some((other) => (
+        Math.hypot(end.east - other.east, end.north - other.north) <= 8
+      )))) {
+        return true;
+      }
+      if (polylineSeparation(first, second) <= 4) return true;
+    }
+  }
+  return false;
+}
+
+function pathClustersFormCompactJunction(left: BridgeDrawable[], right: BridgeDrawable[]) {
+  if (!isPathOnlyCluster(left) || !isPathOnlyCluster(right)) return false;
+  const merged = [...left, ...right];
+  const lines = merged.filter((drawable) => drawable.kind === 'line');
+  const polygons = merged.filter((drawable) => drawable.kind === 'polygon');
+  const decksTouch = polygons.some((first) => (
+    polygons.some((second) => first !== second && polygonsFormOneSpan(first, second))
+  ));
+  if (lines.length >= 2 && !linesConnectAtJunction(lines) && !decksTouch) return false;
+  if (lines.length < 2 && !decksTouch && polygons.length < 2) return false;
+  return compactPathJunctionSurface(merged) !== null;
+}
+
+function compactPathJunctionSurface(drawables: BridgeDrawable[]): DeckSurface | null {
+  if (!isPathOnlyCluster(drawables)) return null;
+  const lines = drawables.filter((drawable) => drawable.kind === 'line' && drawable.plan.length >= 2);
+  const polygons = drawables.filter((drawable) => drawable.kind === 'polygon' && drawable.plan.length >= 3);
+  if (lines.length + polygons.length < 2) return null;
+  if (lines.length >= 2 && !linesDiverge(lines) && polygons.length < 2) return null;
+  if (lines.length >= 2 && !linesConnectAtJunction(lines) && polygons.length < 2) return null;
+  const points = [
+    ...polygons.flatMap((polygon) => polygon.plan),
+    ...lines.flatMap((line) => offsetPolyline(line.plan, line.width / 2 + 0.4)),
+  ];
+  const hull = convexHull(points);
+  if (hull.length < 3) return null;
+  const hullArea = polygonAreaMetres(hull);
+  const partArea = polygons.reduce((sum, polygon) => sum + drawableArea(polygon), 0)
+    + lines.reduce((sum, line) => sum + planLineLength(line.plan) * line.width, 0);
+  if (hullArea < MIN_POLYGON_MESH_AREA_METRES) return null;
+  if (hullArea > INTERCHANGE_DECK_AREA_METRES) return null;
+  if (!deckAreaAllowed(hull)) return null;
+  if (partArea > 0 && hullArea > partArea * 5 && hullArea - partArea > 1_800) return null;
+  return { outer: hull, holes: [] };
+}
+
 export function clusterOutline(drawables: BridgeDrawable[]) {
   return clusterSurfaces(drawables)[0]?.outer ?? [];
 }
 
 export function triangulateDeckSurface(surface: DeckSurface) {
-  const outer = orientedRing(densifyRing(surface.outer, SAMPLE_SPACING_METERS), false);
+  const outer = orientedRing(uniquePlanPoints(densifyRing(surface.outer, SAMPLE_SPACING_METERS)), false);
   const holes = surface.holes
     .filter((hole) => hole.length >= 3)
-    .map((hole) => orientedRing(densifyRing(hole, SAMPLE_SPACING_METERS), true));
+    .map((hole) => orientedRing(uniquePlanPoints(densifyRing(hole, SAMPLE_SPACING_METERS)), true));
   if (outer.length < 3) return null;
   const contour = outer.map((point) => new THREE.Vector2(point.east, point.north));
   const holeContours = holes.map((hole) => hole.map((point) => new THREE.Vector2(point.east, point.north)));
@@ -1011,19 +1131,6 @@ export function bridgeSurfaceStrip(outline: PlanPoint[], axis: PlanPoint, steps 
     previousVertices = currentVertices;
   }
   return { points, indices, t };
-}
-
-function stripCoversSpan(strip: { t: number[]; indices: number[] }, steps: number) {
-  if (strip.indices.length < 6 || strip.t.length < 4) return false;
-  let minT = 1;
-  let maxT = 0;
-  for (const value of strip.t) {
-    minT = Math.min(minT, value);
-    maxT = Math.max(maxT, value);
-  }
-  if (maxT - minT < 0.84) return false;
-  const unique = new Set(strip.t.map((value) => Math.round(value * steps)));
-  return unique.size >= Math.max(5, Math.round(steps * 0.72));
 }
 
 function bestOverlappingInterval(
@@ -1127,7 +1234,10 @@ export function shouldMeshClusterLines(
   surfaces: DeckSurface[],
 ) {
   if (lines.length === 0) return false;
+  if (polygonLooksLikeWideDeck(polygons, lines)) return false;
+  if (compactPathJunctionSurface([...polygons, ...lines])) return false;
   if (polygons.length === 0) return true;
+  if (lines.length >= 2 && !linesDiverge(lines)) return true;
   const lineSpan = Math.max(...lines.map((line) => lineLengthMetres(line.coordinates)));
   const polygonSpan = surfaceSpanLength(surfaces);
   if (lineSpan > polygonSpan + 30 && lineSpan > polygonSpan * 1.2) return true;
@@ -1586,7 +1696,7 @@ function applyStitch(current: BridgeLine, candidate: BridgeLine, mode: StitchMod
   current.coordinates.unshift(...reversed.slice(0, drop ? -1 : undefined));
 }
 
-function stitchGroup(lines: BridgeLine[]) {
+function stitchGroup(lines: BridgeLine[], maxMetres = LINE_STITCH_METRES) {
   const unused = lines.map((line) => ({
     ...line,
     coordinates: line.coordinates.slice(),
@@ -1600,9 +1710,9 @@ function stitchGroup(lines: BridgeLine[]) {
       changed = false;
       let bestIndex = -1;
       let bestMode: StitchMode | null = null;
-      let bestDistance = LINE_STITCH_METRES;
+      let bestDistance = maxMetres;
       for (let index = unused.length - 1; index >= 0; index -= 1) {
-        const match = stitchMatch(current, unused[index], LINE_STITCH_METRES);
+        const match = stitchMatch(current, unused[index], maxMetres);
         if (!match) continue;
         if (match.distance <= bestDistance) {
           bestDistance = match.distance;
@@ -2054,16 +2164,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
     const terrainZoomBucket = Math.floor(view.zoom + 1e-6);
     const bridges: SampledBridge[] = [];
-    let pending = false;
+    this.pendingElevation = false;
     for (const entry of clusters) {
       const sampled = this.sampleCluster(map, origin, entry.cluster, entry.surfaces, entry.span, terrainZoomBucket);
-      if (sampled === 'pending') {
-        pending = true;
-        continue;
-      }
       if (sampled) bridges.push(sampled);
     }
-    return { bridges, pending };
+    return { bridges, pending: this.pendingElevation };
   }
 
   private sampleCluster(
@@ -2085,9 +2191,11 @@ export class BridgeModelLayer implements CustomLayerInterface {
         north: longest.plan[longest.plan.length - 1].north - longest.plan[0].north,
       }
       : undefined;
-    const meshLines = polygons.length === 0 || shouldMeshClusterLines(lines, polygons, surfaces);
-    const axisSource = !meshLines && polygons.length > 0
-      ? surfaces.flatMap((surface) => surface.outer)
+    const meshLines = shouldMeshClusterLines(lines, polygons, surfaces);
+    const axisSource = !meshLines
+      ? (surfaces.flatMap((surface) => surface.outer).length > 0
+        ? surfaces.flatMap((surface) => surface.outer)
+        : (longest?.plan ?? []))
       : (longest?.plan ?? surfaces.flatMap((surface) => surface.outer));
     const axis = spanAxis(axisSource, preferred);
     const spanOrigin = axisSource[0] ?? { east: 0, north: 0 };
@@ -2125,8 +2233,19 @@ export class BridgeModelLayer implements CustomLayerInterface {
         }
         const steps = Math.max(8, Math.round(spanLength / SAMPLE_SPACING_METERS));
         const strip = bridgeSurfaceStrip(surface.outer, axis, steps, surface.holes);
-        if (stripCoversSpan(strip, steps)) {
+        if (strip.indices.length >= 6) {
           appendMesh(strip.points, strip.indices, strip.t);
+        }
+      }
+      if (meshPoints.length < 3 && lines.length > 0) {
+        if (lines.length >= 2 && !linesDiverge(lines)) {
+          const ribbon = parallelBundleRibbon(lines);
+          appendMesh(ribbon.points, ribbon.indices, ribbon.t);
+        } else {
+          for (const line of lines) {
+            const ribbon = lineRibbonMesh(line.plan, line.width);
+            appendMesh(ribbon.points, ribbon.indices, ribbon.t);
+          }
         }
       }
       for (const line of lines) {
@@ -2143,9 +2262,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     const coordinates = meshPoints.map((point) => planToLngLat(point, origin));
-    const ground = this.sampleGround(map, coordinates, terrainZoomBucket);
-    if (ground === null) return 'pending' as const;
-    if (ground.length < 3) return null;
+    const sampledGround = this.sampleGround(map, coordinates, terrainZoomBucket);
+    if (sampledGround.ground.length < 3) return null;
+    const ground = sampledGround.ground;
+    if (sampledGround.pending) this.pendingElevation = true;
 
     const startSamples = meshT.flatMap((t, index) => (t <= 0.08 ? [ground[index]] : []));
     const endSamples = meshT.flatMap((t, index) => (t >= 0.92 ? [ground[index]] : []));
@@ -2190,12 +2310,18 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
   private sampleGround(map: MaplibreMap, coordinates: Array<[number, number]>, terrainZoomBucket: number) {
     const ground: number[] = [];
+    let pending = false;
+    const fallback = this.sceneOriginElevation;
     for (const [longitude, latitude] of coordinates) {
       const elevation = this.sampleElevation(map, longitude, latitude, terrainZoomBucket);
-      if (elevation == null) return null;
+      if (elevation == null) {
+        pending = true;
+        ground.push(fallback);
+        continue;
+      }
       ground.push(elevation);
     }
-    return ground;
+    return { ground, pending };
   }
 
   private toLocal(longitude: number, latitude: number, elevation: number): LocalPoint {

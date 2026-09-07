@@ -371,6 +371,90 @@ describe('clustered bridge decks', () => {
     )).toBe(false);
   });
 
+  it('uses the 2D deck polygon for a path Y instead of the footway ribbons', () => {
+    const yDeck: BridgeDrawable = {
+      ...deck,
+      properties: { className: 'path', subclass: 'footway', layer: 1, ramp: false },
+      plan: [
+        { east: 0, north: -8 },
+        { east: 40, north: -8 },
+        { east: 55, north: 22 },
+        { east: 46, north: 26 },
+        { east: 32, north: 4 },
+        { east: 0, north: 4 },
+      ],
+    };
+    const arm: BridgeDrawable = {
+      ...path,
+      plan: [{ east: 0, north: 0 }, { east: 40, north: 0 }],
+    };
+    const branch: BridgeDrawable = {
+      ...path,
+      plan: [{ east: 38, north: 0 }, { east: 52, north: 22 }],
+    };
+    const groups = clusterBridgeDrawables([yDeck, arm, branch]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].some((drawable) => drawable.kind === 'polygon')).toBe(true);
+    const surfaces = clusterSurfaces(groups[0]);
+    expect(surfaces).toHaveLength(1);
+    expect(surfaces[0].outer).toEqual(yDeck.plan);
+    expect(shouldMeshClusterLines([arm, branch], [yDeck], surfaces)).toBe(false);
+  });
+
+  it('uses a mapped Y-shaped deck when its bent paths outlength its straight span', () => {
+    const sarkanDeck: BridgeDrawable = {
+      ...deck,
+      properties: { className: 'bridge', layer: 1, ramp: false },
+      plan: [
+        { east: -55, north: 62 }, { east: -49, north: 67 }, { east: 0, north: 7 },
+        { east: 3, north: 8 }, { east: 8, north: 23 }, { east: 5, north: 44 },
+        { east: -1, north: 48 }, { east: 13, north: 60 }, { east: 14, north: 59 },
+        { east: 12, north: 51 }, { east: 21, north: -7 }, { east: 24, north: -11 },
+        { east: 7, north: -23 }, { east: 8, north: -18 }, { east: 7, north: -15 },
+      ],
+    };
+    const longArm: BridgeDrawable = {
+      ...path,
+      coordinates: [
+        [23.74574, 61.50443], [23.74588, 61.50405], [23.74593, 61.50380],
+        [23.74563, 61.50394], [23.74464, 61.50452],
+      ],
+      plan: [
+        { east: 6, north: 54 }, { east: 13, north: 12 }, { east: 16, north: -16 },
+        { east: 0, north: 0 }, { east: -52, north: 64 },
+      ],
+    };
+    const shortArm: BridgeDrawable = {
+      ...path,
+      coordinates: [[23.74563, 61.50394], [23.74586, 61.50409]],
+      plan: [{ east: 0, north: 0 }, { east: 13, north: 17 }],
+    };
+    const surfaces = clusterSurfaces([sarkanDeck, longArm, shortArm]);
+    expect(surfaces[0].outer).toEqual(sarkanDeck.plan);
+    expect(shouldMeshClusterLines([longArm, shortArm], [sarkanDeck], surfaces)).toBe(false);
+  });
+
+  it('fills a compact path Y even when the deck polygon is missing', () => {
+    const arm: BridgeDrawable = {
+      ...path,
+      plan: [{ east: 0, north: 0 }, { east: 48, north: 0 }],
+    };
+    const branch: BridgeDrawable = {
+      ...path,
+      plan: [{ east: 46, north: 0 }, { east: 62, north: 24 }],
+    };
+    const spur: BridgeDrawable = {
+      ...path,
+      plan: [{ east: 0, north: 4 }, { east: 46, north: 4 }],
+    };
+    const groups = clusterBridgeDrawables([arm, branch, spur]);
+    expect(groups).toHaveLength(1);
+    const surfaces = clusterSurfaces(groups[0]);
+    expect(surfaces).toHaveLength(1);
+    expect(polygonAreaMetres(surfaces[0].outer)).toBeGreaterThan(80);
+    expect(shouldMeshClusterLines([arm, branch, spur], [], surfaces)).toBe(false);
+  });
+
   it('extends overhanging lines as stubs instead of replacing the deck', () => {
     const stubs = lineOverhangStubs({
       ...path,
@@ -519,6 +603,28 @@ describe('clustered bridge decks', () => {
     expect(linesFormParallelBundle(road, path)).toBe(true);
     expect(clusterBridgeDrawables([road, path])).toHaveLength(1);
     expect(clusterSurfaces([road, path])).toHaveLength(1);
+  });
+
+  it('follows the longer road when a tile polygon stops short', () => {
+    const stubDeck: BridgeDrawable = {
+      ...deck,
+      plan: [
+        { east: 0, north: -8 },
+        { east: 40, north: -8 },
+        { east: 40, north: 8 },
+        { east: 0, north: 8 },
+      ],
+    };
+    const span: BridgeDrawable = {
+      ...road,
+      plan: [{ east: 0, north: 0 }, { east: 140, north: 0 }],
+      coordinates: [[23.76, 61.498], [23.7626, 61.498]],
+    };
+    expect(shouldMeshClusterLines(
+      [span],
+      [stubDeck],
+      clusterSurfaces([span, stubDeck]),
+    )).toBe(true);
   });
 
   it('does not combine a diverging ramp into the main span', () => {
