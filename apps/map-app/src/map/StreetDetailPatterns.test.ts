@@ -21,7 +21,7 @@ describe('street surface patterns', () => {
     expect(pixel(grass, 8, 8)).not.toEqual(pixel(grass, 40, 28));
   });
 
-  it('keeps paving joints sparse and sand variation restrained', () => {
+  it('keeps paving joints darker than slabs and sand variation restrained', () => {
     const paving = createPavingPattern(64);
     const sand = createSandPattern(64);
     const slab = pixel(paving, 10, 10);

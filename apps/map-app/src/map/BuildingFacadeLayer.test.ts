@@ -8,6 +8,7 @@ import {
   uniqueBuildingWalls,
   wallLengthMeters,
 } from './BuildingFacadeLayer';
+import { pastelizeBuildingHex } from './MapPalette';
 
 function polygonFeature(
   id: number,
@@ -54,7 +55,7 @@ describe('building façade walls', () => {
     expect(isLikelyTileClipEdge([23.76, 61.498], [23.761, 61.4985])).toBe(false);
   });
 
-  it('keeps mapped facade colours and skips hide_3d outlines', () => {
+  it('pastelizes mapped facade colours and skips hide_3d outlines', () => {
     const colored = polygonFeature(11, [
       [23.76, 61.498],
       [23.761, 61.498],
@@ -71,7 +72,12 @@ describe('building façade walls', () => {
     ], { hide_3d: true });
 
     const walls = uniqueBuildingWalls([colored, hidden]);
-    expect(walls.every((wall) => wall.color === parseBuildingColour('#c47a62'))).toBe(true);
+    const raw = parseBuildingColour('#c47a62');
+    const pastel = pastelizeBuildingHex(raw!);
+    expect(pastel).not.toBe(raw);
+    expect(walls.every((wall) => wall.color === pastel)).toBe(true);
+    expect((pastel >> 16) & 255).toBeGreaterThan(220);
+    expect((pastel >> 8) & 255).toBeGreaterThan(190);
     expect(walls).toHaveLength(4);
   });
 

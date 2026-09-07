@@ -58,7 +58,9 @@ export function createGrassPattern(size = 256): PatternImage {
     for (let x = 0; x < size; x += 1) {
       const broad = seamValue(x, y, size, 2, 1, 0.4) * 0.55;
       const crossing = seamValue(x, y, size, 1, 2, 1.1) * 0.35;
-      const amount = Math.max(0, Math.min(1, 0.5 + broad + crossing));
+      const hash = ((x * 374_761_393 + y * 668_265_263) >>> 0) % 17;
+      const stipple = hash < 2 ? 0.18 : hash > 14 ? -0.1 : 0;
+      const amount = Math.max(0, Math.min(1, 0.5 + broad + crossing + stipple));
       const color = amount > 0.5
         ? mixRgb(field, patch, (amount - 0.5) * 2)
         : mixRgb(field, shade, (0.5 - amount) * 2);
@@ -69,12 +71,12 @@ export function createGrassPattern(size = 256): PatternImage {
   return { width: size, height: size, data };
 }
 
-/** Faint, widely spaced slab joints for pedestrian surfaces and parking. */
+/** Grid of paving slabs for pedestrian surfaces and parking. */
 export function createPavingPattern(size = 256): PatternImage {
   const data = new Uint8ClampedArray(size * size * 4);
-  const slab: Rgb = [236, 231, 218];
-  const joint: Rgb = [214, 208, 194];
-  const slabStep = 64;
+  const slab: Rgb = [238, 234, 222];
+  const joint: Rgb = [188, 182, 168];
+  const slabStep = 32;
   const jointWidth = 2;
 
   for (let y = 0; y < size; y += 1) {
@@ -138,7 +140,7 @@ export function streetSurfacePatternLayers(): FillLayerSpecification[] {
       ],
       paint: {
         'fill-pattern': GRASS_PATTERN_ID,
-        'fill-opacity': closeRangePatternOpacity(0.22),
+        'fill-opacity': closeRangePatternOpacity(0.28),
       },
     },
     {
@@ -166,7 +168,7 @@ export function streetSurfacePatternLayers(): FillLayerSpecification[] {
       ],
       paint: {
         'fill-pattern': PAVING_PATTERN_ID,
-        'fill-opacity': closeRangePatternOpacity(0.18),
+        'fill-opacity': closeRangePatternOpacity(0.32),
       },
     },
     {
@@ -178,7 +180,7 @@ export function streetSurfacePatternLayers(): FillLayerSpecification[] {
       filter: ['==', ['get', 'class'], 'parking'],
       paint: {
         'fill-pattern': PAVING_PATTERN_ID,
-        'fill-opacity': closeRangePatternOpacity(0.16),
+        'fill-opacity': closeRangePatternOpacity(0.26),
       },
     },
   ];

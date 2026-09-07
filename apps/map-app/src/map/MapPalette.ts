@@ -36,3 +36,20 @@ export const MAP_COLORS = {
   ambientGround: 0x8a9b7f,
   shadow: '#4b5d52',
 } as const;
+
+/** Mix toward ivory for OSM-mapped building colours (0 = raw, 1 = ivory). */
+export const BUILDING_PASTEL_MIX = 0.78;
+
+export function pastelizeBuildingHex(
+  hex: number,
+  ivoryHex = MAP_COLORS.building,
+  mix = BUILDING_PASTEL_MIX,
+) {
+  const t = Math.min(1, Math.max(0, mix));
+  const ivory = Number.parseInt(ivoryHex.replace('#', ''), 16);
+  const mixChannel = (from: number, to: number) => Math.round(from + (to - from) * t);
+  const r = mixChannel((hex >> 16) & 255, (ivory >> 16) & 255);
+  const g = mixChannel((hex >> 8) & 255, (ivory >> 8) & 255);
+  const b = mixChannel(hex & 255, ivory & 255);
+  return (r << 16) | (g << 8) | b;
+}

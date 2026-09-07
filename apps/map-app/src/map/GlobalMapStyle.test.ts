@@ -223,7 +223,7 @@ describe('global map overlay styles', () => {
     expect(filterOf('global-place-labels')).not.toContain('village');
   });
 
-  it('keeps supplied building colours and a deterministic ivory fallback', () => {
+  it('pastelizes mapped building colours and a deterministic ivory fallback', () => {
     const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
     const colorOf = (layerId: string) => JSON.stringify(
       (layersById.get(layerId)?.paint as Record<string, unknown> | undefined)?.['fill-extrusion-color']
@@ -232,6 +232,7 @@ describe('global map overlay styles', () => {
 
     expect(colorOf('global-buildings')).toContain('colour');
     expect(colorOf('global-building-ground-storeys')).toContain('colour');
+    expect(colorOf('global-buildings')).toContain('0.78');
     expect(colorOf('global-buildings')).toContain('fffdf8');
     expect(colorOf('global-building-ground-storeys')).toContain('dedad1');
   });
@@ -244,8 +245,10 @@ describe('global map overlay styles', () => {
     expect(layersById.get('global-railway-rail-right')?.minzoom).toBe(15);
     expect(layerIds.indexOf('global-railway-rail-left')).toBeGreaterThan(layerIds.indexOf('global-railway-bed'));
     expect(layerIds.indexOf('global-railways')).toBeGreaterThan(layerIds.indexOf('global-railway-sleepers'));
-    const railsPaint = layersById.get('global-railways')?.paint as Record<string, unknown> | undefined;
-    expect(JSON.stringify(railsPaint?.['line-opacity'])).toContain('17.4');
+    const railsPaint = layersById.get('global-railway-rail-left')?.paint as Record<string, unknown> | undefined;
+    expect(JSON.stringify(railsPaint?.['line-color'])).toContain('4a5254');
+    const centerlinePaint = layersById.get('global-railways')?.paint as Record<string, unknown> | undefined;
+    expect(JSON.stringify(centerlinePaint?.['line-opacity'])).toContain('17.4');
   });
 
   it('uses physical widths for close-up footpaths, cycleways and tracks', () => {

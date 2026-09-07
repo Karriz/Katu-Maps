@@ -5,6 +5,7 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
+import { MAP_COLORS, pastelizeBuildingHex } from './MapPalette';
 
 const FACADE_MIN_ZOOM = 15;
 const MAX_WALL_COUNT = 3_200;
@@ -239,15 +240,18 @@ export function uniqueBuildingWalls(features: SourceFeature[]): WallSegment[] {
     const heights = buildingHeights(feature.properties);
     const mappedColour = parseBuildingColour(feature.properties?.colour ?? feature.properties?.color);
     const seed = buildingColourSeed(id, centroid[0], centroid[1]);
+    const wallColour = mappedColour !== undefined
+      ? pastelizeBuildingHex(mappedColour, MAP_COLORS.building)
+      : fallbackBuildingColour(seed);
     const group = groups.get(groupKey) ?? {
       edges: [],
-      color: mappedColour ?? fallbackBuildingColour(seed),
+      color: wallColour,
       seed,
       base: heights.base,
       top: heights.top,
       centroid,
     };
-    if (mappedColour !== undefined) group.color = mappedColour;
+    if (mappedColour !== undefined) group.color = wallColour;
     group.base = Math.min(group.base, heights.base);
     group.top = Math.max(group.top, heights.top);
 
@@ -338,36 +342,33 @@ const FRAGMENT_SHADER = /* glsl */ `
   void main() {
     float distanceFade = smoothstep(260.0, 70.0, vDistance);
     float story = mod(vV, uStoryHeight);
-    float floorLine = 1.0 - smoothstep(0.035, 0.09, min(story, uStoryHeight - story));
     float ground = step(vV, uStoryHeight + 0.05);
 
-    float windowWidth = mix(1.05, 1.35, fract(vSeed * 12.9898));
-    float windowGap = mix(0.85, 1.25, fract(vSeed * 78.233));
-    float sill = mix(0.82, 1.05, fract(vSeed * 3.71));
-    float windowHeight = mix(1.25, 1.55, fract(vSeed * 9.13));
-    float cell = mod(vU + vSeed * 2.4, windowWidth + windowGap);
-    float inWindow = step(sill, story)
-      * step(story, sill + windowHeight)
-      * step(0.16, cell)
-      * step(cell, windowWidth);
+    // Wrapping window bands: a dark grey stripe per storey, with thin mullions.
+    float bandBottom = mix(0.82, 0.98, fract(vSeed * 3.71));
+    float bandTop = mix(2.12, 2.28, fract(vSeed * 9.13));
+    float upperBand = (1.0 - ground)
+      * step(bandBottom, story)
+      * step(story, bandTop);
+    float mullionPeriod = mix(3.8, 4.6, fract(vSeed * 12.9898));
+    float mullion = step(0.16, mod(vU + vSeed * 1.7, mullionPeriod));
+    float windowBand = upperBand * mullion;
 
+    // Taller, darker storefront wrapping the ground floor.
     float storefront = ground
-      * step(0.45, vV)
-      * step(vV, 2.45)
-      * step(0.2, mod(vU + 0.4, 4.6))
-      * step(mod(vU + 0.4, 4.6), 3.5);
+      * step(0.32, vV)
+      * step(vV, 2.62);
 
-    float windowMask = max(inWindow * (1.0 - ground), storefront);
+    float bandMask = max(windowBand, storefront);
     float alpha = uOpacity * distanceFade * (
-      windowMask * mix(0.36, 0.5, uNight)
-      + floorLine * 0.16
-      + ground * 0.06
+      storefront * mix(0.58, 0.7, uNight)
+      + windowBand * mix(0.46, 0.6, uNight)
     );
     if (alpha < 0.01) discard;
 
-    vec3 windowColor = mix(vColor * 0.55, vec3(0.36, 0.4, 0.36), 0.42 + uNight * 0.2);
-    vec3 color = mix(vColor * 0.88, windowColor, windowMask);
-    gl_FragColor = vec4(color, alpha);
+    vec3 bandColor = mix(vec3(0.40, 0.42, 0.42), vec3(0.32, 0.34, 0.34), storefront);
+    bandColor = mix(bandColor, bandColor * 0.72, uNight);
+    gl_FragColor = vec4(mix(vColor * 0.92, bandColor, bandMask), alpha);
   }
 `;
 

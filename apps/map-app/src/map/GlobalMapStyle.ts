@@ -10,7 +10,7 @@ import {
 } from './CartoonLighting';
 import { mixHex } from './DayNightAppearance';
 import { globeBiomeColor } from './GlobeBiomeStyle';
-import { MAP_COLORS } from './MapPalette';
+import { BUILDING_PASTEL_MIX, MAP_COLORS } from './MapPalette';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 
@@ -386,6 +386,14 @@ function matchColorVariants(variants: readonly string[]): ExpressionSpecificatio
   ] as ExpressionSpecification;
 }
 
+function pastelMappedBuildingColour(base: string): ExpressionSpecification {
+  return [
+    'interpolate', ['linear'], BUILDING_PASTEL_MIX,
+    0, ['to-color', ['get', 'colour'], base],
+    1, base,
+  ] as ExpressionSpecification;
+}
+
 export function buildingBodyColorExpression(
   base: string = GLOBAL_BUILDING_COLOR,
   alt: string = MAP_COLORS.buildingAlt,
@@ -394,7 +402,7 @@ export function buildingBodyColorExpression(
   return [
     'case',
     ['has', 'colour'],
-    ['to-color', ['get', 'colour'], base],
+    pastelMappedBuildingColour(base),
     matchColorVariants(variants),
   ] as ExpressionSpecification;
 }
@@ -408,8 +416,8 @@ export function buildingGroundColorExpression(
     'case',
     ['has', 'colour'],
     [
-      'interpolate', ['linear'], 0.32,
-      0, ['to-color', ['get', 'colour'], base],
+      'interpolate', ['linear'], 0.42,
+      0, pastelMappedBuildingColour(base),
       1, band,
     ],
     matchColorVariants(variants),
@@ -575,6 +583,8 @@ const ESTIMATED_RAIL_BED_WIDTH_METRES: ExpressionSpecification = [
 ] as ExpressionSpecification;
 
 const RAIL_GAUGE_OFFSET_METRES = 0.72;
+const RAIL_STROKE_WIDTH_METRES = 0.22;
+const RAIL_STEEL_COLOR = '#4a5254';
 
 const PATH_WIDTH_BY_LAYER: Array<{
   id: string;
@@ -623,7 +633,7 @@ export function applyLatitudeScaledLineWidths(map: MapLibreMap, latitude: number
     ['+', ESTIMATED_RAIL_BED_WIDTH_METRES, 0.5] as ExpressionSpecification,
     latitude,
   );
-  const railStrokeWidth = pathWidthExpression(0.18, latitude);
+  const railStrokeWidth = pathWidthExpression(RAIL_STROKE_WIDTH_METRES, latitude);
   [
     'global-railway-bed',
     'global-railway-bridge-casing',
@@ -1830,8 +1840,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#6f797b',
-        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-color': RAIL_STEEL_COLOR,
+        'line-width': pathWidthExpression(RAIL_STROKE_WIDTH_METRES, 61.4981),
         'line-offset': lineOffsetExpression(-RAIL_GAUGE_OFFSET_METRES, 61.4981),
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1854,8 +1864,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#6f797b',
-        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-color': RAIL_STEEL_COLOR,
+        'line-width': pathWidthExpression(RAIL_STROKE_WIDTH_METRES, 61.4981),
         'line-offset': lineOffsetExpression(RAIL_GAUGE_OFFSET_METRES, 61.4981),
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1973,8 +1983,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#5f696b',
-        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-color': RAIL_STEEL_COLOR,
+        'line-width': pathWidthExpression(RAIL_STROKE_WIDTH_METRES, 61.4981),
         'line-offset': lineOffsetExpression(-RAIL_GAUGE_OFFSET_METRES, 61.4981),
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1997,8 +2007,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#5f696b',
-        'line-width': pathWidthExpression(0.18, 61.4981),
+        'line-color': RAIL_STEEL_COLOR,
+        'line-width': pathWidthExpression(RAIL_STROKE_WIDTH_METRES, 61.4981),
         'line-offset': lineOffsetExpression(RAIL_GAUGE_OFFSET_METRES, 61.4981),
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -3125,7 +3135,13 @@ export function applyMapTheme(
   ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
   ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
-  ['global-tracks', 'global-railways', 'global-overview-railways', 'global-railway-rail-left', 'global-railway-rail-right', 'global-railway-bridge-rail-left', 'global-railway-bridge-rail-right'].forEach((id) => set(id, 'line-color', colors.rail));
+  ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
+  [
+    'global-railway-rail-left',
+    'global-railway-rail-right',
+    'global-railway-bridge-rail-left',
+    'global-railway-bridge-rail-right',
+  ].forEach((id) => set(id, 'line-color', mixHex(colors.rail, RAIL_STEEL_COLOR, 0.62)));
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
     set(id, 'fill-color', buildingBodyColorExpression(colors.building, colors.buildingBand));
     set(id, 'fill-outline-color', colors.boundary);
