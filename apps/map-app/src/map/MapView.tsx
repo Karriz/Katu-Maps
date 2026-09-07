@@ -1021,6 +1021,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       sourceId: OPENFREEMAP_SOURCE_ID,
       waterLayers: ['water'],
       vegetationLayers: ['landcover', 'landuse', 'park'],
+      biomeLayer: 'global-globe-biomes',
     });
     flightTreeLayer.setExtendedViewportRange(true);
     try {
@@ -1975,6 +1976,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       sourceId: OPENFREEMAP_SOURCE_ID,
       waterLayers: ['water'],
       vegetationLayers: ['landcover', 'landuse', 'park'],
+      biomeLayer: 'global-globe-biomes',
     });
     treeLayerRef.current = treeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();

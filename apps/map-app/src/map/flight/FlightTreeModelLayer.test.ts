@@ -153,6 +153,7 @@ describe('TreeModelLayer', () => {
     (layer as any).trunkMesh = { count: 1, instanceMatrix: { needsUpdate: false } };
     (layer as any).broadleafMesh = { count: 1, instanceMatrix: { needsUpdate: false } };
     (layer as any).coniferMesh = { count: 0, instanceMatrix: { needsUpdate: false } };
+    (layer as any).palmMesh = { count: 0, instanceMatrix: { needsUpdate: false } };
     (layer as any).shrubMesh = { count: 0, instanceMatrix: { needsUpdate: false } };
     (layer as any).shadowMesh = { count: 1, instanceMatrix: { needsUpdate: false } };
     (layer as any).displayedTrees = new Map([['keep', {
