@@ -11,6 +11,7 @@ import { TRAFFIC_CAMERA_LAYER_IDS } from './TrafficCamerasLayer';
 import { CHARGING_STATION_LAYER_IDS } from './ChargingStationsLayer';
 import { ROAD_WEATHER_LAYER_IDS } from './RoadWeatherLayer';
 import { ROAD_TRAFFIC_LAYER_IDS } from './RoadTrafficLayer';
+import { applyGroundPatternTheme } from './GroundPatterns';
 
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
@@ -112,6 +113,7 @@ export function useMapLayerVisibility({
     treeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     bridgeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    applyGroundPatternTheme(map, resolvedTheme);
     if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();

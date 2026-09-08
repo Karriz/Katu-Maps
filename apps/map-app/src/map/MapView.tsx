@@ -158,6 +158,12 @@ import {
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
+import {
+  createGroundPattern,
+  groundPatternImageId,
+  groundPatternKinds,
+  groundPatternLayers,
+} from './GroundPatterns';
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
@@ -647,9 +653,9 @@ function createWaterPattern(size: number) {
       const vertical = (y / size) * tau;
       // Integer-frequency waves meet at every edge, making the generated
       // image seamless when MapLibre repeats it across water polygons.
-      const broad = Math.sin(horizontal + vertical * 2) * 0.29;
-      const crossing = Math.cos(horizontal * 2 - vertical) * 0.14;
-      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.07;
+      const broad = Math.sin(horizontal + vertical * 2) * 0.38;
+      const crossing = Math.cos(horizontal * 2 - vertical) * 0.2;
+      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.1;
       const shade = Math.max(0, Math.min(1, 0.5 + broad + crossing + detail));
       const offset = (y * size + x) * 4;
 
@@ -677,10 +683,10 @@ function globalWaterPatternLayer(): FillLayerSpecification {
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
         6, 0,
-        7, 0.025,
-        10, 0.08,
-        14, 0.12,
-        18, 0.17,
+        7, 0.04,
+        10, 0.12,
+        14, 0.18,
+        18, 0.24,
       ],
     },
   };
@@ -2404,6 +2410,15 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // providing broad variation at every zoom without a custom shader.
       map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
+      // Ground textures use a large, quiet repeat so they read as material
+      // variation rather than map noise. Both palettes are registered up
+      // front so theme changes only swap the image used by each layer.
+      for (const kind of groundPatternKinds()) {
+        for (const theme of ['light', 'dark'] as const) {
+          map.addImage(groundPatternImageId(kind, theme), createGroundPattern(256, kind, theme), { pixelRatio: 0.5 });
+        }
+      }
+      for (const layer of groundPatternLayers()) map.addLayer(layer, 'global-pedestrian-areas');
       map.addLayer(bridgeLayer, 'global-road-labels');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
