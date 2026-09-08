@@ -7,11 +7,72 @@ import {
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
+  updateBridgeFallback,
+  removeBridgeFallback,
+  refreshMapRenderState,
 } from './GlobalMapStyle';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
+  it('preserves an elevated flight camera through an immediate style redraw', () => {
+    let elevation = 450;
+    let roll = 20;
+    let renderedElevation: number | undefined;
+    const map = {
+      getCenter: () => ({ lng: 18.08, lat: 59.3 }),
+      getCenterElevation: () => elevation,
+      getZoom: () => 16,
+      getBearing: () => 75,
+      getPitch: () => 95,
+      getRoll: () => roll,
+      getPadding: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+      jumpTo: (options: { elevation?: number; roll?: number }) => {
+        // MapLibre samples ground before applying an explicit camera elevation.
+        elevation = options.elevation ?? 30;
+        roll = options.roll ?? roll;
+      },
+      redraw: () => { renderedElevation = elevation; },
+    };
+    refreshMapRenderState(map as any);
+    expect(renderedElevation).toBe(450);
+    expect(roll).toBe(20);
+  });
+
+  it('renders skipped bridge geometry with valid themed fallback layers and cleans them up', () => {
+    const style = structuredClone(GLOBAL_MAP_STYLE);
+    const data = { type: 'FeatureCollection' as const, features: [] };
+    const map = {
+      getStyle: () => style,
+      getSource: (id: string) => style.sources[id],
+      addSource: (id: string, source: any) => { style.sources[id] = source; },
+      getLayer: (id: string) => style.layers.find((layer) => layer.id === id),
+      addLayer: (layer: any, before: string) => { style.layers.splice(style.layers.findIndex((item) => item.id === before), 0, layer); },
+      setLayoutProperty: (id: string, name: string, value: any) => { (map.getLayer(id)!.layout as any)[name] = value; },
+      setPaintProperty: (id: string, name: string, value: any) => { (map.getLayer(id)!.paint as any)[name] = value; },
+      removeLayer: (id: string) => { style.layers = style.layers.filter((layer) => layer.id !== id); },
+      removeSource: (id: string) => { delete style.sources[id]; },
+    };
+    updateBridgeFallback(map as any, data, true);
+    expect(style.sources['bridge-fallback']).toBeUndefined();
+    const features = { type: 'FeatureCollection' as const, features: [{ type: 'Feature' as const,
+      properties: { class: 'primary', brunnel: 'bridge' },
+      geometry: { type: 'LineString' as const, coordinates: [[18, 59], [18.01, 59]] } }] };
+    updateBridgeFallback(map as any, features, true);
+    expect(validateStyleMin(style)).toEqual([]);
+    const road = map.getLayer('global-road-bridges-fallback')!;
+    expect(road.layout?.visibility).toBe('visible');
+    expect(road).not.toHaveProperty('source-layer');
+    expect(map.getLayer('global-footways-fallback')).toBeTruthy();
+    (map.getLayer('global-road-bridges')!.paint as any)['line-color'] = '#123456';
+    updateBridgeFallback(map as any, features, false);
+    expect(road.layout?.visibility).toBe('none');
+    expect((road.paint as any)['line-color']).toBe('#123456');
+    removeBridgeFallback(map as any);
+    expect(style.sources['bridge-fallback']).toBeUndefined();
+    expect(style.layers.some((layer) => layer.id.endsWith('-fallback'))).toBe(false);
+  });
+
   it('is accepted by the MapLibre style specification', () => {
     expect(validateStyleMin(GLOBAL_MAP_STYLE)).toEqual([]);
   });

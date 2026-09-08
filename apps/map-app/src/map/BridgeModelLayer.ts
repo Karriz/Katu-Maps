@@ -6,6 +6,7 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
+import type { Feature, FeatureCollection } from 'geojson';
 import { createExpression } from '@maplibre/maplibre-gl-style-spec';
 import {
   CARTOON_AMBIENT_GROUND_COLOR,
@@ -20,6 +21,8 @@ import {
   OPENFREEMAP_SOURCE_ID,
   refreshMapRenderState,
   setDrapedElevatedBridgeLayersVisible,
+  updateBridgeFallback,
+  removeBridgeFallback,
 } from './GlobalMapStyle';
 
 export const BRIDGE_MODEL_LAYER_ID = 'bridge-models-3d';
@@ -125,6 +128,7 @@ export type BridgeLineProperties = {
 };
 
 export type BridgeLine = {
+  sourceKeys?: string[];
   coordinates: Array<[number, number]>;
   properties: BridgeLineProperties;
 };
@@ -145,6 +149,7 @@ export type PlanOrigin = {
 };
 
 export type BridgeDrawable = {
+  sourceKeys?: string[];
   kind: 'line' | 'polygon';
   coordinates: Array<[number, number]>;
   plan: PlanPoint[];
@@ -179,6 +184,7 @@ export type BridgePaintPart = {
 };
 
 type SampledBridge = {
+  sourceKeys?: string[];
   surfaces: DeckSurface[];
   surface: SampledPoint[];
   indices: number[];
@@ -208,6 +214,7 @@ type LocalPoint = {
 };
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
+type BridgeSampleResult = { bridges: SampledBridge[]; pending: boolean; fallbackFeatures?: Map<string, Feature> };
 
 export function inflatePlanPoints<T extends PlanPoint>(points: T[], metres: number) {
   if (points.length === 0 || metres === 0) return points;
@@ -2267,6 +2274,9 @@ function stitchMatch(current: BridgeLine, candidate: BridgeLine, maxMetres: numb
 }
 
 function applyStitch(current: BridgeLine, candidate: BridgeLine, mode: StitchMode) {
+  if (current.sourceKeys || candidate.sourceKeys) {
+    current.sourceKeys = [...new Set([...(current.sourceKeys ?? []), ...(candidate.sourceKeys ?? [])])];
+  }
   const skipDuplicate = (first: [number, number], second: [number, number]) => (
     segmentLengthMetres(first, second) < 0.4
   );
@@ -2494,8 +2504,11 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private readonly bridgeResources = new Map<string, BridgeResources>();
   private pierOrigin = this.sceneOrigin;
   private pierOriginElevation = 0;
-  private samplingJob?: { generator: Generator<void, { bridges: SampledBridge[]; pending: boolean }, void>; view: string };
-  private meshWrite?: { entries: Array<{ bridge: SampledBridge; paintBridge: SampledBridge; key: string }>; index: number };
+  private samplingJob?: { generator: Generator<void, BridgeSampleResult, void>; view: string };
+  private fallbackFeatures = new Map<string, Feature>();
+  private fallbackData: FeatureCollection = { type: 'FeatureCollection', features: [] };
+  private fallbackSignature = '';
+  private meshWrite?: { entries: Array<{ bridge: SampledBridge; paintBridge: SampledBridge; key: string; sourceKeys?: string[] }>; index: number };
   private jobStarted = 0;
   private activeResourceKeys?: Set<string>;
   private readonly geometryCache = new Map<string, NonNullable<ReturnType<BridgeModelLayer['buildClusterGeometry']>>>();
@@ -2699,6 +2712,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
     this.pendingElevation = false;
     this.sampledBridges = sampled.bridges;
+    this.fallbackFeatures = ('fallbackFeatures' in sampled ? sampled.fallbackFeatures : undefined) ?? new Map();
+    this.fallbackSignature = '';
     this.meshWrite = undefined;
 
     this.sceneOrigin = map.getCenter();
@@ -2763,6 +2778,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.drapedHandoff = undefined;
     this.drapedStyleRefreshId += 1;
     this.setDrapedVisible(true);
+    if (this.map) removeBridgeFallback(this.map);
+    this.fallbackFeatures.clear();
+    this.fallbackData = { type: 'FeatureCollection', features: [] };
+    this.fallbackSignature = '';
     this.clearMeshes();
     this.pierMesh?.geometry.dispose();
     const pierMaterial = this.pierMesh?.material;
@@ -2855,7 +2874,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
   }
 
-  private *sampleBridgeJob(map: MaplibreMap, view: BridgeViewState): Generator<void, { bridges: SampledBridge[]; pending: boolean }, void> {
+  private *sampleBridgeJob(map: MaplibreMap, view: BridgeViewState): Generator<void, BridgeSampleResult, void> {
     if (!map.getSource(this.sourceId)) return { bridges: [] as SampledBridge[], pending: false };
     let features: SourceFeature[] = [];
     try {
@@ -2869,7 +2888,9 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     const uniqueLines = new Map<string, BridgeLine>();
+    const fallbackFeatures = new Map<string, Feature>();
     const uniquePolygons = new Map<string, {
+      sourceKeys: string[];
       coordinates: Array<[number, number]>;
       holes: Array<Array<[number, number]>>;
       properties: BridgeLineProperties;
@@ -2880,19 +2901,25 @@ export class BridgeModelLayer implements CustomLayerInterface {
       const polygonParts = polygonPartsFromFeature(feature);
       if (polygonParts.length > 0) {
         for (const part of polygonParts) {
-          const forward = lineSignature(part.outer);
-          const reverse = lineSignature(part.outer.slice().reverse());
+          const identity = JSON.stringify([properties, part.holes]);
+          const forward = identity + lineSignature(part.outer);
+          const reverse = identity + lineSignature(part.outer.slice().reverse());
           if (uniquePolygons.has(forward) || uniquePolygons.has(reverse)) continue;
-          uniquePolygons.set(forward, { coordinates: part.outer, holes: part.holes, properties });
+          uniquePolygons.set(forward, { coordinates: part.outer, holes: part.holes, properties, sourceKeys: [forward] });
+          fallbackFeatures.set(forward, { type: 'Feature', properties: feature.properties,
+            geometry: { type: 'Polygon', coordinates: [part.outer, ...part.holes].map((ring) => [...ring, ring[0]]) } });
         }
         continue;
       }
-      if (!LINE_BRIDGE_CLASSES.has(properties.className)) continue;
       for (const coordinates of linePartsFromGeometry(feature.geometry)) {
-        const forward = lineSignature(coordinates);
-        const reverse = lineSignature(coordinates.slice().reverse());
+        const identity = JSON.stringify(properties);
+        const forward = identity + lineSignature(coordinates);
+        const reverse = identity + lineSignature(coordinates.slice().reverse());
         if (uniqueLines.has(forward) || uniqueLines.has(reverse)) continue;
-        uniqueLines.set(forward, { coordinates, properties });
+        fallbackFeatures.set(forward, { type: 'Feature', properties: feature.properties,
+          geometry: { type: 'LineString', coordinates } });
+        if (!LINE_BRIDGE_CLASSES.has(properties.className)) continue;
+        uniqueLines.set(forward, { coordinates, properties, sourceKeys: [forward] });
       }
     }
 
@@ -2912,12 +2939,13 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const seed = mergedLines[0]?.coordinates[0] ?? polygons[0]?.coordinates[0];
     if (!seed) {
       const waitingForTiles = typeof map.isSourceLoaded === 'function' && !map.isSourceLoaded(this.sourceId);
-      return { bridges: [] as SampledBridge[], pending: waitingForTiles };
+      return { bridges: [] as SampledBridge[], pending: waitingForTiles, fallbackFeatures };
     }
     const origin = planOriginFromLngLat(seed[0], seed[1]);
     const drawables: BridgeDrawable[] = [
       ...mergedLines.map((line) => ({
         kind: 'line' as const,
+        sourceKeys: line.sourceKeys,
         coordinates: line.coordinates,
         plan: lngLatsToPlan(line.coordinates, origin),
         properties: line.properties,
@@ -2925,6 +2953,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       })),
       ...polygons.map((polygon) => ({
         kind: 'polygon' as const,
+        sourceKeys: polygon.sourceKeys,
         coordinates: polygon.coordinates,
         plan: lngLatsToPlan(polygon.coordinates, origin),
         holes: polygon.holes.map((hole) => lngLatsToPlan(hole, origin)),
@@ -2972,7 +3001,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       }
       yield;
     }
-    return { bridges, pending: this.pendingElevation };
+    return { bridges, pending: this.pendingElevation, fallbackFeatures };
   }
 
   private buildClusterGeometry(cluster: BridgeDrawable[], surfaces: DeckSurface[], spanLength: number, origin: PlanOrigin) {
@@ -3116,6 +3145,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const endSamples = meshT.flatMap((t, index) => (t >= 0.92 ? [ground[index]] : []));
     const startGround = averageOr(startSamples, ground[0]);
     const endGround = averageOr(endSamples, ground[ground.length - 1]);
+    // Layer tags can be missing along a continuous bridge. Do not derive height
+    // offsets from them until missing levels can be resolved across continuations.
     const arch = bridgeArchMetres(spanLength);
     const baseDeck = meshT.map((t, index) => {
       const spanHeight = surfaceElevation(t, startGround, startGround, endGround, arch);
@@ -3146,6 +3177,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
     return {
       surfaces,
+      sourceKeys: [...new Set(cluster.flatMap((drawable) => drawable.sourceKeys ?? []))],
       surface: meshPoints.map((point, index) => ({
         longitude: coordinates[index][0],
         latitude: coordinates[index][1],
@@ -3255,7 +3287,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       const entries = this.sampledBridges.flatMap((bridge) => {
         const sections = this.textureSections(bridge, Math.min(MAX_TEXTURE_SECTIONS, spareSections + 1));
         spareSections -= sections.length - 1;
-        return sections.map((section) => ({ ...section, key: bridgeResourceKey(section.bridge) }));
+        return sections.map((section) => ({ ...section, sourceKeys: bridge.sourceKeys, key: bridgeResourceKey(section.bridge) }));
       });
       const activeKeys = new Set(entries.map((entry) => entry.key));
       this.activeResourceKeys = activeKeys;
@@ -3267,10 +3299,6 @@ export class BridgeModelLayer implements CustomLayerInterface {
         this.disposeResource(resource);
         this.bridgeResources.delete(key);
       }
-      this.pierOrigin = this.sceneOrigin;
-      this.pierOriginElevation = this.sceneOriginElevation;
-      pierMesh.position.set(0, 0, 0);
-      pierMesh.scale.set(1, 1, 1);
       this.meshWrite = { entries, index: 0 };
     }
 
@@ -3293,6 +3321,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
       if (resource) this.decks.add(resource.deck, resource.shadow);
     }
 
+    // Every continuation rewrites all instances in the current scene frame.
+    // Rendering may have recentered since the preceding batch.
+    this.pierOrigin = this.sceneOrigin;
+    this.pierOriginElevation = this.sceneOriginElevation;
     let pierCount = 0;
     for (const bridge of this.sampledBridges) {
       for (const pier of bridge.piers ?? []) {
@@ -3314,6 +3346,23 @@ export class BridgeModelLayer implements CustomLayerInterface {
     pierMesh.instanceMatrix.needsUpdate = true;
     pierMesh.visible = pierCount > 0;
     const complete = this.meshWrite.index >= entries.length;
+    const replaced = new Set<string>();
+    // A feature remains draped until every texture section of its bridge exists.
+    for (const bridge of this.sampledBridges) {
+      const keys = bridge.sourceKeys ?? [];
+      if (!keys.length) continue;
+      const sections = entries.filter((entry) => entry.sourceKeys === bridge.sourceKeys);
+      if (sections.length && sections.every((entry) => this.bridgeResources.has(entry.key))) {
+        keys.forEach((key) => replaced.add(key));
+      }
+    }
+    const fallback = [...this.fallbackFeatures].filter(([key]) => !replaced.has(key));
+    const fallbackSignature = JSON.stringify(fallback.map(([key]) => key));
+    if (fallbackSignature !== this.fallbackSignature) {
+      this.fallbackSignature = fallbackSignature;
+      this.fallbackData = { type: 'FeatureCollection', features: fallback.map(([, feature]) => feature) };
+    }
+    if (this.map) updateBridgeFallback(this.map, this.fallbackData, !this.drapedVisible);
     if (complete) this.meshWrite = undefined;
     else this.map?.triggerRepaint();
     return complete;
@@ -3600,6 +3649,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (!map) return;
     setDrapedElevatedBridgeLayersVisible(map, visible);
     this.drapedVisible = visible;
+    updateBridgeFallback(map, this.fallbackData, !visible);
     this.scheduleDrapedStyleRefresh();
   }
 
@@ -3635,6 +3685,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       this.paintSignature = signature;
       this.paintValues = new Map(values);
       this.paintExpressions.clear();
+      updateBridgeFallback(map, this.fallbackData, !this.drapedVisible);
     }
     const started = performance.now();
     let painted = 0;

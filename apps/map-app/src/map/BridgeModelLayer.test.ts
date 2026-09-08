@@ -1263,6 +1263,8 @@ describe('BridgeModelLayer', () => {
       ...terrainViewMap(),
       getCenter: () => ({ lng: 23.76, lat: 61.5 }),
       getBearing: () => 0,
+      getCenterElevation: () => 180,
+      getRoll: () => 12,
       getPadding: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
       queryTerrainElevation: () => 0,
       getLayer: () => ({}),
@@ -1286,6 +1288,8 @@ describe('BridgeModelLayer', () => {
       zoom: 15,
       pitch: 40,
       bearing: 0,
+      elevation: 180,
+      roll: 12,
     }));
     expect(redraw).toHaveBeenCalled();
   });
@@ -1309,6 +1313,28 @@ describe('BridgeModelLayer', () => {
     expect((layer as any).sampledBridges).toEqual([]);
     expect(setDrapedVisible).toHaveBeenCalledWith(true);
     expect(layer.needsElevationRetry()).toBe(true);
+  });
+
+  it('retains original fallback geometry for short bridges and bridges beyond the mesh budget', () => {
+    const layer = new BridgeModelLayer() as any;
+    const origin = planOriginFromLngLat(18.08, 59.3);
+    const features = Array.from({ length: 242 }, (_, index) => ({
+      type: 'Feature', properties: { class: 'primary', brunnel: 'bridge', layer: 1 },
+      geometry: { type: 'LineString', coordinates: [
+        planToLngLat({ east: 0, north: index * 25 }, origin),
+        planToLngLat({ east: index === 241 ? 2 : 100, north: index * 25 }, origin),
+      ] },
+    }));
+    const job = layer.sampleBridgeJob({ getSource: () => ({}), querySourceFeatures: () => features,
+      queryTerrainElevation: () => 0 },
+    { west: 18.07, east: 18.09, south: 59.29, north: 59.37, zoom: 16 });
+    let result = job.next();
+    while (!result.done) result = job.next();
+    expect(result.value.bridges).toHaveLength(240);
+    const replaced = new Set(result.value.bridges.flatMap((bridge: any) => bridge.sourceKeys));
+    const skipped = [...result.value.fallbackFeatures].filter(([key]) => !replaced.has(key));
+    expect(skipped).toHaveLength(2);
+    expect(skipped.map(([, feature]) => feature)).toContainEqual(features[241]);
   });
 
   const withBridgeResources = (run: (layer: BridgeModelLayer, internal: any, bridge: any) => void) => {
@@ -1751,17 +1777,37 @@ describe('BridgeModelLayer', () => {
       try {
         internal.sampledBridges = [0, 1, 2].map((index) => ({
           ...bridge,
+          sourceKeys: [String(index)],
+          piers: [{ longitude: 23.76, latitude: 61.5, ground: 2, deck: 12 }],
           surface: bridge.surface.map((point: any) => ({ ...point, longitude: point.longitude + index })),
         }));
+        internal.fallbackFeatures = new Map(['0', '1', '2', 'skipped'].map((key) => [key,
+          { type: 'Feature', properties: { key }, geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] } }]));
         internal.writeMeshes();
         expect(internal.bridgeResources.size).toBe(1);
+        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['1', '2', 'skipped']);
         expect(internal.meshWrite).toBeTruthy();
+        internal.sceneOrigin = { lng: internal.sceneOrigin.lng + 0.01, lat: internal.sceneOrigin.lat + 0.01 };
+        internal.sceneOriginElevation = 4;
         internal.writeMeshes();
         expect(internal.bridgeResources.size).toBe(2);
+        const matrix = new THREE.Matrix4();
+        internal.pierMesh.getMatrixAt(0, matrix);
+        const pierPosition = new THREE.Vector3().setFromMatrixPosition(matrix)
+          .multiply(internal.pierMesh.scale).add(internal.pierMesh.position);
+        const expectedPier = internal.toLocal(23.76, 61.5, 7);
+        expect(pierPosition.x).toBeCloseTo(expectedPier.east, 3);
+        expect(pierPosition.y).toBeCloseTo(expectedPier.up, 3);
+        expect(pierPosition.z).toBeCloseTo(expectedPier.north, 3);
+        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['2', 'skipped']);
         internal.writeMeshes();
         expect(internal.bridgeResources.size).toBe(3);
         expect(internal.meshWrite).toBeUndefined();
         expect(internal.decks.children).toHaveLength(6);
+        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['skipped']);
+        internal.sampledBridges = internal.sampledBridges.map((sample: any) => ({ ...sample, sourceKeys: [...sample.sourceKeys] }));
+        internal.writeMeshes();
+        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['skipped']);
       } finally {
         time.mockRestore();
       }
@@ -1880,6 +1926,33 @@ describe('BridgeModelLayer', () => {
 });
 
 describe('bridgePaintColors', () => {
+  it('preserves source levels without deriving height offsets from incomplete layer tags', () => {
+    const layer = new BridgeModelLayer() as any;
+    const origin = planOriginFromLngLat(18.08, 59.3);
+    const plan = [{ east: 0, north: 0 }, { east: 100, north: 0 }];
+    const coordinates = plan.map((point) => planToLngLat(point, origin));
+    const features = [undefined, 3].map((level) => ({
+      type: 'Feature', properties: { class: 'primary', brunnel: 'bridge', ...(level === undefined ? {} : { layer: level }) },
+      geometry: { type: 'LineString', coordinates },
+    }));
+    const job = layer.sampleBridgeJob({ getSource: () => ({}), querySourceFeatures: () => features,
+      queryTerrainElevation: () => 0 },
+    { west: 18.07, east: 18.09, south: 59.29, north: 59.31, zoom: 16 });
+    let result = job.next();
+    while (!result.done) result = job.next();
+    expect(result.value.bridges).toHaveLength(2);
+    const peaks = result.value.bridges.map((bridge: any) => Math.max(...bridge.surface.map((p: any) => p.deck)));
+    expect(peaks[1]).toBeCloseTo(peaks[0], 6);
+
+    const polygon = (level: number): BridgeDrawable => ({ kind: 'polygon', coordinates,
+      plan: [{ east: 0, north: -5 }, { east: 100, north: -5 }, { east: 100, north: 5 }, { east: 0, north: 5 }],
+      width: 0, properties: { className: 'bridge', layer: level, ramp: false } });
+    expect(clusterBridgeDrawables([polygon(0), polygon(3)])).toHaveLength(1);
+    const line: BridgeDrawable = { kind: 'line', plan, coordinates, width: 9,
+      properties: { className: 'primary', layer: 3, ramp: false } };
+    expect(clusterBridgeDrawables([polygon(0), line])).toHaveLength(1);
+  });
+
   it('uses path and cycleway colors from the 2D style', () => {
     expect(bridgePaintColors({ className: 'path', subclass: 'cycleway', layer: 0, ramp: false })).toEqual({
       fill: '#e8ddd6',

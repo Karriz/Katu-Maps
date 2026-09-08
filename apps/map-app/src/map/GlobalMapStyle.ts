@@ -13,6 +13,7 @@ import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { FeatureCollection } from 'geojson';
 
 export const OPENFREEMAP_SOURCE_ID = 'openfreemap';
 export const MAPTERHORN_SOURCE_ID = 'terrain';
@@ -373,6 +374,62 @@ export function setDrapedElevatedBridgeLayersVisible(map: BridgeStyleMap, draped
       drapedVisible ? ROAD_CENTER_MARKING_FILTER : ROAD_CENTER_MARKING_FILTER_WITHOUT_BRIDGES,
     );
   }
+}
+
+const BRIDGE_FALLBACK_SOURCE_ID = 'bridge-fallback';
+const bridgeFallbackIds = [
+  ...GLOBAL_ELEVATED_BRIDGE_LINE_LAYER_IDS, ...GLOBAL_BRIDGE_DECK_LAYER_IDS,
+  ...SURFACE_PATH_LAYER_FILTERS.map(([id]) => id), ROAD_CENTER_MARKINGS_LAYER_ID,
+];
+const bridgeFallbackStates = new WeakMap<MapLibreMap, { data?: FeatureCollection; style: string }>();
+
+/** Reuse the hosted style for original features without a completed 3D replacement. */
+export function updateBridgeFallback(map: MapLibreMap, data: FeatureCollection, visible: boolean) {
+  if (!map.getStyle || !map.addSource) return;
+  if (!map.getSource(BRIDGE_FALLBACK_SOURCE_ID)) {
+    if (!data.features.length) return;
+    map.addSource(BRIDGE_FALLBACK_SOURCE_ID, { type: 'geojson', data, maxzoom: 16 });
+    bridgeFallbackStates.set(map, { data, style: '' });
+  }
+  const state = bridgeFallbackStates.get(map) ?? { style: '' };
+  bridgeFallbackStates.set(map, state);
+  if (state.data !== data) {
+    (map.getSource(BRIDGE_FALLBACK_SOURCE_ID) as import('maplibre-gl').GeoJSONSource).setData(data);
+    state.data = data;
+  }
+  const filters = new Map(SURFACE_PATH_LAYER_FILTERS);
+  filters.set(ROAD_CENTER_MARKINGS_LAYER_ID, ROAD_CENTER_MARKING_FILTER);
+  const originals = map.getStyle().layers.filter((layer) => bridgeFallbackIds.includes(layer.id));
+  const layers = originals.flatMap((original) => {
+    if (original.type !== 'line' && original.type !== 'fill') return [];
+    const { 'source-layer': _sourceLayer, ...layer } = original;
+    const filter = filters.get(layer.id) ?? layer.filter;
+    return [{ ...layer, id: `${layer.id}-fallback`, source: BRIDGE_FALLBACK_SOURCE_ID,
+      filter: ['all', ['==', ['get', 'brunnel'], 'bridge'], ...(filter ? [filter] : [])] as FilterSpecification,
+      layout: { ...layer.layout, visibility: visible ? 'visible' as const : 'none' as const } }];
+  });
+  const signature = JSON.stringify(layers);
+  if (state.style === signature) return;
+  for (const layer of layers) {
+    if (!map.getLayer(layer.id)) {
+      map.addLayer(layer, layer.id.replace(/-fallback$/, ''));
+    } else {
+      map.setLayoutProperty(layer.id, 'visibility', layer.layout.visibility);
+      for (const [name, value] of Object.entries(layer.paint ?? {})) {
+        map.setPaintProperty(layer.id, name as Parameters<MapLibreMap['setPaintProperty']>[1], value);
+      }
+    }
+  }
+  state.style = signature;
+}
+
+export function removeBridgeFallback(map: MapLibreMap) {
+  if (!bridgeFallbackStates.has(map)) return;
+  for (const id of bridgeFallbackIds) {
+    if (map.getLayer?.(`${id}-fallback`)) map.removeLayer(`${id}-fallback`);
+  }
+  if (map.getSource?.(BRIDGE_FALLBACK_SOURCE_ID)) map.removeSource(BRIDGE_FALLBACK_SOURCE_ID);
+  bridgeFallbackStates.delete(map);
 }
 
 export const GLOBAL_ROAD_CASING_LAYER_IDS = [
@@ -2950,16 +3007,20 @@ function refreshMapAfterTheme(map: MapLibreMap) {
 /** Force terrain-draped layers to rebuild without a user camera gesture. */
 export function refreshMapRenderState(map: Pick<
   MapLibreMap,
-  'jumpTo' | 'redraw' | 'getCenter' | 'getZoom' | 'getBearing' | 'getPitch' | 'getPadding'
+  'jumpTo' | 'redraw' | 'getCenter' | 'getCenterElevation' | 'getZoom' | 'getBearing' | 'getPitch' | 'getRoll' | 'getPadding'
 >) {
   // Terrain keeps a render-to-texture of draped vector layers. Visibility and
   // filter changes do not invalidate that cache until a camera event. Re-apply
   // the current camera so MapLibre rebuilds buckets without moving the view.
   map.jumpTo({
     center: map.getCenter(),
+    // jumpTo samples terrain even with ground clamping disabled. Flight uses
+    // an elevated look-at target, which must survive this immediate redraw.
+    elevation: map.getCenterElevation(),
     zoom: map.getZoom(),
     bearing: map.getBearing(),
     pitch: map.getPitch(),
+    roll: map.getRoll(),
     padding: map.getPadding(),
   });
   map.redraw();
