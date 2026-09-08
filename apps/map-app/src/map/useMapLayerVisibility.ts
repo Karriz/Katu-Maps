@@ -73,6 +73,12 @@ export function useMapLayerVisibility({
       return;
     }
     setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
+    terrainEnabledRef.current = layerToggles.terrain;
+    syncTerrain3d(map, { userEnabled: layerToggles.terrain, source: terrainSourceRef.current });
+    if (map.getLayer('terrain-hillshade')) {
+      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
+    }
+    bridgeLayerRef.current?.setEnabled(layerToggles.bridges);
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
       .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'), layerToggles.transit);
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
@@ -91,11 +97,6 @@ export function useMapLayerVisibility({
     if (layerToggles.transitLines) void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
     setVisibility(waterEffectLayerIds, true);
     map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
-    terrainEnabledRef.current = layerToggles.terrain;
-    syncTerrain3d(map, { userEnabled: layerToggles.terrain, source: terrainSourceRef.current });
-    if (map.getLayer('terrain-hillshade')) {
-      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
-    }
     map.triggerRepaint();
     treeRefreshRef.current?.();
     if (!layerToggles.transit) onTransitDisabled();
@@ -103,7 +104,7 @@ export function useMapLayerVisibility({
     if (!layerToggles.chargingStations) onChargingStationsDisabled();
     if (!layerToggles.roadWeather) onRoadWeatherDisabled();
     if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
-  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
+  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds, bridgeLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;

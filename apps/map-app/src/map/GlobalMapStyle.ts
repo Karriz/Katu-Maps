@@ -346,7 +346,7 @@ const GLOBAL_BRIDGE_DECK_LAYER_IDS = [
 ] as const;
 
 type BridgeStyleMap = {
-  getLayer: (layerId: string) => unknown;
+  getLayer?: (layerId: string) => unknown;
   setLayoutProperty: (layerId: string, property: 'visibility', value: 'visible' | 'none') => unknown;
   setFilter: (layerId: string, filter: FilterSpecification | null) => unknown;
 };
@@ -354,20 +354,20 @@ type BridgeStyleMap = {
 /** Hide draped bridge paint while the 3D deck layer is showing those features. */
 export function setDrapedElevatedBridgeLayersVisible(map: BridgeStyleMap, drapedVisible: boolean) {
   GLOBAL_ELEVATED_BRIDGE_LINE_LAYER_IDS.forEach((layerId) => {
-    if (map.getLayer(layerId)) {
+    if (map.getLayer?.(layerId)) {
       map.setLayoutProperty(layerId, 'visibility', drapedVisible ? 'visible' : 'none');
     }
   });
   GLOBAL_BRIDGE_DECK_LAYER_IDS.forEach((layerId) => {
-    if (map.getLayer(layerId)) {
+    if (map.getLayer?.(layerId)) {
       map.setLayoutProperty(layerId, 'visibility', drapedVisible ? 'visible' : 'none');
     }
   });
   SURFACE_PATH_LAYER_FILTERS.forEach(([layerId, filter]) => {
-    if (!map.getLayer(layerId)) return;
+    if (!map.getLayer?.(layerId)) return;
     map.setFilter(layerId, drapedVisible ? filter : excludingBridges(filter));
   });
-  if (map.getLayer(ROAD_CENTER_MARKINGS_LAYER_ID)) {
+  if (map.getLayer?.(ROAD_CENTER_MARKINGS_LAYER_ID)) {
     map.setFilter(
       ROAD_CENTER_MARKINGS_LAYER_ID,
       drapedVisible ? ROAD_CENTER_MARKING_FILTER : ROAD_CENTER_MARKING_FILTER_WITHOUT_BRIDGES,

@@ -24,6 +24,7 @@ import {
   TrainFront,
   TrainTrack,
   Trees,
+  Waypoints,
   X,
   Moon,
   Sun,
@@ -41,6 +42,7 @@ export type MapLayerKey =
   | 'globe'
   | 'terrain'
   | 'buildings'
+  | 'bridges'
   | 'trees'
   | 'cycling'
   | 'hiking'
@@ -84,6 +86,7 @@ const layerGroups: LayerGroup[] = [
     layers: [
       { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
       { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
+      { key: 'bridges', label: '3D bridges', description: 'Draped roads when off', icon: Waypoints },
     ],
   },
   {

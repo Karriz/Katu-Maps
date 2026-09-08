@@ -882,6 +882,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       globe: true,
       trees: !mobileDefault2d,
       buildings: !mobileDefault2d,
+      bridges: !mobileDefault2d,
       terrain: !mobileDefault2d,
       cycling: false,
       hiking: false,
@@ -903,6 +904,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   });
   const is3dMode = layerToggles.terrain
     && layerToggles.buildings
+    && layerToggles.bridges
     && layerToggles.trees
     && layerToggles.transitModels;
   const handleTransitDisabled = useCallback(() => {
@@ -3722,11 +3724,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             }}
             is3dMode={is3dMode}
             onToggle3dMode={() => setLayerToggles((current) => {
-              const enabled = !(current.terrain && current.buildings && current.trees && current.transitModels);
+              const enabled = !(current.terrain && current.buildings && current.bridges && current.trees && current.transitModels);
               return {
                 ...current,
                 terrain: enabled,
                 buildings: enabled,
+                bridges: enabled,
                 trees: enabled,
                 transit: true,
                 transitModels: enabled,

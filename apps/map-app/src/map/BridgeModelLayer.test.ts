@@ -35,6 +35,7 @@ import {
   bridgePierDistances,
   bridgePierLocations,
   bridgeDeckHeightAt,
+  bridgeDeckSampler,
   planBounds,
   planOriginFromLngLat,
   planToLngLat,
@@ -943,6 +944,22 @@ describe('bridge support placement', () => {
     expect(bridgePierLocations([], [{ outer, holes }], reversed, indices, heights.slice().reverse())).toEqual(supports);
   });
 
+  it('matches exhaustive triangle sampling on a holed deck', () => {
+    const outer = [{ east: 0, north: 0 }, { east: 120, north: 0 },
+      { east: 120, north: 24 }, { east: 0, north: 24 }];
+    const holes = [[{ east: 30, north: 8 }, { east: 90, north: 8 },
+      { east: 90, north: 16 }, { east: 30, north: 16 }]];
+    const mesh = triangulateDeckSurface({ outer, holes }, false)!;
+    const heights = mesh.points.map((point) => 10 + point.east / 100);
+    const sample = bridgeDeckSampler(mesh.points, mesh.indices);
+    for (let east = 0; east <= 120; east += 6) {
+      for (let north = 0; north <= 24; north += 4) {
+        const point = { east, north };
+        expect(sample(point, heights)).toEqual(bridgeDeckHeightAt(point, mesh.points, mesh.indices, heights));
+      }
+    }
+  });
+
   it('samples ground at the support itself, skips low clearance, and retries missing terrain', () => {
     const layer = new BridgeModelLayer() as any;
     const origin = planOriginFromLngLat(23.76, 61.5);
@@ -1073,6 +1090,29 @@ describe('BridgeModelLayer', () => {
     expect(sample).toHaveBeenCalledTimes(3);
   });
 
+  it('does not place 3D bridges until the terrain source has loaded', () => {
+    const layer = new BridgeModelLayer();
+    const map = {
+      ...terrainViewMap(),
+      getTerrain: () => ({ source: 'terrain' }),
+      isSourceLoaded: () => false,
+    };
+    const sample = vi.fn(() => ({ bridges: [{}], pending: false }));
+    (layer as any).map = map;
+    (layer as any).sampleVisibleBridges = sample;
+    (layer as any).writeMeshes = vi.fn();
+    const setDrapedVisible = vi.fn();
+    (layer as any).setDrapedVisible = setDrapedVisible;
+
+    layer.updateBridges();
+
+    expect(sample).not.toHaveBeenCalled();
+    expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+    expect((layer as any).sampledBridges).toEqual([]);
+    expect(setDrapedVisible).toHaveBeenCalledWith(true);
+    expect(layer.needsElevationRetry()).toBe(true);
+  });
+
   it('waits for terrain data before retrying pending elevations', () => {
     const layer = new BridgeModelLayer();
     const map = terrainViewMap();
@@ -1148,13 +1188,12 @@ describe('BridgeModelLayer', () => {
     withBridgeResources((layer, internal, bridge) => {
       internal.sampledBridges = [bridge];
       internal.writeMeshes();
-      const renderer = { resetState: vi.fn(), render: vi.fn() };
+      const renderer = { resetState: vi.fn(), render: vi.fn(), dispose: vi.fn() };
       internal.renderer = renderer;
       internal.map = { ...terrainViewMap(), getZoom: () => 12.9,
         getCenter: () => internal.sceneOrigin, isSourceLoaded: () => false };
-      internal.setDrapedVisible = vi.fn();
       layer.render({} as any, { defaultProjectionData: { mainMatrix: new THREE.Matrix4().toArray() } } as any);
-      expect(internal.setDrapedVisible).toHaveBeenCalledWith(true);
+      expect(internal.drapedHandoff).toBeTruthy();
       expect(renderer.render).toHaveBeenCalledTimes(1);
       expect(internal.sampledBridges).toEqual([bridge]);
       internal.renderer = undefined;
@@ -1170,9 +1209,8 @@ describe('BridgeModelLayer', () => {
       let ready = false;
       internal.map = { ...terrainViewMap(), getZoom: () => 12.9,
         isStyleLoaded: () => true, isSourceLoaded: () => ready };
-      internal.setDrapedVisible = vi.fn();
       layer.updateBridges();
-      expect(internal.setDrapedVisible).toHaveBeenCalledWith(true);
+      expect(internal.drapedHandoff).toBeTruthy();
       expect(internal.sampledBridges).toEqual([bridge]);
       for (const now of [0, 16, 100, 1000]) expect(internal.advanceDrapedHandoff(now)).toBe(true);
       expect(resource.deck.material.opacity).toBe(1);
@@ -1432,6 +1470,107 @@ describe('BridgeModelLayer', () => {
     });
   });
 
+  it('reuses cluster geometry until the source is invalidated', () => {
+    withBridgeResources((layer, internal) => {
+      const origin = planOriginFromLngLat(23.76, 61.5);
+      const plan = [{ east: 0, north: 0 }, { east: 80, north: 0 }];
+      const line = {
+        kind: 'line', plan, width: 6,
+        coordinates: plan.map((point) => planToLngLat(point, origin)),
+        properties: { className: 'minor', layer: 0, ramp: false },
+      };
+      const map = { queryTerrainElevation: () => 0 };
+      const sample = () => internal.sampleCluster(map, origin, [line], [], 80, 15);
+      expect(sample()).not.toBeNull();
+      expect(layer.getPerformanceStats()).toMatchObject({ geometryBuilds: 1, geometryCacheHits: 0 });
+      expect(sample()).not.toBeNull();
+      expect(layer.getPerformanceStats()).toMatchObject({ geometryBuilds: 1, geometryCacheHits: 1 });
+      layer.invalidateSource();
+      expect(sample()).not.toBeNull();
+      expect(layer.getPerformanceStats()).toMatchObject({ geometryBuilds: 2, geometryCacheHits: 1 });
+    });
+  });
+
+  it('cancels an in-flight sample when the view changes without committing it', () => {
+    const layer = new BridgeModelLayer();
+    const internal = layer as any;
+    const previous = { keep: true };
+    internal.sampledBridges = [previous];
+    internal.renderer = { capabilities: { getMaxAnisotropy: () => 1 } };
+    let zoom = 15;
+    const feature = (lng: number) => ({
+      properties: { brunnel: 'bridge', class: 'minor' },
+      geometry: { type: 'LineString', coordinates: [[lng, 61.5], [lng + 0.002, 61.5]] },
+    });
+    const map = {
+      ...terrainViewMap(),
+      getZoom: () => zoom,
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      getSource: () => ({}),
+      getLayer: () => undefined,
+      querySourceFeatures: () => [feature(23.76), feature(23.762), feature(23.764)],
+      queryTerrainElevation: () => 0,
+    };
+    internal.map = map;
+    let now = 0;
+    const time = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const original = internal.sampleCluster.bind(internal);
+    const sampleCluster = vi.spyOn(internal, 'sampleCluster').mockImplementation((...args: unknown[]) => {
+      now += 10;
+      return original(...args);
+    });
+    try {
+      layer.updateBridges();
+      expect(internal.sampledBridges).toEqual([previous]);
+      expect(internal.samplingJob).toBeTruthy();
+      const firstView = internal.samplingJob.view;
+      zoom = 15.4;
+      layer.updateBridges();
+      expect(internal.sampledBridges).toEqual([previous]);
+      expect(internal.samplingJob.view).not.toBe(firstView);
+      expect(sampleCluster).toHaveBeenCalled();
+      internal.renderer = undefined;
+      layer.updateBridges();
+      expect(internal.sampledBridges).not.toEqual([previous]);
+      expect(internal.sampledBridges.length).toBeGreaterThan(0);
+      expect(internal.samplingJob).toBeUndefined();
+    } finally {
+      time.mockRestore();
+      sampleCluster.mockRestore();
+      layer.onRemove();
+    }
+  });
+
+  it('paints new deck textures across frames when a renderer is attached', () => {
+    withBridgeResources((_layer, internal, bridge) => {
+      internal.renderer = { capabilities: { getMaxAnisotropy: () => 1 }, dispose: vi.fn() };
+      let now = 0;
+      const time = vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const original = internal.paintDeck.bind(internal);
+      internal.paintDeck = (...args: unknown[]) => {
+        now += 10;
+        return original(...args);
+      };
+      try {
+        internal.sampledBridges = [0, 1, 2].map((index) => ({
+          ...bridge,
+          surface: bridge.surface.map((point: any) => ({ ...point, longitude: point.longitude + index })),
+        }));
+        internal.writeMeshes();
+        expect(internal.bridgeResources.size).toBe(1);
+        expect(internal.meshWrite).toBeTruthy();
+        internal.writeMeshes();
+        expect(internal.bridgeResources.size).toBe(2);
+        internal.writeMeshes();
+        expect(internal.bridgeResources.size).toBe(3);
+        expect(internal.meshWrite).toBeUndefined();
+        expect(internal.decks.children).toHaveLength(6);
+      } finally {
+        time.mockRestore();
+      }
+    });
+  });
+
   it('resamples after terrain source or exaggeration changes without a camera move', () => {
     const layer = new BridgeModelLayer();
     const internal = layer as any;
@@ -1493,6 +1632,53 @@ describe('BridgeModelLayer', () => {
     } as any);
 
     expect(renderer.render).not.toHaveBeenCalled();
+  });
+
+  it('restores draped roads and skips updates when 3D bridges are disabled', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const visibility: Array<[string, string]> = [];
+      const filters: Array<[string, unknown]> = [];
+      const sample = vi.fn(() => ({ bridges: [bridge], pending: false }));
+      internal.sampleVisibleBridges = sample;
+      internal.drapedVisible = false;
+      internal.map = {
+        ...terrainViewMap(),
+        getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+        queryTerrainElevation: () => 0,
+        getLayer: () => ({}),
+        setLayoutProperty: (id: string, property: string, value: string) => {
+          if (property === 'visibility') visibility.push([id, value]);
+        },
+        setFilter: (id: string, filter: unknown) => { filters.push([id, filter]); },
+      };
+      layer.setEnabled(false);
+      expect(visibility).toContainEqual(['global-road-bridges', 'visible']);
+      expect(visibility).toContainEqual(['global-bridge-decks', 'visible']);
+      expect(filters.some(([id]) => id === 'global-footways')).toBe(true);
+      expect(internal.sampledBridges).toEqual([]);
+      expect(internal.drapedHandoff).toBeUndefined();
+      expect(internal.decks.children).toHaveLength(0);
+      layer.updateBridges();
+      expect(sample).not.toHaveBeenCalled();
+      layer.setEnabled(false);
+      expect(sample).not.toHaveBeenCalled();
+      const renderer = { resetState: vi.fn(), render: vi.fn(), dispose: vi.fn() };
+      internal.renderer = renderer;
+      internal.map = {
+        ...internal.map,
+        getCenter: () => internal.sceneOrigin,
+        isStyleLoaded: () => true,
+        isSourceLoaded: () => true,
+        queryTerrainElevation: () => 0,
+      };
+      layer.render({} as any, { defaultProjectionData: { mainMatrix: new THREE.Matrix4().toArray() } } as any);
+      expect(renderer.render).not.toHaveBeenCalled();
+      internal.renderer = undefined;
+      layer.setEnabled(true);
+      expect(sample).toHaveBeenCalled();
+    });
   });
 });
 

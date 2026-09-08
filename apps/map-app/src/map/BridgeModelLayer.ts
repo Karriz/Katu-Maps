@@ -24,6 +24,10 @@ const BRIDGE_MIN_ZOOM = 13;
 const BRIDGE_HANDOFF_FADE_MS = 220;
 const BRIDGE_MAX_VIEWPORT_METERS = 4_000;
 const MAX_BRIDGES = 240;
+const MAX_CACHED_MESH_VERTICES = 60_000;
+const MAX_GEOMETRY_CACHE_VERTICES = 500_000;
+const SAMPLE_FRAME_BUDGET_MS = 6;
+const PAINT_FRAME_BUDGET_MS = 3;
 const BRIDGE_VIEW_PADDING_METERS = 600;
 // Covers stitching gaps, deck widths and abutment extension without clipping geometry.
 const BRIDGE_NEIGHBOUR_METERS = 40;
@@ -492,6 +496,7 @@ export function bridgeClearanceProbes(points: PlanPoint[], indices: number[], sp
 /** Split triangles at shared parameter stations, reusing edge intersections. */
 export function splitBridgeMesh<T extends PlanPoint>(
   source: T[], sourceIndices: number[], cuts: number[], parameter: (point: T) => number,
+  onSplit?: (a: number, b: number, index: number, fraction: number) => void,
 ) {
   const points = source.slice();
   let polygons = Array.from({ length: sourceIndices.length / 3 }, (_, index) => sourceIndices.slice(index * 3, index * 3 + 3));
@@ -516,6 +521,7 @@ export function splitBridgeMesh<T extends PlanPoint>(
       }
       const index = points.length;
       points.push(point);
+      onSplit?.(a, b, index, fraction);
       intersections.set(key, index);
       return index;
     };
@@ -1670,21 +1676,64 @@ export function bridgePierDistances(length: number, limit = 32) {
     : margin + (length - 2 * margin) * index / (count - 1));
 }
 
+function bridgeDeckTriangleHeight(
+  point: PlanPoint, points: PlanPoint[], a: number, b: number, c: number, heights: number[],
+) {
+  const denominator = (points[b].north - points[c].north) * (points[a].east - points[c].east)
+    + (points[c].east - points[b].east) * (points[a].north - points[c].north);
+  if (Math.abs(denominator) < 1e-10) return undefined;
+  const u = ((points[b].north - points[c].north) * (point.east - points[c].east)
+    + (points[c].east - points[b].east) * (point.north - points[c].north)) / denominator;
+  const v = ((points[c].north - points[a].north) * (point.east - points[c].east)
+    + (points[a].east - points[c].east) * (point.north - points[c].north)) / denominator;
+  const w = 1 - u - v;
+  if (Math.min(u, v, w) >= -1e-8) return heights[a] * u + heights[b] * v + heights[c] * w;
+  return undefined;
+}
+
 /** Interpolate the actual rendered triangle, independent of vertex ordering. */
 export function bridgeDeckHeightAt(point: PlanPoint, points: PlanPoint[], indices: number[], heights: number[]) {
   for (let i = 0; i < indices.length; i += 3) {
-    const [a, b, c] = indices.slice(i, i + 3);
-    const denominator = (points[b].north - points[c].north) * (points[a].east - points[c].east)
-      + (points[c].east - points[b].east) * (points[a].north - points[c].north);
-    if (Math.abs(denominator) < 1e-10) continue;
-    const u = ((points[b].north - points[c].north) * (point.east - points[c].east)
-      + (points[c].east - points[b].east) * (point.north - points[c].north)) / denominator;
-    const v = ((points[c].north - points[a].north) * (point.east - points[c].east)
-      + (points[a].east - points[c].east) * (point.north - points[c].north)) / denominator;
-    const w = 1 - u - v;
-    if (Math.min(u, v, w) >= -1e-8) return heights[a] * u + heights[b] * v + heights[c] * w;
+    const height = bridgeDeckTriangleHeight(point, points, indices[i], indices[i + 1], indices[i + 2], heights);
+    if (height !== undefined) return height;
   }
   return undefined;
+}
+
+const bridgeDeckSamplers = new WeakMap<PlanPoint[], { indices: number[]; sample: (point: PlanPoint, heights: number[]) => number | undefined }>();
+
+export function bridgeDeckSampler(points: PlanPoint[], indices: number[]) {
+  const cached = bridgeDeckSamplers.get(points);
+  if (cached?.indices === indices) return cached.sample;
+  const bounds = planBounds(points, 0);
+  const cells = Math.min(32, Math.max(1, Math.ceil(Math.sqrt(indices.length / 24))));
+  const eastScale = cells / Math.max(1, bounds.maxEast - bounds.minEast);
+  const northScale = cells / Math.max(1, bounds.maxNorth - bounds.minNorth);
+  const cellX = (east: number) => Math.min(cells - 1, Math.max(0, Math.floor((east - bounds.minEast) * eastScale)));
+  const cellY = (north: number) => Math.min(cells - 1, Math.max(0, Math.floor((north - bounds.minNorth) * northScale)));
+  const buckets: number[][] = Array.from({ length: cells * cells }, () => []);
+  for (let index = 0; index < indices.length; index += 3) {
+    const corners = [points[indices[index]], points[indices[index + 1]], points[indices[index + 2]]];
+    const minX = cellX(Math.min(corners[0].east, corners[1].east, corners[2].east));
+    const maxX = cellX(Math.max(corners[0].east, corners[1].east, corners[2].east));
+    const minY = cellY(Math.min(corners[0].north, corners[1].north, corners[2].north));
+    const maxY = cellY(Math.max(corners[0].north, corners[1].north, corners[2].north));
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) buckets[y * cells + x].push(index);
+    }
+  }
+  const sample = (point: PlanPoint, heights: number[]) => {
+    const cell = buckets[cellY(point.north) * cells + cellX(point.east)];
+    for (const start of cell) {
+      const height = bridgeDeckTriangleHeight(
+        point, points, indices[start], indices[start + 1], indices[start + 2], heights,
+      );
+      if (height !== undefined) return height;
+    }
+    return undefined;
+  };
+  bridgeDeckSamplers.set(points, { indices, sample });
+  return sample;
 }
 
 export function bridgePierLocations(lines: PlanPoint[][], surfaces: DeckSurface[], points: PlanPoint[],
@@ -1731,6 +1780,7 @@ export function bridgePierLocations(lines: PlanPoint[][], surfaces: DeckSurface[
     }
   }
   const result: Array<PlanPoint & { deck: number }> = [];
+  const sampleDeck = bridgeDeckSampler(points, indices);
   for (const point of candidates) {
     if (result.length >= limit) break;
     if (result.some((other) => Math.hypot(point.east - other.east, point.north - other.north) < PIER_SPACING_METERS / 2)) continue;
@@ -1743,7 +1793,7 @@ export function bridgePierLocations(lines: PlanPoint[][], surfaces: DeckSurface[
     // outside the support's circumscribed radius as well.
     if (surfaces.some((surface) => surface.holes.some((hole) =>
       pointToPolyline(point, hole, true) < Math.SQRT2 * 0.675))) continue;
-    const deck = footprint.map((sample) => bridgeDeckHeightAt(sample, points, indices, heights));
+    const deck = footprint.map((sample) => sampleDeck(sample, heights));
     if (deck.some((height) => height === undefined)) continue;
     result.push({ ...point, deck: Math.min(...deck as number[]) });
   }
@@ -2318,19 +2368,55 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private sunPolar = CARTOON_SUN_POLAR_DEGREES;
   private lastUpdateSignature?: string;
   private terrainSignature?: string;
+  private userEnabled = true;
   private readonly bridgeResources = new Map<string, BridgeResources>();
   private pierOrigin = this.sceneOrigin;
   private pierOriginElevation = 0;
-  private readonly performanceStats = { updates: 0, built: 0, reused: 0, heightUpdates: 0, recenters: 0, lastUpdateMs: 0, sourceParts: 0, retainedParts: 0 };
+  private samplingJob?: { generator: Generator<void, { bridges: SampledBridge[]; pending: boolean }, void>; view: string };
+  private meshWrite?: { entries: Array<{ bridge: SampledBridge; paintBridge: SampledBridge; key: string }>; index: number };
+  private jobStarted = 0;
+  private activeResourceKeys?: Set<string>;
+  private readonly geometryCache = new Map<string, NonNullable<ReturnType<BridgeModelLayer['buildClusterGeometry']>>>();
+  private geometryVertices = 0;
+  private readonly sectionCache = new Map<string, { sections: ReturnType<typeof bridgeTextureSections>; heights: string }>();
+  private cachedSections = 0;
+  private readonly performanceStats = { updates: 0, built: 0, reused: 0, heightUpdates: 0, recenters: 0, lastUpdateMs: 0, geometryMs: 0, supportMs: 0, sectionMs: 0, paintMs: 0, geometryBuilds: 0, geometryCacheHits: 0, sectionBuilds: 0, sectionCacheHits: 0, sourceParts: 0, retainedParts: 0 };
 
   getPerformanceStats() {
-    return { ...this.performanceStats, cachedBridges: this.bridgeResources.size };
+    return { ...this.performanceStats, cachedBridges: this.bridgeResources.size, cachedGeometryVertices: this.geometryVertices, cachedSections: this.cachedSections };
   }
 
   constructor(private readonly sourceId = OPENFREEMAP_SOURCE_ID) {}
 
   invalidateSource() {
+    this.cancelBridgeJobs();
+    this.clearCpuCaches();
     this.lastUpdateSignature = undefined;
+  }
+
+  private cancelBridgeJobs() {
+    this.samplingJob = undefined;
+    this.meshWrite = undefined;
+  }
+
+  private clearCpuCaches() {
+    this.geometryCache.clear();
+    this.geometryVertices = 0;
+    this.sectionCache.clear();
+    this.cachedSections = 0;
+  }
+
+  private beginPerformanceJob() {
+    this.jobStarted = performance.now();
+    this.performanceStats.updates += 1;
+    this.performanceStats.geometryMs = 0;
+    this.performanceStats.supportMs = 0;
+    this.performanceStats.sectionMs = 0;
+    this.performanceStats.paintMs = 0;
+  }
+
+  private recordJobDuration() {
+    this.performanceStats.lastUpdateMs = performance.now() - this.jobStarted;
   }
 
   invalidateTerrain() {
@@ -2344,6 +2430,25 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.darkMode = dark;
     this.applyLighting();
     this.map?.triggerRepaint();
+  }
+
+  setEnabled(enabled: boolean) {
+    if (this.userEnabled === enabled) return;
+    this.userEnabled = enabled;
+    this.cancelBridgeJobs();
+    this.lastUpdateSignature = undefined;
+    if (!enabled) {
+      this.pendingElevation = false;
+      this.meshWrite = undefined;
+      this.stopDrapedHandoff();
+      this.sampledBridges = [];
+      this.clearMeshes();
+      this.setDrapedVisible(true);
+      this.map?.triggerRepaint();
+      return;
+    }
+    this.stopDrapedHandoff();
+    this.updateBridges();
   }
 
   setDayNightLighting(lighting: {
@@ -2403,7 +2508,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
   updateBridges() {
     const map = this.map;
-    if (!map) return;
+    if (!map || !this.userEnabled) return;
 
     const terrainSignature = JSON.stringify(map.getTerrain());
     if (terrainSignature !== this.terrainSignature) {
@@ -2413,11 +2518,18 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const view = this.currentView(map);
     const visible = shouldRenderBridgesForView(view);
     const signature = visible ? JSON.stringify(view) : 'hidden';
-    if (signature === this.lastUpdateSignature) return;
+    if (signature === this.lastUpdateSignature && !this.samplingJob && !this.meshWrite) return;
+    if (signature === this.lastUpdateSignature && !this.samplingJob && this.meshWrite) {
+      this.writeMeshes();
+      this.recordJobDuration();
+      map.triggerRepaint();
+      return;
+    }
     // Record attempts too: missing terrain is retried when source data arrives,
     // rather than creating an idle/repaint retry loop.
     this.lastUpdateSignature = signature;
     if (!visible) {
+      this.cancelBridgeJobs();
       this.pendingElevation = false;
       if (view.terrainEnabled && this.sampledBridges.length > 0) {
         this.beginDrapedHandoff();
@@ -2429,22 +2541,33 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     this.cancelDrapedHandoff();
-    const started = performance.now();
-    this.performanceStats.updates += 1;
+    if (!this.terrainElevationReady(map)) {
+      this.pendingElevation = true;
+      this.cancelBridgeJobs();
+      if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
+      return;
+    }
+    if (!this.samplingJob) this.beginPerformanceJob();
     const sampled = this.sampleVisibleBridges(map, view);
+    if (sampled.building) {
+      this.recordJobDuration();
+      map.triggerRepaint();
+      return;
+    }
     if (sampled.pending) {
       this.pendingElevation = true;
-      this.performanceStats.lastUpdateMs = performance.now() - started;
+      this.recordJobDuration();
       if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
       return;
     }
     this.pendingElevation = false;
     this.sampledBridges = sampled.bridges;
+    this.meshWrite = undefined;
 
     this.sceneOrigin = map.getCenter();
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
     this.writeMeshes();
-    this.performanceStats.lastUpdateMs = performance.now() - started;
+    this.recordJobDuration();
     this.setDrapedVisible(this.sampledBridges.length === 0);
     map.triggerRepaint();
   }
@@ -2453,6 +2576,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const map = this.map;
     const renderer = this.renderer;
     if (!map || !renderer) return;
+    if (!this.userEnabled) return;
+    if (this.samplingJob || this.meshWrite) this.updateBridges();
     const view = this.currentView(map);
     if (!view.terrainEnabled || this.sampledBridges.length === 0) return;
     if (!shouldRenderBridgesForView(view)) {
@@ -2496,6 +2621,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   onRemove() {
+    this.cancelBridgeJobs();
+    this.clearCpuCaches();
     this.drapedHandoff = undefined;
     this.setDrapedVisible(true);
     this.clearMeshes();
@@ -2530,6 +2657,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
     };
   }
 
+  private terrainElevationReady(map: MaplibreMap) {
+    const terrain = map.getTerrain() as { source?: string } | null | undefined;
+    if (!terrain) return false;
+    const sourceId = terrain.source;
+    if (!sourceId || typeof map.isSourceLoaded !== 'function') return true;
+    return Boolean(map.isSourceLoaded(sourceId));
+  }
+
   private cachedElevation(key: string) {
     const elevation = this.elevationCache.get(key);
     if (elevation === undefined) return undefined;
@@ -2559,6 +2694,30 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   private sampleVisibleBridges(map: MaplibreMap, view: BridgeViewState) {
+    const viewKey = JSON.stringify(view);
+    if (this.samplingJob && this.samplingJob.view !== viewKey) {
+      this.samplingJob = undefined;
+      this.beginPerformanceJob();
+    }
+    if (!this.samplingJob) {
+      this.samplingJob = { generator: this.sampleBridgeJob(map, view), view: viewKey };
+    }
+    const job = this.samplingJob;
+    const started = performance.now();
+    for (;;) {
+      const next = job.generator.next();
+      if (next.done) {
+        this.samplingJob = undefined;
+        return { ...next.value, building: false };
+      }
+      // Yield between whole clusters; keep the last complete scene until commit.
+      if (this.renderer && performance.now() - started >= SAMPLE_FRAME_BUDGET_MS) {
+        return { bridges: this.sampledBridges, pending: false, building: true };
+      }
+    }
+  }
+
+  private *sampleBridgeJob(map: MaplibreMap, view: BridgeViewState): Generator<void, { bridges: SampledBridge[]; pending: boolean }, void> {
     if (!map.getSource(this.sourceId)) return { bridges: [] as SampledBridge[], pending: false };
     let features: SourceFeature[] = [];
     try {
@@ -2662,6 +2821,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const bridges: SampledBridge[] = [];
     this.pendingElevation = false;
     let remainingPiers = MAX_PIERS;
+    yield;
     for (const entry of clusters) {
       const sampled = this.sampleCluster(map, entry.origin, entry.cluster, entry.surfaces, entry.span, terrainZoomBucket,
         Math.min(32, remainingPiers));
@@ -2669,19 +2829,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
         bridges.push(sampled);
         remainingPiers -= sampled.piers.length;
       }
+      yield;
     }
     return { bridges, pending: this.pendingElevation };
   }
 
-  private sampleCluster(
-    map: MaplibreMap,
-    origin: PlanOrigin,
-    cluster: BridgeDrawable[],
-    surfaces: DeckSurface[],
-    spanLength: number,
-    terrainZoomBucket: number,
-    pierLimit = 32,
-  ) {
+  private buildClusterGeometry(cluster: BridgeDrawable[], surfaces: DeckSurface[], spanLength: number, origin: PlanOrigin) {
     const lines = cluster.filter((drawable) => drawable.kind === 'line');
     const polygons = cluster.filter((drawable) => drawable.kind === 'polygon');
     const longest = lines
@@ -2773,6 +2926,44 @@ export class BridgeModelLayer implements CustomLayerInterface {
     meshT.splice(0, meshT.length, ...refined.t);
 
     const coordinates = meshPoints.map((point) => planToLngLat(point, origin));
+    return { meshPoints, meshIndices, meshT, coordinates };
+  }
+
+  private sampleCluster(
+    map: MaplibreMap,
+    origin: PlanOrigin,
+    cluster: BridgeDrawable[],
+    surfaces: DeckSurface[],
+    spanLength: number,
+    terrainZoomBucket: number,
+    pierLimit = 32,
+  ) {
+    const lines = cluster.filter((drawable) => drawable.kind === 'line');
+    const key = clusterGeometryKey(cluster, origin);
+    let geometry = this.geometryCache.get(key);
+    if (geometry) {
+      this.geometryCache.delete(key);
+      this.geometryCache.set(key, geometry);
+      this.performanceStats.geometryCacheHits += 1;
+    } else {
+      const started = performance.now();
+      geometry = this.buildClusterGeometry(cluster, surfaces, spanLength, origin) ?? undefined;
+      this.performanceStats.geometryMs += performance.now() - started;
+      this.performanceStats.geometryBuilds += 1;
+      if (!geometry) return null;
+      // Bound retained CPU geometry as well as the GPU resource cache.
+      if (geometry.meshPoints.length <= MAX_CACHED_MESH_VERTICES) {
+        while (this.geometryCache.size >= MAX_BRIDGES
+          || this.geometryVertices + geometry.meshPoints.length > MAX_GEOMETRY_CACHE_VERTICES) {
+          const oldest = this.geometryCache.keys().next().value!;
+          this.geometryVertices -= this.geometryCache.get(oldest)!.meshPoints.length;
+          this.geometryCache.delete(oldest);
+        }
+        this.geometryCache.set(key, geometry);
+        this.geometryVertices += geometry.meshPoints.length;
+      }
+    }
+    const { meshPoints, meshIndices, meshT, coordinates } = geometry;
     const ground = this.sampleGround(map, coordinates, terrainZoomBucket);
     if (ground === null) {
       this.pendingElevation = true;
@@ -2798,8 +2989,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
     const deck = terrainClearedDeck(meshT, baseDeck, ground, spanLength,
       probes.map((probe, index) => ({ ...probe, ground: probeGround[index] })));
+    const supportStarted = performance.now();
     const pierLocations = bridgePierLocations(lines.map((line) => line.plan), surfaces, meshPoints, meshIndices, deck, pierLimit);
     const piers = this.sampleBridgePiers(map, pierLocations, origin, terrainZoomBucket);
+    this.performanceStats.supportMs += performance.now() - supportStarted;
     if (piers === null) {
       this.pendingElevation = true;
       return null;
@@ -2874,131 +3067,91 @@ export class BridgeModelLayer implements CustomLayerInterface {
     };
   }
 
+  private textureSections(bridge: SampledBridge, limit: number) {
+    const started = performance.now();
+    const key = `${limit}:${bridgeResourceKey(bridge)}`;
+    const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck]));
+    let cached = this.sectionCache.get(key);
+    if (cached) {
+      this.sectionCache.delete(key);
+      this.sectionCache.set(key, cached);
+      this.performanceStats.sectionCacheHits += 1;
+      if (cached.heights !== heights) {
+        for (const section of cached.sections) {
+          const updated = section.weights.map((weights) => ({
+            ground: weights.reduce((sum, [index, weight]) => sum + bridge.surface[index].ground * weight, 0),
+            deck: weights.reduce((sum, [index, weight]) => sum + bridge.surface[index].deck * weight, 0),
+          }));
+          section.bridge = { ...section.bridge, surface: section.bridge.surface.map((point, index) => ({ ...point, ...updated[index] })) };
+          section.paintBridge = { ...section.paintBridge, surface: section.paintBridge.surface.map((point, index) => ({ ...point, ...updated[index] })) };
+        }
+        cached.heights = heights;
+      }
+    } else {
+      const sections = bridgeTextureSections(bridge, limit);
+      while (this.cachedSections + sections.length > MAX_BRIDGES) {
+        const oldest = this.sectionCache.keys().next().value!;
+        this.cachedSections -= this.sectionCache.get(oldest)!.sections.length;
+        this.sectionCache.delete(oldest);
+      }
+      cached = { sections, heights };
+      this.sectionCache.set(key, cached);
+      this.cachedSections += sections.length;
+      this.performanceStats.sectionBuilds += 1;
+    }
+    this.performanceStats.sectionMs += performance.now() - started;
+    return cached.sections;
+  }
+
   private writeMeshes() {
     const pierMesh = this.pierMesh;
-    if (!pierMesh) return;
-    this.decks.clear();
-    // Sections share the existing mesh/texture cache budget; never drop a whole
-    // bridge just to increase the resolution of another one.
-    let spareSections = Math.max(0, MAX_BRIDGES - this.sampledBridges.length);
-    const entries = this.sampledBridges.flatMap((bridge) => {
-      const sections = bridgeTextureSections(bridge, Math.min(MAX_TEXTURE_SECTIONS, spareSections + 1));
-      spareSections -= sections.length - 1;
-      return sections.map((section) => ({ ...section, key: bridgeResourceKey(section.bridge) }));
-    });
-    const activeKeys = new Set(entries.map((entry) => entry.key));
-    const missing = [...activeKeys].filter((key) => !this.bridgeResources.has(key)).length;
-    // Evict before allocating so tile replacement does not double texture memory.
-    for (const [key, resource] of this.bridgeResources) {
-      if (this.bridgeResources.size + missing <= MAX_BRIDGES) break;
-      if (activeKeys.has(key)) continue;
-      this.disposeResource(resource);
-      this.bridgeResources.delete(key);
-    }
-    this.pierOrigin = this.sceneOrigin;
-    this.pierOriginElevation = this.sceneOriginElevation;
-    pierMesh.position.set(0, 0, 0);
-    pierMesh.scale.set(1, 1, 1);
-
-    const night = Math.max(this.darkMode ? 0.45 : 0, this.nightMix);
-    const azimuth = CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
-    const shadowEast = -Math.sin(azimuth) * SHADOW_OFFSET_METERS;
-    const shadowNorth = -Math.cos(azimuth) * SHADOW_OFFSET_METERS;
-    let pierCount = 0;
-
-    for (const { bridge, paintBridge, key } of entries) {
-      const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck]));
-      let resource = this.bridgeResources.get(key);
-      if (resource) {
+    if (!pierMesh) return true;
+    if (!this.meshWrite) {
+      // Sections share the existing mesh/texture cache budget; never drop a whole
+      // bridge just to increase the resolution of another one.
+      let spareSections = Math.max(0, MAX_BRIDGES - this.sampledBridges.length);
+      const entries = this.sampledBridges.flatMap((bridge) => {
+        const sections = this.textureSections(bridge, Math.min(MAX_TEXTURE_SECTIONS, spareSections + 1));
+        spareSections -= sections.length - 1;
+        return sections.map((section) => ({ ...section, key: bridgeResourceKey(section.bridge) }));
+      });
+      const activeKeys = new Set(entries.map((entry) => entry.key));
+      this.activeResourceKeys = activeKeys;
+      const missing = [...activeKeys].filter((key) => !this.bridgeResources.has(key)).length;
+      // Evict before allocating so tile replacement does not double texture memory.
+      for (const [key, resource] of this.bridgeResources) {
+        if (this.bridgeResources.size + missing <= MAX_BRIDGES) break;
+        if (activeKeys.has(key)) continue;
+        this.disposeResource(resource);
         this.bridgeResources.delete(key);
-        this.bridgeResources.set(key, resource);
-        this.performanceStats.reused += 1;
-        if (resource.heights !== heights) {
-          const deckPositions = resource.deck.geometry.getAttribute('position') as THREE.BufferAttribute;
-          const shadowPositions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
-          bridge.surface.forEach((point, index) => {
-            deckPositions.setY(index, point.deck - resource!.elevation);
-            shadowPositions.setY(index, point.ground - resource!.elevation + 0.12);
-          });
-          deckPositions.needsUpdate = true;
-          shadowPositions.needsUpdate = true;
-          resource.deck.geometry.computeVertexNormals();
-          resource.heights = heights;
-          this.performanceStats.heightUpdates += 1;
-        }
-      } else {
-        const canvas = this.paintDeck(paintBridge);
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.flipY = false;
-        texture.generateMipmaps = true;
-        texture.minFilter = THREE.LinearMipmapLinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.anisotropy = Math.min(8, this.renderer?.capabilities.getMaxAnisotropy() ?? 1);
-        texture.needsUpdate = true;
-
-        const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
-        const groundPoints = bridge.surface.map((point) => this.toLocal(
-          point.longitude,
-          point.latitude,
-          point.ground,
-        )).map((point) => ({
-          east: point.east + shadowEast,
-          north: point.north + shadowNorth,
-          up: point.up + 0.12,
-        }));
-        const plan = paintBridge.surface;
-
-        const deckGeometry = texturedIndexedGeometry(deckPoints, plan, paintBridge.bounds, bridge.indices);
-        const shadowGeometry = texturedIndexedGeometry(groundPoints, plan, paintBridge.bounds, bridge.indices);
-        if (!deckGeometry || !shadowGeometry) {
-          deckGeometry?.dispose();
-          shadowGeometry?.dispose();
-          texture.dispose();
-          continue;
-        }
-
-        const deckMaterial = new THREE.MeshBasicMaterial({
-          toneMapped: false,
-          map: texture,
-          transparent: true,
-          alphaTest: 0.2,
-          side: THREE.DoubleSide,
-          forceSinglePass: true,
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-        });
-
-        const deckMesh = new THREE.Mesh(deckGeometry, deckMaterial);
-        deckMesh.frustumCulled = false;
-        const shadowMaterial = new THREE.MeshBasicMaterial({
-          map: texture,
-          color: CARTOON_SHADOW_COLOR,
-          transparent: true,
-          opacity: 0.32 * (1 - night * 0.65),
-          alphaTest: 0.2,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          forceSinglePass: true,
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-        });
-        const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
-        shadowMesh.frustumCulled = false;
-
-        resource = {
-          paintBridge,
-          paintSignature: this.paintSignature,
-          deck: deckMesh, shadow: shadowMesh, origin: this.sceneOrigin,
-          elevation: this.sceneOriginElevation, heights,
-        };
-        this.bridgeResources.set(key, resource);
-        this.performanceStats.built += 1;
       }
-      this.decks.add(resource.deck, resource.shadow);
+      this.pierOrigin = this.sceneOrigin;
+      this.pierOriginElevation = this.sceneOriginElevation;
+      pierMesh.position.set(0, 0, 0);
+      pierMesh.scale.set(1, 1, 1);
+      this.meshWrite = { entries, index: 0 };
     }
 
-    // Piers belong to the original span, not individual texture sections.
+    const { entries } = this.meshWrite;
+    const started = performance.now();
+    let created = 0;
+    while (this.meshWrite.index < entries.length) {
+      const entry = entries[this.meshWrite.index];
+      const isNew = !this.bridgeResources.has(entry.key);
+      if (isNew && this.renderer && created > 0
+        && (created >= 2 || performance.now() - started >= PAINT_FRAME_BUDGET_MS)) break;
+      this.writeMeshEntry(entry);
+      if (isNew) created += 1;
+      this.meshWrite.index += 1;
+    }
+
+    this.decks.clear();
+    for (const { key } of entries) {
+      const resource = this.bridgeResources.get(key);
+      if (resource) this.decks.add(resource.deck, resource.shadow);
+    }
+
+    let pierCount = 0;
     for (const bridge of this.sampledBridges) {
       for (const pier of bridge.piers ?? []) {
         if (pierCount >= MAX_PIERS) break;
@@ -3018,6 +3171,106 @@ export class BridgeModelLayer implements CustomLayerInterface {
     pierMesh.count = pierCount;
     pierMesh.instanceMatrix.needsUpdate = true;
     pierMesh.visible = pierCount > 0;
+    const complete = this.meshWrite.index >= entries.length;
+    if (complete) this.meshWrite = undefined;
+    else this.map?.triggerRepaint();
+    return complete;
+  }
+
+  private writeMeshEntry(entry: { bridge: SampledBridge; paintBridge: SampledBridge; key: string }) {
+    const { bridge, paintBridge, key } = entry;
+    const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck]));
+    let resource = this.bridgeResources.get(key);
+    if (resource) {
+      this.bridgeResources.delete(key);
+      this.bridgeResources.set(key, resource);
+      this.performanceStats.reused += 1;
+      if (resource.heights !== heights) {
+        const deckPositions = resource.deck.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const shadowPositions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
+        bridge.surface.forEach((point, index) => {
+          deckPositions.setY(index, point.deck - resource!.elevation);
+          shadowPositions.setY(index, point.ground - resource!.elevation + 0.12);
+        });
+        deckPositions.needsUpdate = true;
+        shadowPositions.needsUpdate = true;
+        resource.deck.geometry.computeVertexNormals();
+        resource.heights = heights;
+        this.performanceStats.heightUpdates += 1;
+      }
+      return;
+    }
+
+    const night = Math.max(this.darkMode ? 0.45 : 0, this.nightMix);
+    const azimuth = CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
+    const shadowEast = -Math.sin(azimuth) * SHADOW_OFFSET_METERS;
+    const shadowNorth = -Math.cos(azimuth) * SHADOW_OFFSET_METERS;
+    const canvas = this.paintDeck(paintBridge);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(8, this.renderer?.capabilities.getMaxAnisotropy() ?? 1);
+    texture.needsUpdate = true;
+
+    const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
+    const groundPoints = bridge.surface.map((point) => this.toLocal(
+      point.longitude,
+      point.latitude,
+      point.ground,
+    )).map((point) => ({
+      east: point.east + shadowEast,
+      north: point.north + shadowNorth,
+      up: point.up + 0.12,
+    }));
+    const plan = paintBridge.surface;
+
+    const deckGeometry = texturedIndexedGeometry(deckPoints, plan, paintBridge.bounds, bridge.indices);
+    const shadowGeometry = texturedIndexedGeometry(groundPoints, plan, paintBridge.bounds, bridge.indices);
+    if (!deckGeometry || !shadowGeometry) {
+      deckGeometry?.dispose();
+      shadowGeometry?.dispose();
+      texture.dispose();
+      return;
+    }
+
+    const deckMaterial = new THREE.MeshBasicMaterial({
+      toneMapped: false,
+      map: texture,
+      transparent: true,
+      alphaTest: 0.2,
+      side: THREE.DoubleSide,
+      forceSinglePass: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
+
+    const deckMesh = new THREE.Mesh(deckGeometry, deckMaterial);
+    deckMesh.frustumCulled = false;
+    const shadowMaterial = new THREE.MeshBasicMaterial({
+      map: texture,
+      color: CARTOON_SHADOW_COLOR,
+      transparent: true,
+      opacity: 0.32 * (1 - night * 0.65),
+      alphaTest: 0.2,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      forceSinglePass: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
+    const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
+    shadowMesh.frustumCulled = false;
+
+    this.bridgeResources.set(key, {
+      paintBridge,
+      paintSignature: this.paintSignature,
+      deck: deckMesh, shadow: shadowMesh, origin: this.sceneOrigin,
+      elevation: this.sceneOriginElevation, heights,
+    });
+    this.performanceStats.built += 1;
   }
 
   private positionResources() {
@@ -3044,6 +3297,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   private clearDeckGroup() {
+    this.activeResourceKeys = undefined;
     this.decks.clear();
     this.bridgeResources.forEach((resource) => this.disposeResource(resource));
     this.bridgeResources.clear();
@@ -3064,11 +3318,16 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.setDrapedVisible(true);
   }
 
-  private cancelDrapedHandoff() {
+  private stopDrapedHandoff() {
     if (!this.drapedHandoff) return;
     this.drapedHandoff = undefined;
     this.bridgeOpacity = 1;
     this.applyLighting();
+  }
+
+  private cancelDrapedHandoff() {
+    if (!this.drapedHandoff) return;
+    this.stopDrapedHandoff();
     this.setDrapedVisible(false);
   }
 
@@ -3076,6 +3335,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (this.sampledBridges.length > 0) this.lastUpdateSignature = undefined;
     this.drapedHandoff = undefined;
     this.bridgeOpacity = 1;
+    this.meshWrite = undefined;
     this.sampledBridges = [];
     this.clearMeshes();
     this.setDrapedVisible(true);
@@ -3135,17 +3395,26 @@ export class BridgeModelLayer implements CustomLayerInterface {
       this.paintValues = new Map(values);
       this.paintExpressions.clear();
     }
-    for (const resource of this.bridgeResources.values()) {
+    const started = performance.now();
+    let painted = 0;
+    for (const [key, resource] of this.bridgeResources) {
+      if (this.activeResourceKeys && !this.activeResourceKeys.has(key)) continue;
       if (resource.paintSignature === signature) continue;
+      if (this.renderer && painted > 0 && (painted >= 2 || performance.now() - started >= PAINT_FRAME_BUDGET_MS)) {
+        map.triggerRepaint();
+        break;
+      }
       const texture = resource.deck.material.map!;
       texture.image = this.paintDeck(resource.paintBridge);
       texture.needsUpdate = true;
       resource.paintSignature = signature;
+      painted += 1;
     }
   }
 
   private paintDeck(bridge: SampledBridge) {
-    return paintBridgeCluster(bridge.surfaces, bridge.parts, bridge.bounds, (part) => {
+    const started = performance.now();
+    const canvas = paintBridgeCluster(bridge.surfaces, bridge.parts, bridge.bounds, (part) => {
       const properties = part.properties;
       if (!properties) return part;
       const rail = properties.className === 'rail' || properties.className === 'transit';
@@ -3181,6 +3450,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
         : fill;
       return { fill: deckFill, edge: color(edgeLayer, part.edge), rail: rail ? fill : undefined };
     }, bridge.texturePixelBudget);
+    this.performanceStats.paintMs += performance.now() - started;
+    return canvas;
   }
 
   private applyLighting() {
@@ -3235,11 +3506,17 @@ export function bridgeTextureSections(bridge: SampledBridge, maxSections = MAX_T
   const { minEast, maxEast } = paintBridge.bounds;
   const length = maxEast - minEast;
   const count = length <= 512 ? 1 : Math.min(maxSections, Math.ceil(length / TEXTURE_SECTION_METRES));
-  if (count <= 1) return [{ bridge, paintBridge }];
+  const weights: Array<Array<[number, number]>> = bridge.surface.map((_, index) => [[index, 1]]);
+  if (count <= 1) return [{ bridge, paintBridge, weights }];
   const cuts = Array.from({ length: count - 1 }, (_, index) => minEast + length * (index + 1) / count);
   const split = splitBridgeMesh(paintBridge.surface.map((point, index) => ({
     ...point, worldEast: bridge.surface[index].east, worldNorth: bridge.surface[index].north,
-  })), bridge.indices, cuts, (point) => point.east);
+  })), bridge.indices, cuts, (point) => point.east, (a, b, index, fraction) => {
+    const combined = new Map<number, number>();
+    for (const [vertex, weight] of weights[a]) combined.set(vertex, weight * (1 - fraction));
+    for (const [vertex, weight] of weights[b]) combined.set(vertex, (combined.get(vertex) ?? 0) + weight * fraction);
+    weights[index] = [...combined];
+  });
   const groups: number[][] = Array.from({ length: count }, () => []);
   for (let i = 0; i < split.indices.length; i += 3) {
     const triangle = split.indices.slice(i, i + 3);
@@ -3261,7 +3538,8 @@ export function bridgeTextureSections(bridge: SampledBridge, maxSections = MAX_T
       minEast: minEast + length * section / count - padding,
       maxEast: minEast + length * (section + 1) / count + padding };
     const texturePixelBudget = Math.floor(MAX_TEXTURE_PIXELS_PER_BRIDGE / count);
-    return [{ bridge: { ...bridge, surface, indices: localIndices, bounds: planBounds(surface, 2), texturePixelBudget },
+    return [{ weights: vertices.map((index) => weights[index]),
+      bridge: { ...bridge, surface, indices: localIndices, bounds: planBounds(surface, 2), texturePixelBudget },
       paintBridge: { ...paintBridge, surface: projected, indices: localIndices, bounds, texturePixelBudget } }];
   });
 }
@@ -3290,6 +3568,22 @@ function texturedIndexedGeometry(
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function roundedPlan(points: PlanPoint[]) {
+  return points.map((point) => [Number(point.east.toFixed(3)), Number(point.north.toFixed(3))]);
+}
+
+function clusterGeometryKey(cluster: BridgeDrawable[], origin: PlanOrigin) {
+  return JSON.stringify({
+    origin: [Number(origin.longitude.toFixed(9)), Number(origin.latitude.toFixed(9))],
+    parts: cluster.map((part) => ({
+      kind: part.kind,
+      width: part.width,
+      plan: roundedPlan(part.plan),
+      holes: part.holes?.map(roundedPlan),
+    })),
+  });
 }
 
 /** Millimetre plan precision avoids cache misses from floating-point origin shifts. */
