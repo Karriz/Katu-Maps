@@ -2151,16 +2151,18 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transitRouteOverlay.update(map.getBounds(), map.getZoom());
     };
     const invalidateAndScheduleModels = () => {
+      bridgeLayer.invalidateTerrain();
       modelDataRevision += 1;
       scheduleTreeUpdate();
     };
     const handleModelSourceData = (event: MapSourceDataEvent) => {
-      if (event.sourceId === 'terrain' && event.sourceDataType === 'content') {
+      if (event.sourceId === terrainSourceRef.current && event.sourceDataType === 'content') {
         bridgeLayer.invalidateTerrain();
         scheduleTreeUpdate();
         return;
       }
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
+      bridgeLayer.invalidateSource();
       modelDataRevision += 1;
     };
     treeRefreshRef.current = invalidateAndScheduleModels;

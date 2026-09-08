@@ -6,6 +6,7 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
+import { createExpression } from '@maplibre/maplibre-gl-style-spec';
 import {
   CARTOON_AMBIENT_GROUND_COLOR,
   CARTOON_AMBIENT_SKY_COLOR,
@@ -20,11 +21,17 @@ import { OPENFREEMAP_SOURCE_ID, setDrapedElevatedBridgeLayersVisible } from './G
 export const BRIDGE_MODEL_LAYER_ID = 'bridge-models-3d';
 
 const BRIDGE_MIN_ZOOM = 13;
+const BRIDGE_HANDOFF_FADE_MS = 220;
 const BRIDGE_MAX_VIEWPORT_METERS = 4_000;
 const MAX_BRIDGES = 240;
+const BRIDGE_VIEW_PADDING_METERS = 600;
+// Covers stitching gaps, deck widths and abutment extension without clipping geometry.
+const BRIDGE_NEIGHBOUR_METERS = 40;
 const MAX_PIERS = 400;
 const MAX_ELEVATION_CACHE_ENTRIES = 8_000;
 const SAMPLE_SPACING_METERS = 10;
+const MAX_CLEARANCE_PROBES = 128;
+const CLEARANCE_LIFT_SLOPE = 0.12;
 const MIN_BRIDGE_LENGTH_METERS = 6;
 const MIN_POLYGON_AREA_METRES = 8;
 const MAX_POLYGON_AREA_METRES = 8_000;
@@ -45,7 +52,10 @@ const MAX_ELONGATED_DECK_AREA_METRES = 50_000;
 const ELONGATED_DECK_MIN_SPAN_METRES = 150;
 const ELONGATED_DECK_MAX_WIDTH_METRES = 32;
 const LAYER_SEPARATION_METERS = 3.8;
-const MAX_ARCH_METERS = 2.2;
+const SHORT_BRIDGE_MAX_ARCH_METERS = 2.2;
+const BRIDGE_ARCH_STOPS: ReadonlyArray<readonly [number, number]> = [
+  [150, SHORT_BRIDGE_MAX_ARCH_METERS], [300, 4], [600, 8], [1000, 12],
+];
 const ARCH_PER_METRE = 0.016;
 const PIER_CLEARANCE_METERS = 5;
 const PIER_SPACING_METERS = 28;
@@ -53,7 +63,10 @@ const PIER_END_MARGIN = 0.16;
 const SHADOW_OFFSET_METERS = 2.8;
 const MAX_CANVAS_LONG = 2048;
 const MAX_CANVAS_SHORT = 512;
-const MAX_CANVAS_PIXELS_PER_METRE = 3;
+const MAX_CANVAS_PIXELS_PER_METRE = 6;
+const MAX_TEXTURE_PIXELS_PER_BRIDGE = MAX_CANVAS_LONG * MAX_CANVAS_SHORT;
+const MAX_TEXTURE_SECTIONS = 8;
+const TEXTURE_SECTION_METRES = 300;
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RECENTER_DISTANCE_METERS = 350;
@@ -73,7 +86,7 @@ const ROAD_EDGE = '#87918d';
 const RAIL_EDGE = '#6f7874';
 const PATH_EDGE = '#d8d4ca';
 const CYCLEWAY_EDGE = '#b99a91';
-const PIER_COLOR = new THREE.Color('#5c6561');
+const PIER_COLOR = new THREE.Color('#a6ada8');
 
 export type BridgeViewState = {
   west: number;
@@ -91,6 +104,7 @@ export type BridgeLineProperties = {
   layer: number;
   ramp: boolean;
   service?: string;
+  surface?: string;
 };
 
 export type BridgeLine = {
@@ -143,6 +157,7 @@ export type BridgePaintPart = {
   width: number;
   fill: string;
   edge: string;
+  properties?: BridgeLineProperties;
 };
 
 type SampledBridge = {
@@ -152,6 +167,18 @@ type SampledBridge = {
   parts: BridgePaintPart[];
   bounds: PlanBounds;
   spanLength: number;
+  texturePixelBudget?: number;
+  piers?: Array<{ longitude: number; latitude: number; ground: number; deck: number }>;
+};
+
+type BridgeResources = {
+  deck: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  paintBridge: SampledBridge;
+  paintSignature: string;
+  shadow: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  origin: maplibregl.LngLat;
+  elevation: number;
+  heights: string;
 };
 
 type LocalPoint = {
@@ -303,6 +330,76 @@ export function planBounds(points: PlanPoint[], padding: number): PlanBounds {
   };
 }
 
+/** Keep whole nearby parts and their neighbours, including offscreen tile continuations. */
+export function bridgePartsForView<T extends { coordinates: Array<[number, number]> }>(
+  parts: T[],
+  view: Pick<BridgeViewState, 'west' | 'south' | 'east' | 'north'>,
+): T[] {
+  if (parts.length === 0) return [];
+  // The downstream pipeline owns world wrapping; be conservative at its seams.
+  if (view.west < -180 || view.east > 180 || view.east < view.west) return parts;
+  const origin = planOriginFromLngLat((view.west + view.east) / 2, (view.south + view.north) / 2);
+  const viewport = planBounds(lngLatsToPlan([
+    [view.west, view.south], [view.east, view.north],
+  ], origin), BRIDGE_VIEW_PADDING_METERS);
+  const bounds = parts.map((part) => planBounds(lngLatsToPlan(part.coordinates, origin), 0));
+  // Broad-phase only: generous bounds preserve existing stitch/cluster decisions.
+  // A grid avoids comparing every offscreen part with every retained part.
+  const grid = new Map<string, number[]>();
+  const oversized: number[] = [];
+  const cells = (box: PlanBounds): string[] | null => {
+    const x0 = Math.floor(box.minEast / 256);
+    const x1 = Math.floor(box.maxEast / 256);
+    const y0 = Math.floor(box.minNorth / 256);
+    const y1 = Math.floor(box.maxNorth / 256);
+    if (!Number.isFinite(x0 + x1 + y0 + y1)) return [];
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4096) return null;
+    const keys: string[] = [];
+    for (let x = x0; x <= x1; x += 1) {
+      for (let y = y0; y <= y1; y += 1) keys.push(`${x}:${y}`);
+    }
+    return keys;
+  };
+  const retained = new Set<number>();
+  const queue: number[] = [];
+  bounds.forEach((box, index) => {
+    if (boundsOverlap(box, viewport)) {
+      retained.add(index);
+      queue.push(index);
+    }
+    const keys = cells(box);
+    if (!keys) {
+      oversized.push(index);
+      return;
+    }
+    for (const key of keys) {
+      const bucket = grid.get(key);
+      if (bucket) bucket.push(index);
+      else grid.set(key, [index]);
+    }
+  });
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const box = bounds[queue[cursor]];
+    const expanded = {
+      minEast: box.minEast - BRIDGE_NEIGHBOUR_METERS,
+      minNorth: box.minNorth - BRIDGE_NEIGHBOUR_METERS,
+      maxEast: box.maxEast + BRIDGE_NEIGHBOUR_METERS,
+      maxNorth: box.maxNorth + BRIDGE_NEIGHBOUR_METERS,
+    };
+    const keys = cells(expanded);
+    const candidates = keys
+      ? new Set([...oversized, ...keys.flatMap((key) => grid.get(key) ?? [])])
+      : bounds.keys();
+    for (const index of candidates) {
+      if (retained.has(index) || !boundsOverlap(expanded, bounds[index])) continue;
+      retained.add(index);
+      queue.push(index);
+    }
+  }
+  // Preserve source order: clustering and painting use it to break ties.
+  return parts.filter((_, index) => retained.has(index));
+}
+
 export function mergeBridgeLines(lines: BridgeLine[]) {
   const groups = new Map<string, BridgeLine[]>();
   for (const line of lines) {
@@ -321,7 +418,18 @@ export function mergeBridgeLines(lines: BridgeLine[]) {
 }
 
 export function bridgeArchMetres(lengthMetres: number) {
-  return Math.min(MAX_ARCH_METERS, Math.max(0.5, lengthMetres * ARCH_PER_METRE));
+  // Visual estimate: the transportation tiles do not supply measured deck heights.
+  // Keep short bridges unchanged and interpolate continuously as tile spans grow.
+  if (lengthMetres <= BRIDGE_ARCH_STOPS[0][0]) {
+    return Math.min(SHORT_BRIDGE_MAX_ARCH_METERS, Math.max(0.5, lengthMetres * ARCH_PER_METRE));
+  }
+  for (let index = 1; index < BRIDGE_ARCH_STOPS.length; index += 1) {
+    const [endLength, endRise] = BRIDGE_ARCH_STOPS[index];
+    if (lengthMetres > endLength) continue;
+    const [startLength, startRise] = BRIDGE_ARCH_STOPS[index - 1];
+    return startRise + (endRise - startRise) * (lengthMetres - startLength) / (endLength - startLength);
+  }
+  return BRIDGE_ARCH_STOPS[BRIDGE_ARCH_STOPS.length - 1][1];
 }
 
 export function bridgeDeckElevations(ground: number[], layer: number, lengthMetres = 80) {
@@ -338,6 +446,181 @@ export function bridgeDeckElevations(ground: number[], layer: number, lengthMetr
     maxClearance = Math.max(maxClearance, deck[index] - ground[index]);
   }
   return { deck, maxClearance };
+}
+
+type BridgeClearanceProbe = {
+  point: PlanPoint;
+  vertices: [number, number, number];
+  weights: [number, number, number];
+};
+
+/** Sample triangle interiors and long edges without adding mesh vertices. */
+export function bridgeClearanceProbes(points: PlanPoint[], indices: number[], spanLength: number): BridgeClearanceProbe[] {
+  const triangleCount = Math.floor(indices.length / 3);
+  const count = Math.min(triangleCount, MAX_CLEARANCE_PROBES / 2, Math.max(1, Math.ceil(spanLength / 20)));
+  const probes: BridgeClearanceProbe[] = [];
+  for (let slot = 0; slot < count; slot += 1) {
+    const triangle = count === 1 ? 0 : Math.round(slot * (triangleCount - 1) / (count - 1));
+    const vertices = indices.slice(triangle * 3, triangle * 3 + 3) as [number, number, number];
+    const corners = vertices.map((index) => points[index]);
+    let longest = 0;
+    let length = -1;
+    for (let edge = 0; edge < 3; edge += 1) {
+      const next = (edge + 1) % 3;
+      const distance = Math.hypot(corners[edge].east - corners[next].east, corners[edge].north - corners[next].north);
+      if (distance > length) {
+        longest = edge;
+        length = distance;
+      }
+    }
+    const midpoint: [number, number, number] = [0, 0, 0];
+    midpoint[longest] = 0.5;
+    midpoint[(longest + 1) % 3] = 0.5;
+    for (const weights of [[1 / 3, 1 / 3, 1 / 3] as [number, number, number], midpoint]) {
+      probes.push({
+        vertices, weights,
+        point: {
+          east: corners.reduce((sum, point, index) => sum + point.east * weights[index], 0),
+          north: corners.reduce((sum, point, index) => sum + point.north * weights[index], 0),
+        },
+      });
+    }
+  }
+  return probes;
+}
+
+/** Split triangles at shared parameter stations, reusing edge intersections. */
+export function splitBridgeMesh<T extends PlanPoint>(
+  source: T[], sourceIndices: number[], cuts: number[], parameter: (point: T) => number,
+) {
+  const points = source.slice();
+  let polygons = Array.from({ length: sourceIndices.length / 3 }, (_, index) => sourceIndices.slice(index * 3, index * 3 + 3));
+  // Retain convex clipped polygons until all cuts are complete. Triangulating
+  // after each cut creates new diagonals that subsequent cuts split needlessly.
+  for (const cut of [...cuts].sort((a, b) => a - b)) {
+    const intersections = new Map<string, number>();
+    const intersect = (a: number, b: number) => {
+      if (Math.abs(parameter(points[a]) - cut) < 1e-10) return a;
+      if (Math.abs(parameter(points[b]) - cut) < 1e-10) return b;
+      const key = `${Math.min(a, b)}:${Math.max(a, b)}`;
+      const existing = intersections.get(key);
+      if (existing !== undefined) return existing;
+      const fraction = (cut - parameter(points[a])) / (parameter(points[b]) - parameter(points[a]));
+      const point = { ...points[a] };
+      for (const name of Object.keys(point) as Array<keyof T>) {
+        const start = points[a][name];
+        const end = points[b][name];
+        if (typeof start === 'number' && typeof end === 'number') {
+          point[name] = (start + (end - start) * fraction) as T[keyof T];
+        }
+      }
+      const index = points.length;
+      points.push(point);
+      intersections.set(key, index);
+      return index;
+    };
+    const next: number[][] = [];
+    for (const triangle of polygons) {
+      const values = triangle.map((index) => parameter(points[index]));
+      if (Math.min(...values) >= cut - 1e-10 || Math.max(...values) <= cut + 1e-10) {
+        next.push(triangle);
+        continue;
+      }
+      for (const sign of [-1, 1]) {
+        const polygon: number[] = [];
+        for (let edge = 0; edge < triangle.length; edge += 1) {
+          const a = triangle[edge];
+          const b = triangle[(edge + 1) % triangle.length];
+          const insideA = sign * (parameter(points[a]) - cut) >= 0;
+          const insideB = sign * (parameter(points[b]) - cut) >= 0;
+          if (insideA) polygon.push(a);
+          if (insideA !== insideB) polygon.push(intersect(a, b));
+        }
+        const unique = polygon.filter((value, index) => polygon.indexOf(value) === index);
+        if (unique.length >= 3) next.push(unique);
+      }
+    }
+    polygons = next;
+  }
+  const indices: number[] = [];
+  for (const polygon of polygons) {
+    for (let index = 1; index + 1 < polygon.length; index += 1) {
+      indices.push(polygon[0], polygon[index], polygon[index + 1]);
+    }
+  }
+  return { points, indices };
+}
+
+export function refineBridgeApproaches(points: PlanPoint[], indices: number[], t: number[], spanLength: number) {
+  const approach = Math.min(ABUTMENT_EXTEND_METRES, spanLength / 4);
+  const cuts = [0.2, 0.5, 0.8, 1].flatMap((fraction) => {
+    const value = fraction * approach / Math.max(1, spanLength);
+    return [value, 1 - value];
+  }).sort((a, b) => a - b);
+  const refined = splitBridgeMesh(points.map((point, index) => ({ ...point, t: t[index] })), indices, cuts, (point) => point.t);
+  return { points: refined.points.map(({ east, north }) => ({ east, north })),
+    indices: refined.indices, t: refined.points.map((point) => point.t) };
+}
+
+/** Polygon triangulation can join opposite ends; cut it before applying the arch. */
+export function refineBridgeSpan(points: PlanPoint[], indices: number[], t: number[], spanLength: number) {
+  const steps = Math.min(64, Math.max(2, Math.ceil(spanLength / SAMPLE_SPACING_METERS)));
+  const cuts = Array.from({ length: steps - 1 }, (_, index) => (index + 1) / steps);
+  const refined = splitBridgeMesh(points.map((point, index) => ({ ...point, t: t[index] })), indices, cuts, (point) => point.t);
+  return { points: refined.points.map(({ east, north }) => ({ east, north })),
+    indices: refined.indices, t: refined.points.map((point) => point.t) };
+}
+
+/** Ease the existing approach extension into terrain without changing the main span. */
+export function bridgeApproachMix(t: number, spanLength: number) {
+  const distance = Math.max(0, Math.min(t, 1 - t)) * spanLength;
+  const approach = Math.min(ABUTMENT_EXTEND_METRES, spanLength / 4);
+  const u = Math.min(1, distance / Math.max(1, approach));
+  return u * u * (3 - 2 * u);
+}
+
+export function bridgeSurfaceClearance(t: number, spanLength: number) {
+  // A small offset avoids coplanar flicker where the deck meets the draped road.
+  return 0.06 + (DECK_WATER_CLEARANCE_METRES - 0.06) * bridgeApproachMix(t, spanLength);
+}
+
+/** Raise only obstructed sections, spreading lift along the span without lowering clearance. */
+export function terrainClearedDeck(
+  t: number[],
+  deck: number[],
+  ground: number[],
+  spanLength: number,
+  probes: Array<BridgeClearanceProbe & { ground: number }> = [],
+) {
+  const required = deck.map((height, index) => Math.max(0, ground[index] + bridgeSurfaceClearance(t[index], spanLength) - height));
+  for (const probe of probes) {
+    const height = probe.vertices.reduce((sum, vertex, index) => sum + deck[vertex] * probe.weights[index], 0);
+    const probeT = probe.vertices.reduce((sum, vertex, index) => sum + t[vertex] * probe.weights[index], 0);
+    const lift = Math.max(0, probe.ground + bridgeSurfaceClearance(probeT, spanLength) - height);
+    // Applying the deficit to each contributing vertex also clears the interpolated
+    // triangle, rather than only lifting a theoretical profile between vertices.
+    probe.vertices.forEach((vertex, index) => {
+      if (probe.weights[index] > 0) required[vertex] = Math.max(required[vertex], lift);
+    });
+  }
+  if (!required.some((lift) => lift > 1e-6)) return deck;
+  const stations = new Map<number, number>();
+  const keys = t.map((value) => Math.round(value * 1e6) / 1e6);
+  keys.forEach((key, index) => stations.set(key, Math.max(stations.get(key) ?? 0, required[index])));
+  const ordered = [...stations.keys()].sort((left, right) => left - right);
+  const lifts = ordered.map((key) => stations.get(key)!);
+  // A slope-limited upper envelope keeps the correction continuous and leaves
+  // unaffected approaches alone. Equal span stations receive equal lift across width.
+  for (let index = 1; index < lifts.length; index += 1) {
+    const fall = (ordered[index] - ordered[index - 1]) * spanLength * CLEARANCE_LIFT_SLOPE;
+    lifts[index] = Math.max(lifts[index], lifts[index - 1] - fall);
+  }
+  for (let index = lifts.length - 2; index >= 0; index -= 1) {
+    const fall = (ordered[index + 1] - ordered[index]) * spanLength * CLEARANCE_LIFT_SLOPE;
+    lifts[index] = Math.max(lifts[index], lifts[index + 1] - fall);
+  }
+  ordered.forEach((key, index) => stations.set(key, lifts[index]));
+  return deck.map((height, index) => height + stations.get(keys[index])!);
 }
 
 export function surfaceElevation(
@@ -496,7 +779,11 @@ export function lineRibbonMesh(plan: PlanPoint[], width: number) {
   const points: PlanPoint[] = [];
   const t: number[] = [];
   const indices: number[] = [];
+  const totalLength = planLineLength(densified);
+  let distance = 0;
   for (let index = 0; index < densified.length; index += 1) {
+    if (index > 0) distance += Math.hypot(densified[index].east - densified[index - 1].east,
+      densified[index].north - densified[index - 1].north);
     const previous = densified[Math.max(0, index - 1)];
     const next = densified[Math.min(densified.length - 1, index + 1)];
     const east = next.east - previous.east;
@@ -508,7 +795,7 @@ export function lineRibbonMesh(plan: PlanPoint[], width: number) {
       { east: densified[index].east + normalEast, north: densified[index].north + normalNorth },
       { east: densified[index].east - normalEast, north: densified[index].north - normalNorth },
     );
-    const parameter = densified.length === 1 ? 0 : index / (densified.length - 1);
+    const parameter = totalLength > 0 ? distance / totalLength : 0;
     t.push(parameter, parameter);
     if (index === 0) continue;
     const vertex = points.length - 4;
@@ -529,7 +816,11 @@ export function parallelBundleRibbon(lines: BridgeDrawable[]) {
   const points: PlanPoint[] = [];
   const t: number[] = [];
   const indices: number[] = [];
+  const totalLength = planLineLength(densified);
+  let distance = 0;
   for (let index = 0; index < densified.length; index += 1) {
+    if (index > 0) distance += Math.hypot(densified[index].east - densified[index - 1].east,
+      densified[index].north - densified[index - 1].north);
     const previous = densified[Math.max(0, index - 1)];
     const next = densified[Math.min(densified.length - 1, index + 1)];
     const east = next.east - previous.east;
@@ -553,7 +844,7 @@ export function parallelBundleRibbon(lines: BridgeDrawable[]) {
       { east: spinePoint.east + normalEast * maxLateral, north: spinePoint.north + normalNorth * maxLateral },
       { east: spinePoint.east + normalEast * minLateral, north: spinePoint.north + normalNorth * minLateral },
     );
-    const parameter = densified.length === 1 ? 0 : index / (densified.length - 1);
+    const parameter = totalLength > 0 ? distance / totalLength : 0;
     t.push(parameter, parameter);
     if (index === 0) continue;
     const vertex = points.length - 4;
@@ -1036,11 +1327,13 @@ export function clusterOutline(drawables: BridgeDrawable[]) {
   return clusterSurfaces(drawables)[0]?.outer ?? [];
 }
 
-export function triangulateDeckSurface(surface: DeckSurface) {
-  const outer = orientedRing(uniquePlanPoints(densifyRing(surface.outer, SAMPLE_SPACING_METERS)), false);
+export function triangulateDeckSurface(surface: DeckSurface, densifyBoundary = true) {
+  const boundary = (ring: PlanPoint[]) => uniquePlanPoints(densifyBoundary
+    ? densifyRing(ring, SAMPLE_SPACING_METERS) : ring);
+  const outer = orientedRing(boundary(surface.outer), false);
   const holes = surface.holes
     .filter((hole) => hole.length >= 3)
-    .map((hole) => orientedRing(uniquePlanPoints(densifyRing(hole, SAMPLE_SPACING_METERS)), true));
+    .map((hole) => orientedRing(boundary(hole), true));
   if (outer.length < 3) return null;
   const contour = outer.map((point) => new THREE.Vector2(point.east, point.north));
   const holeContours = holes.map((hole) => hole.map((point) => new THREE.Vector2(point.east, point.north)));
@@ -1368,16 +1661,93 @@ export function extendClusterAbutments(cluster: BridgeDrawable[], origin: PlanOr
   });
 }
 
-export function pierStations(clearance: number[], lengthMetres: number) {
-  if (clearance.length < 2 || lengthMetres < PIER_SPACING_METERS * 1.4) return [];
-  const stations: number[] = [];
-  const start = Math.floor(clearance.length * PIER_END_MARGIN);
-  const end = Math.ceil(clearance.length * (1 - PIER_END_MARGIN));
-  const spacing = Math.max(1, Math.round((PIER_SPACING_METERS / lengthMetres) * (clearance.length - 1)));
-  for (let index = start; index < end; index += spacing) {
-    if (clearance[index] >= PIER_CLEARANCE_METERS) stations.push(index);
+export function bridgePierDistances(length: number, limit = 32) {
+  if (length < PIER_SPACING_METERS * 1.4 || limit < 1) return [];
+  const margin = Math.min(PIER_SPACING_METERS, Math.max(ABUTMENT_EXTEND_METRES, length * PIER_END_MARGIN));
+  const previousCount = Math.min(limit, Math.max(1, Math.round((length - 2 * margin) / PIER_SPACING_METERS) + 1));
+  const count = Math.ceil(previousCount / 2);
+  return Array.from({ length: count }, (_, index) => count === 1 ? length / 2
+    : margin + (length - 2 * margin) * index / (count - 1));
+}
+
+/** Interpolate the actual rendered triangle, independent of vertex ordering. */
+export function bridgeDeckHeightAt(point: PlanPoint, points: PlanPoint[], indices: number[], heights: number[]) {
+  for (let i = 0; i < indices.length; i += 3) {
+    const [a, b, c] = indices.slice(i, i + 3);
+    const denominator = (points[b].north - points[c].north) * (points[a].east - points[c].east)
+      + (points[c].east - points[b].east) * (points[a].north - points[c].north);
+    if (Math.abs(denominator) < 1e-10) continue;
+    const u = ((points[b].north - points[c].north) * (point.east - points[c].east)
+      + (points[c].east - points[b].east) * (point.north - points[c].north)) / denominator;
+    const v = ((points[c].north - points[a].north) * (point.east - points[c].east)
+      + (points[a].east - points[c].east) * (point.north - points[c].north)) / denominator;
+    const w = 1 - u - v;
+    if (Math.min(u, v, w) >= -1e-8) return heights[a] * u + heights[b] * v + heights[c] * w;
   }
-  return stations;
+  return undefined;
+}
+
+export function bridgePierLocations(lines: PlanPoint[][], surfaces: DeckSurface[], points: PlanPoint[],
+  indices: number[], heights: number[], limit = 32) {
+  const candidates: PlanPoint[] = [];
+  for (const line of lines) {
+    const length = planLineLength(line);
+    const distances = bridgePierDistances(length, limit);
+    let offset = 0;
+    let segment = 1;
+    for (const distance of distances) {
+      while (segment < line.length) {
+        const a = line[segment - 1];
+        const b = line[segment];
+        const span = Math.hypot(b.east - a.east, b.north - a.north);
+        if (offset + span >= distance && span > 0) {
+          const t = (distance - offset) / span;
+          candidates.push({ east: a.east + (b.east - a.east) * t, north: a.north + (b.north - a.north) * t });
+          break;
+        }
+        offset += span;
+        segment += 1;
+      }
+    }
+  }
+  if (!lines.length) {
+    for (const surface of surfaces) {
+      const axis = spanAxis(surface.outer);
+      const origin = surface.outer[0];
+      if (!origin) continue;
+      const spans = surface.outer.map((point) => projectSpan(point, origin, axis));
+      const start = Math.min(...spans);
+      const perp = { east: -axis.north, north: axis.east };
+      for (const distance of bridgePierDistances(Math.max(...spans) - start, limit)) {
+        const hits = [surface.outer, ...surface.holes].flatMap((ring) => sectionHits(ring, origin, axis, start + distance))
+          .sort((a, b) => (a.east - b.east) * perp.east + (a.north - b.north) * perp.north);
+        for (let index = 1; index < hits.length; index += 1) {
+          const a = hits[index - 1];
+          const b = hits[index];
+          const point = { east: (a.east + b.east) / 2, north: (a.north + b.north) / 2 };
+          if (pointInFilledPolygon(point, surface.outer, surface.holes)) candidates.push(point);
+        }
+      }
+    }
+  }
+  const result: Array<PlanPoint & { deck: number }> = [];
+  for (const point of candidates) {
+    if (result.length >= limit) break;
+    if (result.some((other) => Math.hypot(point.east - other.east, point.north - other.north) < PIER_SPACING_METERS / 2)) continue;
+    const footprint = [point, ...[-0.675, 0.675].flatMap((east) => [-0.675, 0.675].map((north) => ({
+      east: point.east + east, north: point.north + north,
+    })))];
+    if (surfaces.length && footprint.some((sample) => !surfaces.some((surface) =>
+      pointInFilledPolygon(sample, surface.outer, surface.holes)))) continue;
+    // A small hole can fit between the footprint samples; keep its boundary
+    // outside the support's circumscribed radius as well.
+    if (surfaces.some((surface) => surface.holes.some((hole) =>
+      pointToPolyline(point, hole, true) < Math.SQRT2 * 0.675))) continue;
+    const deck = footprint.map((sample) => bridgeDeckHeightAt(sample, points, indices, heights));
+    if (deck.some((height) => height === undefined)) continue;
+    result.push({ ...point, deck: Math.min(...deck as number[]) });
+  }
+  return result;
 }
 
 export function deckAreaAllowed(outer: PlanPoint[], holes: PlanPoint[][] = []) {
@@ -1401,7 +1771,7 @@ export function polygonAreaMetres(points: PlanPoint[]) {
   return Math.abs(area) * 0.5;
 }
 
-function createBridgeCanvas(bounds: PlanBounds) {
+function createBridgeCanvas(bounds: PlanBounds, pixelBudget = MAX_TEXTURE_PIXELS_PER_BRIDGE) {
   const spanEast = Math.max(1, bounds.maxEast - bounds.minEast);
   const spanNorth = Math.max(1, bounds.maxNorth - bounds.minNorth);
   const longSpan = Math.max(spanEast, spanNorth);
@@ -1410,10 +1780,15 @@ function createBridgeCanvas(bounds: PlanBounds) {
     MAX_CANVAS_LONG / longSpan,
     MAX_CANVAS_SHORT / shortSpan,
     MAX_CANVAS_PIXELS_PER_METRE,
+    Math.sqrt(pixelBudget / (spanEast * spanNorth)),
   );
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(2, Math.ceil(spanEast * scale));
-  canvas.height = Math.max(2, Math.ceil(spanNorth * scale));
+  canvas.width = Math.max(2, Math.floor(spanEast * scale));
+  canvas.height = Math.max(2, Math.floor(spanNorth * scale));
+  // Integer texture dimensions must match UV normalization exactly at joins.
+  canvas.getContext('2d')?.setTransform(
+    canvas.width / (spanEast * scale), 0, 0, canvas.height / (spanNorth * scale), 0, 0,
+  );
   return { canvas, scale, spanEast, spanNorth };
 }
 
@@ -1515,15 +1890,41 @@ export function paintBridgePolygonCanvas(
   return canvas;
 }
 
+/** Two schematic rails follow the OSM track centerline, including bounded corner joins. */
+export function bridgeRailLines(plan: PlanPoint[]) {
+  const points = plan.filter((point, index) => index === 0
+    || Math.hypot(point.east - plan[index - 1].east, point.north - plan[index - 1].north) > 1e-6);
+  if (points.length < 2) return [];
+  const normals = points.slice(1).map((point, index) => {
+    const east = point.east - points[index].east;
+    const north = point.north - points[index].north;
+    const length = Math.hypot(east, north);
+    return { east: -north / length, north: east / length };
+  });
+  return [-1, 1].map((side) => points.map((point, index) => {
+    const incoming = normals[Math.max(0, index - 1)];
+    const outgoing = normals[Math.min(normals.length - 1, index)];
+    const length = Math.hypot(incoming.east + outgoing.east, incoming.north + outgoing.north);
+    const normal = length > 1e-6 ? { east: (incoming.east + outgoing.east) / length,
+      north: (incoming.north + outgoing.north) / length } : outgoing;
+    const offset = side * 0.75 / Math.max(0.5, normal.east * outgoing.east + normal.north * outgoing.north);
+    return { east: point.east + normal.east * offset, north: point.north + normal.north * offset };
+  }));
+}
+
 export function paintBridgeCluster(
   surfaces: DeckSurface[],
   parts: BridgePaintPart[],
   bounds: PlanBounds,
+  resolve: (part: BridgePaintPart) => { fill: string; edge: string; rail?: string } = (part) => part,
+  pixelBudget = MAX_TEXTURE_PIXELS_PER_BRIDGE,
 ) {
-  const { canvas, scale } = createBridgeCanvas(bounds);
+  const { canvas, scale } = createBridgeCanvas(bounds, pixelBudget);
   const context = canvas.getContext('2d');
   if (!context) return canvas;
-  const base = clusterBaseColors(parts);
+  const baseColors = clusterBaseColors(parts);
+  const basePart = parts.find((part) => part.fill === baseColors.fill);
+  const base = basePart ? resolve(basePart) : baseColors;
   const paintFilledDecks = parts.some((part) => part.kind === 'polygon');
   if (paintFilledDecks) {
     for (const surface of surfaces) {
@@ -1535,7 +1936,8 @@ export function paintBridgeCluster(
     .slice()
     .sort((left, right) => right.width - left.width);
   for (const part of polygons) {
-    fillPlanPolygon(context, part.plan, bounds, scale, part.fill, part.edge, 1.15, part.holes ?? []);
+    const colors = resolve(part);
+    fillPlanPolygon(context, part.plan, bounds, scale, colors.fill, colors.edge, 1.15, part.holes ?? []);
   }
   for (const part of lines) {
     const clipToDeck = paintFilledDecks && (part.fill === PATH_FILL || part.fill === CYCLEWAY_FILL);
@@ -1547,8 +1949,30 @@ export function paintBridgeCluster(
       }
       context.clip();
     }
-    strokePlanLine(context, part.plan, bounds, scale, part.width, part.fill, part.edge);
+    const colors = resolve(part);
+    strokePlanLine(context, part.plan, bounds, scale, part.width, colors.fill, colors.edge);
     if (clipToDeck) context.restore();
+  }
+  // Paint from complete centerlines so section boundaries never restart the rails.
+  for (const part of lines) {
+    if (part.properties?.className !== 'rail' && part.properties?.className !== 'transit') continue;
+    const colors = resolve(part);
+    context.save();
+    context.globalCompositeOperation = 'source-atop';
+    context.strokeStyle = colors.rail ?? part.edge;
+    context.lineWidth = Math.max(1, 0.18 * scale);
+    context.lineJoin = 'round';
+    context.lineCap = 'butt';
+    for (const rail of bridgeRailLines(part.plan)) {
+      context.beginPath();
+      rail.forEach((point, index) => {
+        const pixel = canvasPoint(point.east, point.north, bounds, scale);
+        if (index === 0) context.moveTo(pixel.x, pixel.y);
+        else context.lineTo(pixel.x, pixel.y);
+      });
+      context.stroke();
+    }
+    context.restore();
   }
   return canvas;
 }
@@ -1859,6 +2283,7 @@ function propertiesFromFeature(feature: SourceFeature): BridgeLineProperties {
     layer: Number.isFinite(layer) ? layer : 0,
     ramp: properties.ramp === 1 || properties.ramp === true,
     service: typeof properties.service === 'string' ? properties.service : undefined,
+    surface: typeof properties.surface === 'string' ? properties.surface : undefined,
   };
 }
 
@@ -1881,22 +2306,41 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private readonly elevationCache = new Map<string, number>();
   private sampledBridges: SampledBridge[] = [];
   private drapedVisible = true;
+  private drapedHandoff?: { frames: number; fadeStarted?: number };
+  private bridgeOpacity = 1;
   private pendingElevation = false;
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
   private pierMesh?: THREE.InstancedMesh;
   private darkMode = false;
   private nightMix = 0;
+  private sunAzimuth = CARTOON_SUN_AZIMUTH_DEGREES;
+  private sunPolar = CARTOON_SUN_POLAR_DEGREES;
+  private lastUpdateSignature?: string;
+  private terrainSignature?: string;
+  private readonly bridgeResources = new Map<string, BridgeResources>();
+  private pierOrigin = this.sceneOrigin;
+  private pierOriginElevation = 0;
+  private readonly performanceStats = { updates: 0, built: 0, reused: 0, heightUpdates: 0, recenters: 0, lastUpdateMs: 0, sourceParts: 0, retainedParts: 0 };
+
+  getPerformanceStats() {
+    return { ...this.performanceStats, cachedBridges: this.bridgeResources.size };
+  }
 
   constructor(private readonly sourceId = OPENFREEMAP_SOURCE_ID) {}
 
+  invalidateSource() {
+    this.lastUpdateSignature = undefined;
+  }
+
   invalidateTerrain() {
+    this.invalidateSource();
     this.elevationCache.clear();
     this.pendingElevation = true;
   }
 
   setTheme(dark: boolean) {
-    if (this.darkMode === dark && this.nightMix === 0) return;
+    if (this.darkMode === dark) return;
     this.darkMode = dark;
     this.applyLighting();
     this.map?.triggerRepaint();
@@ -1909,7 +2353,11 @@ export class BridgeModelLayer implements CustomLayerInterface {
   } | null) {
     const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
     const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
-    this.nightMix = lighting?.nightMix ?? 0;
+    const nightMix = lighting?.nightMix ?? 0;
+    if (this.sunAzimuth === azimuth && this.sunPolar === polar && this.nightMix === nightMix) return;
+    this.sunAzimuth = azimuth;
+    this.sunPolar = polar;
+    this.nightMix = nightMix;
     const position = sunCartesian(azimuth, polar);
     this.sunlight?.position.set(position.x, position.y, position.z);
     this.applyLighting();
@@ -1927,7 +2375,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     );
     this.scene.add(this.hemisphereLight);
     this.sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR, 2.4);
-    const sunPosition = sunCartesian(CARTOON_SUN_AZIMUTH_DEGREES, CARTOON_SUN_POLAR_DEGREES);
+    const sunPosition = sunCartesian(this.sunAzimuth, this.sunPolar);
     this.sunlight.position.set(sunPosition.x, sunPosition.y, sunPosition.z);
     this.scene.add(this.sunlight);
     this.decks.frustumCulled = false;
@@ -1935,7 +2383,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
     this.pierMesh = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1.35, 1, 1.7),
-      new THREE.MeshLambertMaterial({ color: PIER_COLOR, flatShading: true }),
+      new THREE.MeshLambertMaterial({ color: PIER_COLOR, flatShading: true, transparent: true }),
       MAX_PIERS,
     );
     this.pierMesh.count = 0;
@@ -1957,21 +2405,37 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const map = this.map;
     if (!map) return;
 
+    const terrainSignature = JSON.stringify(map.getTerrain());
+    if (terrainSignature !== this.terrainSignature) {
+      this.invalidateTerrain();
+      this.terrainSignature = terrainSignature;
+    }
     const view = this.currentView(map);
-    if (!shouldRenderBridgesForView(view)) {
-      this.sampledBridges = [];
+    const visible = shouldRenderBridgesForView(view);
+    const signature = visible ? JSON.stringify(view) : 'hidden';
+    if (signature === this.lastUpdateSignature) return;
+    // Record attempts too: missing terrain is retried when source data arrives,
+    // rather than creating an idle/repaint retry loop.
+    this.lastUpdateSignature = signature;
+    if (!visible) {
       this.pendingElevation = false;
-      this.clearMeshes();
-      this.setDrapedVisible(true);
+      if (view.terrainEnabled && this.sampledBridges.length > 0) {
+        this.beginDrapedHandoff();
+      } else {
+        this.finishDrapedHandoff();
+      }
       map.triggerRepaint();
       return;
     }
 
+    this.cancelDrapedHandoff();
+    const started = performance.now();
+    this.performanceStats.updates += 1;
     const sampled = this.sampleVisibleBridges(map, view);
     if (sampled.pending) {
       this.pendingElevation = true;
+      this.performanceStats.lastUpdateMs = performance.now() - started;
       if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
-      map.triggerRepaint();
       return;
     }
     this.pendingElevation = false;
@@ -1980,6 +2444,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.sceneOrigin = map.getCenter();
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
     this.writeMeshes();
+    this.performanceStats.lastUpdateMs = performance.now() - started;
     this.setDrapedVisible(this.sampledBridges.length === 0);
     map.triggerRepaint();
   }
@@ -1988,7 +2453,15 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const map = this.map;
     const renderer = this.renderer;
     if (!map || !renderer) return;
-    if (!shouldRenderBridgesForView(this.currentView(map)) || this.sampledBridges.length === 0) return;
+    const view = this.currentView(map);
+    if (!view.terrainEnabled || this.sampledBridges.length === 0) return;
+    if (!shouldRenderBridgesForView(view)) {
+      this.beginDrapedHandoff();
+      if (!this.advanceDrapedHandoff(performance.now())) return;
+    } else {
+      this.cancelDrapedHandoff();
+    }
+    this.refreshDeckPaint();
 
     const center = map.getCenter();
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
@@ -2001,7 +2474,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (drift > RECENTER_DISTANCE_METERS) {
       this.sceneOrigin = center;
       this.sceneOriginElevation = map.queryTerrainElevation(center) ?? this.sceneOriginElevation;
-      this.writeMeshes();
+      this.positionResources();
+      this.performanceStats.recenters += 1;
     }
 
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
@@ -2022,6 +2496,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   onRemove() {
+    this.drapedHandoff = undefined;
     this.setDrapedVisible(true);
     this.clearMeshes();
     this.pierMesh?.geometry.dispose();
@@ -2034,6 +2509,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.renderer?.dispose();
     this.renderer = undefined;
     this.map = undefined;
+    this.lastUpdateSignature = undefined;
+    this.terrainSignature = undefined;
   }
 
   needsElevationRetry() {
@@ -2122,9 +2599,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
       }
     }
 
-    const mergedLines = mergeBridgeLines([...uniqueLines.values()])
+    const parts = [...uniqueLines.values(), ...uniquePolygons.values()];
+    const retained = new Set(bridgePartsForView(parts, view));
+    this.performanceStats.sourceParts = parts.length;
+    this.performanceStats.retainedParts = retained.size;
+    const mergedLines = mergeBridgeLines([...uniqueLines.values()].filter((line) => retained.has(line)))
       .filter((line) => lineLengthMetres(line.coordinates) >= MIN_BRIDGE_LENGTH_METERS);
     const polygons = [...uniquePolygons.values()].filter((polygon) => {
+      if (!retained.has(polygon)) return false;
       const outer = toPlanPoints(polygon.coordinates);
       const holes = polygon.holes.map((hole) => toPlanPoints(hole));
       return deckAreaAllowed(outer, holes);
@@ -2152,12 +2634,26 @@ export class BridgeModelLayer implements CustomLayerInterface {
     ];
 
     const clusters = clusterBridgeDrawables(drawables)
-      .map((cluster) => extendClusterAbutments(cluster, origin))
-      .map((cluster) => ({
-        cluster,
-        surfaces: clusterSurfaces(cluster),
-        span: clusterSpanLength(cluster),
-      }))
+      .map((members) => {
+        // Tile enumeration may change the shared plan origin. Build each cluster
+        // in its own coordinates so unrelated tile arrivals do not change its mesh.
+        const anchor = members[0].coordinates[0];
+        const clusterOrigin = planOriginFromLngLat(anchor[0], anchor[1]);
+        const localMembers = members.map((drawable) => ({
+          ...drawable,
+          plan: lngLatsToPlan(drawable.coordinates, clusterOrigin),
+          holes: drawable.holes?.map((hole) => lngLatsToPlan(
+            hole.map((point) => planToLngLat(point, origin)), clusterOrigin,
+          )),
+        }));
+        const cluster = extendClusterAbutments(localMembers, clusterOrigin);
+        return {
+          origin: clusterOrigin,
+          cluster,
+          surfaces: clusterSurfaces(cluster),
+          span: clusterSpanLength(cluster),
+        };
+      })
       .filter((entry) => entry.span >= MIN_BRIDGE_LENGTH_METERS)
       .sort((left, right) => right.span - left.span)
       .slice(0, MAX_BRIDGES);
@@ -2165,9 +2661,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const terrainZoomBucket = Math.floor(view.zoom + 1e-6);
     const bridges: SampledBridge[] = [];
     this.pendingElevation = false;
+    let remainingPiers = MAX_PIERS;
     for (const entry of clusters) {
-      const sampled = this.sampleCluster(map, origin, entry.cluster, entry.surfaces, entry.span, terrainZoomBucket);
-      if (sampled) bridges.push(sampled);
+      const sampled = this.sampleCluster(map, entry.origin, entry.cluster, entry.surfaces, entry.span, terrainZoomBucket,
+        Math.min(32, remainingPiers));
+      if (sampled) {
+        bridges.push(sampled);
+        remainingPiers -= sampled.piers.length;
+      }
     }
     return { bridges, pending: this.pendingElevation };
   }
@@ -2179,6 +2680,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     surfaces: DeckSurface[],
     spanLength: number,
     terrainZoomBucket: number,
+    pierLimit = 32,
   ) {
     const lines = cluster.filter((drawable) => drawable.kind === 'line');
     const polygons = cluster.filter((drawable) => drawable.kind === 'polygon');
@@ -2222,7 +2724,9 @@ export class BridgeModelLayer implements CustomLayerInterface {
       }
     } else {
       for (const surface of surfaces) {
-        const triangulated = triangulateDeckSurface(surface);
+        // Span slicing supplies the height samples; densifying the outline first
+        // creates redundant long diagonals and multiplies the resulting triangles.
+        const triangulated = triangulateDeckSurface(surface, false);
         if (triangulated) {
           appendMesh(
             triangulated.points,
@@ -2261,6 +2765,13 @@ export class BridgeModelLayer implements CustomLayerInterface {
       for (let index = 0; index < meshT.length; index += 1) meshT[index] = remapped[index];
     }
 
+    const spanMesh = meshLines ? { points: meshPoints, indices: meshIndices, t: meshT }
+      : refineBridgeSpan(meshPoints, meshIndices, meshT, spanLength);
+    const refined = refineBridgeApproaches(spanMesh.points, spanMesh.indices, spanMesh.t, spanLength);
+    meshPoints.splice(0, meshPoints.length, ...refined.points);
+    meshIndices.splice(0, meshIndices.length, ...refined.indices);
+    meshT.splice(0, meshT.length, ...refined.t);
+
     const coordinates = meshPoints.map((point) => planToLngLat(point, origin));
     const ground = this.sampleGround(map, coordinates, terrainZoomBucket);
     if (ground === null) {
@@ -2274,9 +2785,25 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const startGround = averageOr(startSamples, ground[0]);
     const endGround = averageOr(endSamples, ground[ground.length - 1]);
     const arch = bridgeArchMetres(spanLength);
-    const deck = meshT.map((t) => (
-      surfaceElevation(t, startGround, startGround, endGround, arch) + DECK_WATER_CLEARANCE_METRES
-    ));
+    const baseDeck = meshT.map((t, index) => {
+      const spanHeight = surfaceElevation(t, startGround, startGround, endGround, arch);
+      const mix = bridgeApproachMix(t, spanLength);
+      return ground[index] + (spanHeight - ground[index]) * mix + bridgeSurfaceClearance(t, spanLength);
+    });
+    const probes = bridgeClearanceProbes(meshPoints, meshIndices, spanLength);
+    const probeGround = this.sampleGround(map, probes.map((probe) => planToLngLat(probe.point, origin)), terrainZoomBucket);
+    if (probeGround === null) {
+      this.pendingElevation = true;
+      return null;
+    }
+    const deck = terrainClearedDeck(meshT, baseDeck, ground, spanLength,
+      probes.map((probe, index) => ({ ...probe, ground: probeGround[index] })));
+    const pierLocations = bridgePierLocations(lines.map((line) => line.plan), surfaces, meshPoints, meshIndices, deck, pierLimit);
+    const piers = this.sampleBridgePiers(map, pierLocations, origin, terrainZoomBucket);
+    if (piers === null) {
+      this.pendingElevation = true;
+      return null;
+    }
     const allPlan = [
       ...meshPoints,
       ...cluster.flatMap((drawable) => drawable.plan),
@@ -2298,6 +2825,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
         const colors = bridgePaintColors(drawable.properties);
         return {
           kind: drawable.kind,
+          properties: drawable.properties,
           plan: drawable.plan,
           holes: drawable.holes,
           width: drawable.width,
@@ -2307,7 +2835,16 @@ export class BridgeModelLayer implements CustomLayerInterface {
       }),
       bounds: planBounds(allPlan, 2),
       spanLength,
+      piers,
     };
+  }
+
+  private sampleBridgePiers(map: MaplibreMap, locations: Array<PlanPoint & { deck: number }>, origin: PlanOrigin, terrainZoomBucket: number) {
+    const coordinates = locations.map((point) => planToLngLat(point, origin));
+    const ground = this.sampleGround(map, coordinates, terrainZoomBucket);
+    if (ground === null) return null;
+    return locations.flatMap((point, index) => point.deck - ground[index] >= PIER_CLEARANCE_METERS
+      ? [{ longitude: coordinates[index][0], latitude: coordinates[index][1], ground: ground[index], deck: point.deck }] : []);
   }
 
   private sampleGround(map: MaplibreMap, coordinates: Array<[number, number]>, terrainZoomBucket: number) {
@@ -2340,7 +2877,28 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private writeMeshes() {
     const pierMesh = this.pierMesh;
     if (!pierMesh) return;
-    this.clearDeckGroup();
+    this.decks.clear();
+    // Sections share the existing mesh/texture cache budget; never drop a whole
+    // bridge just to increase the resolution of another one.
+    let spareSections = Math.max(0, MAX_BRIDGES - this.sampledBridges.length);
+    const entries = this.sampledBridges.flatMap((bridge) => {
+      const sections = bridgeTextureSections(bridge, Math.min(MAX_TEXTURE_SECTIONS, spareSections + 1));
+      spareSections -= sections.length - 1;
+      return sections.map((section) => ({ ...section, key: bridgeResourceKey(section.bridge) }));
+    });
+    const activeKeys = new Set(entries.map((entry) => entry.key));
+    const missing = [...activeKeys].filter((key) => !this.bridgeResources.has(key)).length;
+    // Evict before allocating so tile replacement does not double texture memory.
+    for (const [key, resource] of this.bridgeResources) {
+      if (this.bridgeResources.size + missing <= MAX_BRIDGES) break;
+      if (activeKeys.has(key)) continue;
+      this.disposeResource(resource);
+      this.bridgeResources.delete(key);
+    }
+    this.pierOrigin = this.sceneOrigin;
+    this.pierOriginElevation = this.sceneOriginElevation;
+    pierMesh.position.set(0, 0, 0);
+    pierMesh.scale.set(1, 1, 1);
 
     const night = Math.max(this.darkMode ? 0.45 : 0, this.nightMix);
     const azimuth = CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
@@ -2348,51 +2906,71 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const shadowNorth = -Math.cos(azimuth) * SHADOW_OFFSET_METERS;
     let pierCount = 0;
 
-    for (const bridge of this.sampledBridges) {
-      const canvas = paintBridgeCluster(bridge.surfaces, bridge.parts, bridge.bounds);
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.flipY = false;
-      const large = Math.max(canvas.width, canvas.height) >= 256;
-      texture.generateMipmaps = large;
-      texture.minFilter = large ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      texture.anisotropy = Math.min(8, this.renderer?.capabilities.getMaxAnisotropy() ?? 1);
-      texture.needsUpdate = true;
+    for (const { bridge, paintBridge, key } of entries) {
+      const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck]));
+      let resource = this.bridgeResources.get(key);
+      if (resource) {
+        this.bridgeResources.delete(key);
+        this.bridgeResources.set(key, resource);
+        this.performanceStats.reused += 1;
+        if (resource.heights !== heights) {
+          const deckPositions = resource.deck.geometry.getAttribute('position') as THREE.BufferAttribute;
+          const shadowPositions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
+          bridge.surface.forEach((point, index) => {
+            deckPositions.setY(index, point.deck - resource!.elevation);
+            shadowPositions.setY(index, point.ground - resource!.elevation + 0.12);
+          });
+          deckPositions.needsUpdate = true;
+          shadowPositions.needsUpdate = true;
+          resource.deck.geometry.computeVertexNormals();
+          resource.heights = heights;
+          this.performanceStats.heightUpdates += 1;
+        }
+      } else {
+        const canvas = this.paintDeck(paintBridge);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.flipY = false;
+        texture.generateMipmaps = true;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.anisotropy = Math.min(8, this.renderer?.capabilities.getMaxAnisotropy() ?? 1);
+        texture.needsUpdate = true;
 
-      const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
-      const groundPoints = bridge.surface.map((point) => this.toLocal(
-        point.longitude,
-        point.latitude,
-        point.ground,
-      )).map((point) => ({
-        east: point.east + shadowEast,
-        north: point.north + shadowNorth,
-        up: point.up + 0.12,
-      }));
-      const plan = bridge.surface.map((point) => ({ east: point.east, north: point.north }));
+        const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
+        const groundPoints = bridge.surface.map((point) => this.toLocal(
+          point.longitude,
+          point.latitude,
+          point.ground,
+        )).map((point) => ({
+          east: point.east + shadowEast,
+          north: point.north + shadowNorth,
+          up: point.up + 0.12,
+        }));
+        const plan = paintBridge.surface;
 
-      const deckGeometry = texturedIndexedGeometry(deckPoints, plan, bridge.bounds, bridge.indices);
-      const shadowGeometry = texturedIndexedGeometry(groundPoints, plan, bridge.bounds, bridge.indices);
-      if (!deckGeometry) {
-        texture.dispose();
-        continue;
-      }
+        const deckGeometry = texturedIndexedGeometry(deckPoints, plan, paintBridge.bounds, bridge.indices);
+        const shadowGeometry = texturedIndexedGeometry(groundPoints, plan, paintBridge.bounds, bridge.indices);
+        if (!deckGeometry || !shadowGeometry) {
+          deckGeometry?.dispose();
+          shadowGeometry?.dispose();
+          texture.dispose();
+          continue;
+        }
 
-      const deckMaterial = new THREE.MeshLambertMaterial({
-        map: texture,
-        transparent: true,
-        alphaTest: 0.2,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-      });
-      deckMaterial.color.setRGB(1 - night * 0.35, 1 - night * 0.32, 1 - night * 0.28);
-      const deckMesh = new THREE.Mesh(deckGeometry, deckMaterial);
-      deckMesh.frustumCulled = false;
-      this.decks.add(deckMesh);
+        const deckMaterial = new THREE.MeshBasicMaterial({
+          toneMapped: false,
+          map: texture,
+          transparent: true,
+          alphaTest: 0.2,
+          side: THREE.DoubleSide,
+          forceSinglePass: true,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+        });
 
-      if (shadowGeometry) {
+        const deckMesh = new THREE.Mesh(deckGeometry, deckMaterial);
+        deckMesh.frustumCulled = false;
         const shadowMaterial = new THREE.MeshBasicMaterial({
           map: texture,
           color: CARTOON_SHADOW_COLOR,
@@ -2401,29 +2979,31 @@ export class BridgeModelLayer implements CustomLayerInterface {
           alphaTest: 0.2,
           depthWrite: false,
           side: THREE.DoubleSide,
+          forceSinglePass: true,
           polygonOffset: true,
           polygonOffsetFactor: -1,
         });
         const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
         shadowMesh.frustumCulled = false;
-        this.decks.add(shadowMesh);
-      }
 
-      const mid = Math.floor(bridge.surface.length / 4) * 2;
-      const stations = [mid - 2, mid, mid + 2].filter((index) => (
-        index >= 2 && index < bridge.surface.length - 2
-      ));
-      for (const index of stations) {
+        resource = {
+          paintBridge,
+          paintSignature: this.paintSignature,
+          deck: deckMesh, shadow: shadowMesh, origin: this.sceneOrigin,
+          elevation: this.sceneOriginElevation, heights,
+        };
+        this.bridgeResources.set(key, resource);
+        this.performanceStats.built += 1;
+      }
+      this.decks.add(resource.deck, resource.shadow);
+    }
+
+    // Piers belong to the original span, not individual texture sections.
+    for (const bridge of this.sampledBridges) {
+      for (const pier of bridge.piers ?? []) {
         if (pierCount >= MAX_PIERS) break;
-        const left = bridge.surface[index];
-        const right = bridge.surface[index + 1] ?? left;
-        const clearance = ((left.deck - left.ground) + (right.deck - right.ground)) / 2;
-        if (clearance < PIER_CLEARANCE_METERS) continue;
-        const longitude = (left.longitude + right.longitude) / 2;
-        const latitude = (left.latitude + right.latitude) / 2;
-        const ground = (left.ground + right.ground) / 2;
-        const local = this.toLocal(longitude, latitude, ground);
-        const height = Math.max(1.2, clearance);
+        const local = this.toLocal(pier.longitude, pier.latitude, pier.ground);
+        const height = pier.deck - pier.ground;
         this.transformHelper.position.set(local.east, local.up + height / 2, local.north);
         this.transformHelper.rotation.set(0, 0, 0);
         this.transformHelper.scale.set(1, height, 1);
@@ -2433,27 +3013,40 @@ export class BridgeModelLayer implements CustomLayerInterface {
       }
     }
 
+    this.positionResources();
+    this.applyLighting();
     pierMesh.count = pierCount;
     pierMesh.instanceMatrix.needsUpdate = true;
     pierMesh.visible = pierCount > 0;
   }
 
-  private clearDeckGroup() {
-    const textures = new Set<THREE.Texture>();
-    for (const child of [...this.decks.children]) {
-      this.decks.remove(child);
-      if (!(child instanceof THREE.Mesh)) continue;
-      child.geometry.dispose();
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      materials.forEach((material) => {
-        if ('map' in material && material.map instanceof THREE.Texture) textures.add(material.map);
-        if ('alphaMap' in material && material.alphaMap instanceof THREE.Texture) {
-          textures.add(material.alphaMap);
-        }
-        material.dispose();
-      });
+  private positionResources() {
+    const units = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin).meterInMercatorCoordinateUnits();
+    const position = (object: THREE.Object3D, origin: maplibregl.LngLat, elevation: number) => {
+      const local = this.toLocal(origin.lng, origin.lat, elevation);
+      const scale = maplibregl.MercatorCoordinate.fromLngLat(origin).meterInMercatorCoordinateUnits() / units;
+      object.position.set(local.east, local.up, local.north);
+      object.scale.set(scale, 1, scale);
+    };
+    for (const resource of this.bridgeResources.values()) {
+      position(resource.deck, resource.origin, resource.elevation);
+      position(resource.shadow, resource.origin, resource.elevation);
     }
-    textures.forEach((texture) => texture.dispose());
+    if (this.pierMesh) position(this.pierMesh, this.pierOrigin, this.pierOriginElevation);
+  }
+
+  private disposeResource(resource: BridgeResources) {
+    resource.deck.geometry.dispose();
+    resource.shadow.geometry.dispose();
+    resource.deck.material.map?.dispose();
+    resource.deck.material.dispose();
+    resource.shadow.material.dispose();
+  }
+
+  private clearDeckGroup() {
+    this.decks.clear();
+    this.bridgeResources.forEach((resource) => this.disposeResource(resource));
+    this.bridgeResources.clear();
   }
 
   private clearMeshes() {
@@ -2465,12 +3058,129 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
   }
 
+  private beginDrapedHandoff() {
+    if (this.drapedHandoff) return;
+    this.drapedHandoff = { frames: 0 };
+    this.setDrapedVisible(true);
+  }
+
+  private cancelDrapedHandoff() {
+    if (!this.drapedHandoff) return;
+    this.drapedHandoff = undefined;
+    this.bridgeOpacity = 1;
+    this.applyLighting();
+    this.setDrapedVisible(false);
+  }
+
+  private finishDrapedHandoff() {
+    if (this.sampledBridges.length > 0) this.lastUpdateSignature = undefined;
+    this.drapedHandoff = undefined;
+    this.bridgeOpacity = 1;
+    this.sampledBridges = [];
+    this.clearMeshes();
+    this.setDrapedVisible(true);
+  }
+
+  private advanceDrapedHandoff(now: number) {
+    const handoff = this.drapedHandoff!;
+    const map = this.map!;
+    handoff.frames += 1;
+    // Visibility changes rebuild MapLibre buckets asynchronously. Allow complete
+    // map frames after restoring them, and retain the mesh while tiles are pending.
+    const ready = (map.isStyleLoaded?.() ?? true) && (map.isSourceLoaded?.(this.sourceId) ?? true);
+    if (handoff.frames < 3 || !ready) {
+      if (!ready && handoff.fadeStarted !== undefined) {
+        handoff.fadeStarted = undefined;
+        this.bridgeOpacity = 1;
+        this.applyLighting();
+      }
+      if (handoff.frames < 3) map.triggerRepaint();
+      return true;
+    }
+    handoff.fadeStarted ??= now;
+    const progress = Math.min(1, (now - handoff.fadeStarted) / BRIDGE_HANDOFF_FADE_MS);
+    if (progress >= 1) {
+      this.finishDrapedHandoff();
+      return false;
+    }
+    this.bridgeOpacity = 1 - progress * progress * (3 - 2 * progress);
+    this.applyLighting();
+    map.triggerRepaint();
+    return true;
+  }
+
   private setDrapedVisible(visible: boolean) {
     if (this.drapedVisible === visible) return;
     const map = this.map;
     if (!map) return;
     setDrapedElevatedBridgeLayersVisible(map, visible);
     this.drapedVisible = visible;
+  }
+
+  private paintSignature = '';
+  private paintValues = new Map<string, unknown>();
+  private paintExpressions = new Map<string, ReturnType<typeof createExpression>>();
+
+  private refreshDeckPaint() {
+    const map = this.map;
+    if (!map?.getPaintProperty) return;
+    const ids = ['global-roads', 'global-road-casing', 'global-railways',
+      'global-railway-bed', 'global-footways', 'global-path-casing',
+      'global-cycleways', 'global-cycleway-casing', 'global-tracks', 'global-bridge-decks'];
+    const values = ids.map((id) => [id, map.getLayer(id)
+      ? map.getPaintProperty(id, id === 'global-bridge-decks' ? 'fill-color' : 'line-color') : undefined] as const);
+    const signature = JSON.stringify(values);
+    if (signature !== this.paintSignature) {
+      this.paintSignature = signature;
+      this.paintValues = new Map(values);
+      this.paintExpressions.clear();
+    }
+    for (const resource of this.bridgeResources.values()) {
+      if (resource.paintSignature === signature) continue;
+      const texture = resource.deck.material.map!;
+      texture.image = this.paintDeck(resource.paintBridge);
+      texture.needsUpdate = true;
+      resource.paintSignature = signature;
+    }
+  }
+
+  private paintDeck(bridge: SampledBridge) {
+    return paintBridgeCluster(bridge.surfaces, bridge.parts, bridge.bounds, (part) => {
+      const properties = part.properties;
+      if (!properties) return part;
+      const rail = properties.className === 'rail' || properties.className === 'transit';
+      const path = isPathClass(properties.className);
+      const cycle = properties.subclass === 'cycleway';
+      const fillLayer = part.kind === 'polygon' ? 'global-bridge-decks'
+        : rail ? 'global-railways' : path
+          ? properties.className === 'track' ? 'global-tracks' : cycle ? 'global-cycleways' : 'global-footways'
+          : 'global-roads';
+      const edgeLayer = rail ? 'global-railway-bed' : path
+        ? cycle ? 'global-cycleway-casing' : 'global-path-casing'
+        : 'global-road-casing';
+      const color = (id: string, fallback: string) => {
+        const value = this.paintValues.get(id);
+        if (typeof value === 'string') return value;
+        if (!Array.isArray(value)) return fallback;
+        let compiled = this.paintExpressions.get(id);
+        if (!compiled) {
+          compiled = createExpression(value, 'bridge-color');
+          this.paintExpressions.set(id, compiled);
+        }
+        if (compiled.result !== 'success') return fallback;
+        const result = compiled.value.evaluate({ zoom: this.map?.getZoom() ?? 16 }, {
+          type: part.kind === 'polygon' ? 'Polygon' : 'LineString',
+          properties: { ...properties, class: properties.className, brunnel: 'bridge' },
+        });
+        return typeof result === 'string' ? result : fallback;
+      };
+      const fill = color(fillLayer, part.fill);
+      // Keep the active rail palette tint, but give the broad deck a light gray surface.
+      const deckFill = rail
+        ? `#${new THREE.Color(fill).lerp(new THREE.Color('#dedede'), 0.65).getHexString()}`
+        : fill;
+      return { fill: deckFill, edge: color(edgeLayer, part.edge), rail: rail ? fill : undefined };
+    }, bridge.texturePixelBudget);
   }
 
   private applyLighting() {
@@ -2480,8 +3190,80 @@ export class BridgeModelLayer implements CustomLayerInterface {
       this.sunlight.intensity = 0.5 + (1 - night) * 1.9;
       this.sunlight.color.set(night > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR);
     }
-    if (this.sampledBridges.length > 0) this.writeMeshes();
+    if (this.pierMesh) {
+      const materials = Array.isArray(this.pierMesh.material) ? this.pierMesh.material : [this.pierMesh.material];
+      for (const material of materials) material.opacity = this.bridgeOpacity;
+    }
+    const deckNight = Math.max(this.darkMode ? 0.45 : 0, this.nightMix);
+    for (const child of this.decks.children) {
+      if (!(child instanceof THREE.Mesh)) continue;
+      const material = child.material;
+      if (material instanceof THREE.MeshBasicMaterial && !material.depthWrite) {
+        material.opacity = 0.32 * (1 - deckNight * 0.65) * this.bridgeOpacity;
+      } else if (material instanceof THREE.MeshBasicMaterial) {
+        material.opacity = this.bridgeOpacity;
+      }
+    }
   }
+}
+
+/** Spend the texture budget along the span, independent of compass bearing. */
+export function bridgeTexturePlan(bridge: SampledBridge): SampledBridge {
+  const points = bridge.surfaces.flatMap((surface) => surface.outer);
+  if (!points.length) return bridge;
+  const axis = spanAxis(points);
+  const origin = points[0];
+  const project = <T extends PlanPoint>(point: T): T => {
+    const east = point.east - origin.east;
+    const north = point.north - origin.north;
+    return { ...point, east: east * axis.east + north * axis.north,
+      north: -east * axis.north + north * axis.east };
+  };
+  const surface = bridge.surface.map(project);
+  const surfaces = bridge.surfaces.map((part) => ({
+    outer: part.outer.map(project), holes: part.holes.map((hole) => hole.map(project)),
+  }));
+  const parts = bridge.parts.map((part) => ({ ...part, plan: part.plan.map(project),
+    holes: part.holes?.map((hole) => hole.map(project)) }));
+  return { ...bridge, surface, surfaces, parts,
+    bounds: planBounds([...surface, ...surfaces.flatMap((part) => part.outer)], 2) };
+}
+
+/** Clip mesh triangles only; retain the full drawing so paint continues across joins. */
+export function bridgeTextureSections(bridge: SampledBridge, maxSections = MAX_TEXTURE_SECTIONS) {
+  const paintBridge = bridgeTexturePlan(bridge);
+  const { minEast, maxEast } = paintBridge.bounds;
+  const length = maxEast - minEast;
+  const count = length <= 512 ? 1 : Math.min(maxSections, Math.ceil(length / TEXTURE_SECTION_METRES));
+  if (count <= 1) return [{ bridge, paintBridge }];
+  const cuts = Array.from({ length: count - 1 }, (_, index) => minEast + length * (index + 1) / count);
+  const split = splitBridgeMesh(paintBridge.surface.map((point, index) => ({
+    ...point, worldEast: bridge.surface[index].east, worldNorth: bridge.surface[index].north,
+  })), bridge.indices, cuts, (point) => point.east);
+  const groups: number[][] = Array.from({ length: count }, () => []);
+  for (let i = 0; i < split.indices.length; i += 3) {
+    const triangle = split.indices.slice(i, i + 3);
+    const center = triangle.reduce((sum, index) => sum + split.points[index].east, 0) / 3;
+    const section = Math.max(0, Math.min(count - 1, Math.floor((center - minEast) / length * count)));
+    groups[section].push(...triangle);
+  }
+  return groups.flatMap((indices, section) => {
+    if (!indices.length) return [];
+    const vertices = [...new Set(indices)];
+    const remap = new Map(vertices.map((index, local) => [index, local]));
+    const localIndices = indices.map((index) => remap.get(index)!);
+    const projected = vertices.map((index) => split.points[index]);
+    const surface = projected.map(({ worldEast, worldNorth, ...point }) => ({ ...point,
+      east: worldEast, north: worldNorth }));
+    // Padding supplies neighboring paint for linear filtering at the shared edge.
+    const padding = 2 / MAX_CANVAS_PIXELS_PER_METRE;
+    const bounds = { ...paintBridge.bounds,
+      minEast: minEast + length * section / count - padding,
+      maxEast: minEast + length * (section + 1) / count + padding };
+    const texturePixelBudget = Math.floor(MAX_TEXTURE_PIXELS_PER_BRIDGE / count);
+    return [{ bridge: { ...bridge, surface, indices: localIndices, bounds: planBounds(surface, 2), texturePixelBudget },
+      paintBridge: { ...paintBridge, surface: projected, indices: localIndices, bounds, texturePixelBudget } }];
+  });
 }
 
 function texturedIndexedGeometry(
@@ -2508,4 +3290,21 @@ function texturedIndexedGeometry(
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+/** Millimetre plan precision avoids cache misses from floating-point origin shifts. */
+function bridgeResourceKey(bridge: SampledBridge) {
+  const anchor = bridge.surface[0];
+  const relative = (point: PlanPoint) => [
+    Number((point.east - anchor.east).toFixed(3)),
+    Number((point.north - anchor.north).toFixed(3)),
+  ];
+  return JSON.stringify({
+    coordinates: bridge.surface.map((point) => [Number(point.longitude.toFixed(9)), Number(point.latitude.toFixed(9))]),
+    plan: bridge.surface.map(relative),
+    indices: bridge.indices,
+    surfaces: bridge.surfaces.map((surface) => [surface.outer.map(relative), surface.holes.map((hole) => hole.map(relative))]),
+    parts: bridge.parts.map((part) => ({ ...part, plan: part.plan.map(relative), holes: part.holes?.map((hole) => hole.map(relative)) })),
+    bounds: [relative({ east: bridge.bounds.minEast, north: bridge.bounds.minNorth }), relative({ east: bridge.bounds.maxEast, north: bridge.bounds.maxNorth })],
+  });
 }

@@ -1,8 +1,22 @@
+import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BridgeModelLayer,
+  bridgeClearanceProbes,
+  bridgeArchMetres,
+  bridgeApproachMix,
+  bridgeSurfaceClearance,
+  refineBridgeApproaches,
+  refineBridgeSpan,
+  terrainClearedDeck,
+  lineRibbonMesh,
+  lngLatsToPlan,
   bridgeDeckElevations,
   bridgePaintColors,
+  bridgeRailLines,
+  bridgeTexturePlan,
+  bridgeTextureSections,
+  bridgePartsForView,
   bridgeSurfaceStrip,
   bridgeWidthMetres,
   clusterBridgeDrawables,
@@ -18,9 +32,12 @@ import {
   mergeBridgeLines,
   paintBridgeCanvas,
   paintBridgeCluster,
-  pierStations,
+  bridgePierDistances,
+  bridgePierLocations,
+  bridgeDeckHeightAt,
   planBounds,
   planOriginFromLngLat,
+  planToLngLat,
   pointInFilledPolygon,
   polygonAreaMetres,
   shouldMeshClusterLines,
@@ -56,6 +73,167 @@ describe('shouldRenderBridgesForView', () => {
       west: 23.0, south: 61.0, east: 24.5, north: 62.2,
       zoom: 14, pitch: 32, terrainEnabled: true,
     })).toBe(false);
+  });
+});
+
+describe('bridgePartsForView', () => {
+  const origin = planOriginFromLngLat(23.76, 61.5);
+  const coordinate = (east: number, north = 0) => planToLngLat({ east, north }, origin);
+  const view = {
+    west: coordinate(-100)[0], east: coordinate(100)[0],
+    south: coordinate(0, -100)[1], north: coordinate(0, 100)[1],
+  };
+  const part = (start: number, end: number, north = 0) => ({ coordinates: [coordinate(start, north), coordinate(end, north)] });
+
+  it('drops disconnected distant parts but keeps whole crossing and padded parts', () => {
+    const crossing = part(-1200, 1200);
+    const padded = part(400, 500, 400);
+    const far = part(2000, 2100, 2000);
+    expect(bridgePartsForView([far, crossing, padded], view)).toEqual([crossing, padded]);
+    expect(crossing.coordinates).toEqual([coordinate(-1200), coordinate(1200)]);
+  });
+
+  it('retains a chain of tile fragments beyond the margin in source order', () => {
+    const visible = part(0, 680);
+    const middle = part(700, 1100);
+    const end = part(1120, 1800);
+    const distant = part(1900, 2100);
+    expect(bridgePartsForView([end, distant, middle, visible], view)).toEqual([end, middle, visible]);
+  });
+
+  it('retains enclosing polygons and their holes even with all vertices offscreen', () => {
+    const polygon = {
+      coordinates: [coordinate(-900, -900), coordinate(900, -900), coordinate(900, 900), coordinate(-900, 900)],
+      holes: [[coordinate(-20, -20), coordinate(20, -20), coordinate(0, 20)]],
+    };
+    expect(bridgePartsForView([polygon], view)[0]).toBe(polygon);
+  });
+
+  it('handles oversized bounds without allocating an unbounded grid', () => {
+    const crossing = part(-1_000_000, 1_000_000);
+    const continuation = part(1_000_020, 1_000_100);
+    expect(bridgePartsForView([crossing, continuation], view)).toEqual([crossing, continuation]);
+  });
+
+  it('does not introduce culling at wrapped-world seams', () => {
+    const parts = [part(0, 10)];
+    expect(bridgePartsForView(parts, { ...view, west: 179, east: -179 })).toBe(parts);
+    expect(bridgePartsForView(parts, { ...view, west: 181, east: 182 })).toBe(parts);
+  });
+});
+
+describe('bridge terrain clearance', () => {
+  it('keeps polygon triangles close to the smooth arch instead of spanning the whole deck', () => {
+    const outer = [{ east: 0, north: 0 }, { east: 600, north: 0 },
+      { east: 600, north: 12 }, { east: 0, north: 12 }];
+    const holes = [[{ east: 240, north: 4 }, { east: 360, north: 4 },
+      { east: 360, north: 8 }, { east: 240, north: 8 }]];
+    const original = triangulateDeckSurface({ outer, holes }, false)!;
+    const mesh = refineBridgeSpan(original.points, original.indices, original.points.map((p) => p.east / 600), 600);
+    expect(mesh.indices.length / 3).toBeLessThan(1000);
+    let area = 0;
+    for (let i = 0; i < mesh.indices.length; i += 3) {
+      const vertices = mesh.indices.slice(i, i + 3);
+      const parameters = vertices.map((index) => mesh.t[index]);
+      expect(Math.max(...parameters) - Math.min(...parameters)).toBeLessThanOrEqual(1 / 60 + 1e-9);
+      const t = parameters.reduce((sum, value) => sum + value, 0) / 3;
+      const actual = parameters.reduce((sum, value) => sum + surfaceElevation(value, 0, 5, 7, 8), 0) / 3;
+      expect(Math.abs(actual - surfaceElevation(t, 0, 5, 7, 8))).toBeLessThan(0.02);
+      const points = vertices.map((index) => mesh.points[index]);
+      area += polygonAreaMetres(points);
+      const center = { east: points.reduce((sum, p) => sum + p.east, 0) / 3,
+        north: points.reduce((sum, p) => sum + p.north, 0) / 3 };
+      expect(pointInFilledPolygon(center, outer, holes)).toBe(true);
+    }
+    expect(area).toBeCloseTo(600 * 12 - 120 * 4);
+    const long = refineBridgeSpan(outer, [0, 1, 2, 0, 2, 3], [0, 1, 1, 0], 10000);
+    expect(new Set(long.t.map((value) => value.toFixed(8))).size).toBe(65);
+  });
+
+  it('uses physical distance for irregular OSM line vertices', () => {
+    const ribbon = lineRibbonMesh([{ east: 0, north: 0 }, { east: 1, north: 0 },
+      { east: 100, north: 0 }], 6);
+    ribbon.points.forEach((point, index) => expect(ribbon.t[index]).toBeCloseTo(point.east / 100));
+    const refined = refineBridgeApproaches(ribbon.points, ribbon.indices, ribbon.t, 100);
+    for (const metres of [2, 5, 8, 10, 90, 92, 95, 98]) {
+      expect(refined.points.some((point) => Math.abs(point.east - metres) < 1e-8)).toBe(true);
+    }
+  });
+
+  it('adds shared approach stations without subdividing the middle of a span', () => {
+    const points = [{ east: 0, north: 0 }, { east: 0, north: 6 },
+      { east: 100, north: 0 }, { east: 100, north: 6 }];
+    const refined = refineBridgeApproaches(points, [0, 1, 2, 1, 3, 2], [0, 0, 1, 1], 100);
+    for (const station of [0.02, 0.05, 0.08, 0.1, 0.9, 0.92, 0.95, 0.98]) {
+      expect(refined.t.some((value) => Math.abs(value - station) < 1e-9)).toBe(true);
+    }
+    expect(refined.t.some((value) => value > 0.100001 && value < 0.899999)).toBe(false);
+    let area = 0;
+    for (let i = 0; i < refined.indices.length; i += 3) {
+      area += polygonAreaMetres(refined.indices.slice(i, i + 3).map((index) => refined.points[index]));
+    }
+    expect(area).toBeCloseTo(600);
+    expect(refined.points.slice(0, 4)).toEqual(points);
+    expect(refineBridgeApproaches(points, [0, 1, 2, 1, 3, 2], [0, 0, 1, 1], 100)).toEqual(refined);
+  });
+
+  it('eases approaches to a small terrain offset while retaining span clearance', () => {
+    for (const length of [12, 80, 1000]) {
+      expect(bridgeApproachMix(0, length)).toBe(0);
+      expect(bridgeApproachMix(1, length)).toBe(0);
+      expect(bridgeApproachMix(0.5, length)).toBe(1);
+      expect(bridgeSurfaceClearance(0, length)).toBeCloseTo(0.06);
+      expect(bridgeSurfaceClearance(1, length)).toBeCloseTo(0.06);
+      expect(bridgeSurfaceClearance(0.5, length)).toBeCloseTo(0.7);
+      const t = [0, 0.01, 0.025, 0.05, 0.1, 0.5, 0.9, 0.95, 0.975, 0.99, 1];
+      const heights = t.map((value) => bridgeSurfaceClearance(value, length));
+      expect(terrainClearedDeck(t, heights, t.map(() => 0), length)).toBe(heights);
+    }
+    expect(bridgeApproachMix(0.05, 100)).toBeCloseTo(0.5);
+    expect(bridgeApproachMix(0.1, 100)).toBe(1);
+  });
+
+  it('leaves an already clear deck unchanged', () => {
+    const deck = [0.7, 2.7, 0.7];
+    expect(terrainClearedDeck([0, 0.5, 1], deck, [0, 0, 0], 200)).toBe(deck);
+  });
+
+  it('clears intermediate terrain with a gradual lift and level cross-sections', () => {
+    const t = Array.from({ length: 21 }, (_, index) => [index / 20, index / 20]).flat();
+    const base = t.map(() => 1);
+    const ground = t.map((value, index) => value === 0.5 && index % 2 === 0 ? 5 : 0);
+    const deck = terrainClearedDeck(t, base, ground, 200);
+    expect(deck[20]).toBeCloseTo(5.7);
+    expect(deck[21]).toBe(deck[20]);
+    expect(deck[18]).toBeGreaterThan(base[18]);
+    expect(deck[0]).toBe(base[0]);
+    expect(deck[deck.length - 1]).toBe(base[base.length - 1]);
+    deck.forEach((height, index) => {
+      expect(height).toBeGreaterThanOrEqual(ground[index] + 0.7);
+      expect(height).toBeGreaterThanOrEqual(base[index]);
+      if (index >= 2) expect(Math.abs(height - deck[index - 2])).toBeLessThanOrEqual(1.200001);
+    });
+  });
+
+  it('clears sampled triangle interiors even when all original vertices clear terrain', () => {
+    const points = [{ east: 0, north: 0 }, { east: 100, north: 0 }, { east: 50, north: 8 }];
+    const probes = bridgeClearanceProbes(points, [0, 1, 2], 100).map((probe) => ({ ...probe, ground: 8 }));
+    const deck = terrainClearedDeck([0, 1, 0.5], [1, 1, 1], [0, 0, 0], 100, probes);
+    for (const probe of probes) {
+      const interpolated = probe.vertices.reduce((sum, vertex, index) => sum + deck[vertex] * probe.weights[index], 0);
+      const probeT = probe.vertices.reduce((sum, vertex, index) => sum + [0, 1, 0.5][vertex] * probe.weights[index], 0);
+      expect(interpolated).toBeGreaterThanOrEqual(8 + bridgeSurfaceClearance(probeT, 100) - 1e-9);
+    }
+  });
+
+  it('bounds and deterministically spreads extra samples on very long spans', () => {
+    const ribbon = lineRibbonMesh([{ east: 0, north: 0 }, { east: 10_000, north: 0 }], 8);
+    const probes = bridgeClearanceProbes(ribbon.points, ribbon.indices, 10_000);
+    expect(probes).toHaveLength(128);
+    expect(bridgeClearanceProbes(ribbon.points, ribbon.indices, 10_000)).toEqual(probes);
+    expect(probes[0].point.east).toBeLessThan(10);
+    expect(probes[probes.length - 1].point.east).toBeGreaterThan(9990);
+    expect(bridgeClearanceProbes([], [], 0)).toEqual([]);
   });
 });
 
@@ -219,6 +397,18 @@ describe('paintBridgeCanvas', () => {
 });
 
 describe('bridgeDeckElevations', () => {
+  it('adds a bounded length-based rise while preserving approach heights', () => {
+    for (const [length, rise] of [[80, 1.28], [150, 2.2], [300, 4], [450, 6], [600, 8], [1000, 12], [5000, 12]]) {
+      expect(bridgeArchMetres(length)).toBeCloseTo(rise);
+      const { deck } = bridgeDeckElevations([10, 0, 20], 0, length);
+      expect(deck[0]).toBe(10);
+      expect(deck[2]).toBe(20);
+      expect(deck[1]).toBeCloseTo(15 + rise);
+    }
+    for (const stop of [150, 300, 600, 1000]) {
+      expect(bridgeArchMetres(stop + 0.001) - bridgeArchMetres(stop - 0.001)).toBeLessThan(0.001);
+    }
+  });
   it('keeps ends on the ground and only slightly arches the middle', () => {
     const ground = [20, 20, 20, 20, 20];
     const { deck, maxClearance } = bridgeDeckElevations(ground, 0, 80);
@@ -709,18 +899,63 @@ describe('clustered bridge decks', () => {
   });
 });
 
-describe('pierStations', () => {
-  it('places piers only where clearance is real and away from abutments', () => {
-    const clearance = [0.5, 1, 8, 12, 14, 12, 8, 1, 0.4];
-    const stations = pierStations(clearance, 120);
-    expect(stations.length).toBeGreaterThan(0);
-    expect(stations[0]).toBeGreaterThan(0);
-    expect(stations[stations.length - 1]).toBeLessThan(clearance.length - 1);
-    for (const index of stations) expect(clearance[index]).toBeGreaterThanOrEqual(5);
+describe('bridge support placement', () => {
+  it('spaces supports along the span with approach margins and a fixed budget', () => {
+    const stations = bridgePierDistances(120);
+    expect(stations.length).toBe(2);
+    expect(stations[0]).toBeGreaterThan(10);
+    expect(stations.at(-1)).toBeLessThan(110);
+    stations.slice(1).forEach((value, index) => expect(value - stations[index]).toBeCloseTo(81.6));
+    expect(bridgePierDistances(18)).toEqual([]);
+    expect(bridgePierDistances(5000)).toHaveLength(16);
+    expect(bridgePierDistances(5000, 0)).toEqual([]);
+    expect(bridgePierDistances(5000, 1)).toEqual([2500]);
   });
 
-  it('skips short at-grade spans', () => {
-    expect(pierStations([0.4, 0.5, 0.4], 18)).toEqual([]);
+  it('follows a bent line by distance and avoids duplicate supports on coincident lines', () => {
+    const line = [{ east: 0, north: 0 }, { east: 5, north: 0 },
+      { east: 60, north: 0 }, { east: 60, north: 60 }];
+    const mesh = lineRibbonMesh(line, 8);
+    const locations = bridgePierLocations([line], [], mesh.points, mesh.indices, mesh.points.map(() => 12));
+    expect(locations).toHaveLength(2);
+    expect(locations[0].north).toBeCloseTo(0);
+    expect(locations.at(-1)!.east).toBeCloseTo(60);
+    expect(locations.at(-1)!.north).toBeGreaterThan(30);
+    expect(bridgePierLocations([line, line], [], mesh.points, mesh.indices, mesh.points.map(() => 12))).toEqual(locations);
+  });
+
+  it('keeps polygon supports on solid deck and uses triangle heights independent of vertex order', () => {
+    const outer = [{ east: 0, north: 0 }, { east: 120, north: 0 },
+      { east: 120, north: 24 }, { east: 0, north: 24 }];
+    const holes = [[{ east: 30, north: 8 }, { east: 90, north: 8 },
+      { east: 90, north: 16 }, { east: 30, north: 16 }]];
+    const mesh = triangulateDeckSurface({ outer, holes }, false)!;
+    const heights = mesh.points.map((point) => 10 + point.east / 100);
+    const supports = bridgePierLocations([], [{ outer, holes }], mesh.points, mesh.indices, heights);
+    expect(supports.length).toBeGreaterThanOrEqual(2);
+    for (const support of supports) {
+      expect(pointInFilledPolygon(support, outer, holes)).toBe(true);
+      expect(support.deck).toBeCloseTo(10 + (support.east - 0.675) / 100);
+    }
+    expect(bridgeDeckHeightAt({ east: 60, north: 12 }, mesh.points, mesh.indices, heights)).toBeUndefined();
+    const reversed = mesh.points.slice().reverse();
+    const indices = mesh.indices.map((index) => mesh.points.length - index - 1);
+    expect(bridgePierLocations([], [{ outer, holes }], reversed, indices, heights.slice().reverse())).toEqual(supports);
+  });
+
+  it('samples ground at the support itself, skips low clearance, and retries missing terrain', () => {
+    const layer = new BridgeModelLayer() as any;
+    const origin = planOriginFromLngLat(23.76, 61.5);
+    const locations = [{ east: 50, north: 0, deck: 15 }];
+    layer.sampleElevation = vi.fn(() => 7);
+    const result = layer.sampleBridgePiers({}, locations, origin, 15);
+    const coordinates = planToLngLat(locations[0], origin);
+    expect(layer.sampleElevation).toHaveBeenCalledWith({}, coordinates[0], coordinates[1], 15);
+    expect(result).toEqual([{ longitude: coordinates[0], latitude: coordinates[1], ground: 7, deck: 15 }]);
+    layer.sampleElevation.mockReturnValue(12);
+    expect(layer.sampleBridgePiers({}, locations, origin, 15)).toEqual([]);
+    layer.sampleElevation.mockReturnValue(null);
+    expect(layer.sampleBridgePiers({}, locations, origin, 15)).toBeNull();
   });
 });
 
@@ -770,6 +1005,453 @@ describe('BridgeModelLayer', () => {
     expect((layer as any).sampledBridges).toEqual([previous]);
     expect(setDrapedVisible).not.toHaveBeenCalled();
     expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+  });
+
+  it('updates lighting without replacing bridge resources and skips unchanged lighting', () => {
+    const layer = new BridgeModelLayer();
+    const map = terrainViewMap();
+    (layer as any).map = map;
+    const texture = new THREE.Texture();
+    const geometry = new THREE.BufferGeometry();
+    const deckMaterial = new THREE.MeshBasicMaterial({ map: texture });
+    const shadowMaterial = new THREE.MeshBasicMaterial({ map: texture, opacity: 0.32, depthWrite: false });
+    (layer as any).decks.add(new THREE.Mesh(geometry, deckMaterial), new THREE.Mesh(geometry, shadowMaterial));
+    const rebuild = vi.spyOn(layer as any, 'writeMeshes');
+    const dispose = vi.spyOn(texture, 'dispose');
+    const lighting = { azimuth: 90, polar: 45, nightMix: 1 };
+
+    layer.setDayNightLighting(lighting);
+    expect(deckMaterial.color.r).toBe(1);
+    expect(shadowMaterial.opacity).toBeCloseTo(0.32 * 0.35);
+    layer.setDayNightLighting(lighting);
+    expect(map.triggerRepaint).toHaveBeenCalledTimes(1);
+    layer.setDayNightLighting(null);
+    layer.setDayNightLighting(null);
+    expect(map.triggerRepaint).toHaveBeenCalledTimes(2);
+    expect(deckMaterial.color.r).toBe(1);
+    expect(shadowMaterial.opacity).toBe(0.32);
+    layer.setTheme(true);
+    layer.setTheme(true);
+    expect(map.triggerRepaint).toHaveBeenCalledTimes(3);
+    expect(deckMaterial.color.r).toBe(1);
+    expect(rebuild).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
+    expect(deckMaterial.map).toBe(texture);
+    geometry.dispose();
+    deckMaterial.dispose();
+    shadowMaterial.dispose();
+    texture.dispose();
+  });
+
+  it('skips unchanged idle updates but refreshes for camera and source changes', () => {
+    const layer = new BridgeModelLayer();
+    let zoom = 15;
+    const map = {
+      ...terrainViewMap(),
+      getZoom: () => zoom,
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      queryTerrainElevation: () => 0,
+    };
+    (layer as any).map = map;
+    const sample = vi.fn(() => ({ bridges: [], pending: false }));
+    (layer as any).sampleVisibleBridges = sample;
+    (layer as any).writeMeshes = vi.fn();
+    layer.updateBridges();
+    layer.updateBridges();
+    expect(sample).toHaveBeenCalledTimes(1);
+    expect(map.triggerRepaint).toHaveBeenCalledTimes(1);
+    layer.invalidateSource();
+    layer.updateBridges();
+    expect(sample).toHaveBeenCalledTimes(2);
+    zoom = 15.1;
+    layer.updateBridges();
+    expect(sample).toHaveBeenCalledTimes(3);
+    zoom = 10;
+    layer.updateBridges();
+    layer.updateBridges();
+    expect(map.triggerRepaint).toHaveBeenCalledTimes(4);
+    expect(sample).toHaveBeenCalledTimes(3);
+  });
+
+  it('waits for terrain data before retrying pending elevations', () => {
+    const layer = new BridgeModelLayer();
+    const map = terrainViewMap();
+    (layer as any).map = map;
+    const sample = vi.fn(() => ({ bridges: [], pending: true }));
+    (layer as any).sampleVisibleBridges = sample;
+    layer.updateBridges();
+    layer.updateBridges();
+    expect(sample).toHaveBeenCalledTimes(1);
+    expect(map.triggerRepaint).not.toHaveBeenCalled();
+    expect(layer.needsElevationRetry()).toBe(true);
+    layer.invalidateTerrain();
+    layer.updateBridges();
+    expect(sample).toHaveBeenCalledTimes(2);
+  });
+
+  const withBridgeResources = (run: (layer: BridgeModelLayer, internal: any, bridge: any) => void) => {
+    // Canvas painting is covered separately; these tests exercise resource ownership.
+    vi.stubGlobal('document', { createElement: () => ({ width: 0, height: 0, getContext: () => null }) });
+    const layer = new BridgeModelLayer();
+    const internal = layer as any;
+    internal.pierMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(), new THREE.MeshLambertMaterial(), 400);
+    const surface = Array.from({ length: 8 }, (_, index) => ({
+      longitude: 23.76 + Math.floor(index / 2) * 0.0001,
+      latitude: 61.5 + (index % 2) * 0.00003,
+      ground: 2, deck: 12,
+      east: Math.floor(index / 2) * 5,
+      north: (index % 2) * 3,
+    }));
+    const bridge = {
+      surface, indices: [0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4, 4, 5, 6, 5, 7, 6],
+      surfaces: [], parts: [], spanLength: 15,
+      bounds: { minEast: -2, minNorth: -2, maxEast: 17, maxNorth: 5 },
+    };
+    try {
+      run(layer, internal, bridge);
+    } finally {
+      internal.map = undefined;
+      layer.onRemove();
+      vi.unstubAllGlobals();
+    }
+  };
+
+  it('renders support bases at sampled terrain and updates them without rebuilding deck textures', () => {
+    withBridgeResources((_layer, internal, bridge) => {
+      const pier = { longitude: 23.76, latitude: 61.5, ground: 7, deck: 15 };
+      internal.sampledBridges = [{ ...bridge, piers: [pier] }];
+      internal.writeMeshes();
+      const texture = internal.decks.children[0].material.map;
+      const matrix = new THREE.Matrix4();
+      internal.pierMesh.getMatrixAt(0, matrix);
+      const position = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      matrix.decompose(position, new THREE.Quaternion(), scale);
+      const expected = internal.toLocal(pier.longitude, pier.latitude, pier.ground);
+      expect(position.x).toBeCloseTo(expected.east);
+      expect(position.z).toBeCloseTo(expected.north);
+      expect(position.y - scale.y / 2).toBeCloseTo(expected.up);
+      expect(scale.y).toBeCloseTo(8);
+      internal.sampledBridges = [{ ...bridge, piers: [{ ...pier, ground: 9 }] }];
+      internal.writeMeshes();
+      expect(internal.decks.children[0].material.map).toBe(texture);
+      internal.pierMesh.getMatrixAt(0, matrix);
+      matrix.decompose(position, new THREE.Quaternion(), scale);
+      expect(scale.y).toBeCloseTo(6);
+      internal.sampledBridges = [{ ...bridge, piers: Array.from({ length: 405 }, () => pier) }];
+      internal.writeMeshes();
+      expect(internal.pierMesh.count).toBe(400);
+    });
+  });
+
+  it('continues drawing below the cutoff even before the next bridge update', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const renderer = { resetState: vi.fn(), render: vi.fn() };
+      internal.renderer = renderer;
+      internal.map = { ...terrainViewMap(), getZoom: () => 12.9,
+        getCenter: () => internal.sceneOrigin, isSourceLoaded: () => false };
+      internal.setDrapedVisible = vi.fn();
+      layer.render({} as any, { defaultProjectionData: { mainMatrix: new THREE.Matrix4().toArray() } } as any);
+      expect(internal.setDrapedVisible).toHaveBeenCalledWith(true);
+      expect(renderer.render).toHaveBeenCalledTimes(1);
+      expect(internal.sampledBridges).toEqual([bridge]);
+      internal.renderer = undefined;
+    });
+  });
+
+  it('retains 3D bridges until draped tiles are ready, then fades and releases them', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const resource = [...internal.bridgeResources.values()][0] as any;
+      const dispose = vi.spyOn(resource.deck.geometry, 'dispose');
+      let ready = false;
+      internal.map = { ...terrainViewMap(), getZoom: () => 12.9,
+        isStyleLoaded: () => true, isSourceLoaded: () => ready };
+      internal.setDrapedVisible = vi.fn();
+      layer.updateBridges();
+      expect(internal.setDrapedVisible).toHaveBeenCalledWith(true);
+      expect(internal.sampledBridges).toEqual([bridge]);
+      for (const now of [0, 16, 100, 1000]) expect(internal.advanceDrapedHandoff(now)).toBe(true);
+      expect(resource.deck.material.opacity).toBe(1);
+      expect(dispose).not.toHaveBeenCalled();
+      ready = true;
+      expect(internal.advanceDrapedHandoff(1100)).toBe(true);
+      expect(internal.advanceDrapedHandoff(1210)).toBe(true);
+      expect(resource.deck.material.opacity).toBeCloseTo(0.5);
+      expect(internal.advanceDrapedHandoff(1320)).toBe(false);
+      expect(dispose).toHaveBeenCalledTimes(1);
+      expect(internal.sampledBridges).toEqual([]);
+      expect(internal.lastUpdateSignature).toBeUndefined();
+    });
+  });
+
+  it('waits for map frames and cancels an outgoing fade when zoom reverses', () => {
+    withBridgeResources((_layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const resource = [...internal.bridgeResources.values()][0] as any;
+      const dispose = vi.spyOn(resource.deck.geometry, 'dispose');
+      let ready = true;
+      internal.map = { ...terrainViewMap(), isStyleLoaded: () => true, isSourceLoaded: () => ready };
+      internal.setDrapedVisible = vi.fn();
+      internal.beginDrapedHandoff();
+      internal.advanceDrapedHandoff(0);
+      internal.advanceDrapedHandoff(1000);
+      expect(resource.deck.material.opacity).toBe(1);
+      internal.advanceDrapedHandoff(1100);
+      internal.advanceDrapedHandoff(1210);
+      expect(resource.deck.material.opacity).toBeCloseTo(0.5);
+      ready = false;
+      internal.advanceDrapedHandoff(1220);
+      expect(resource.deck.material.opacity).toBe(1);
+      internal.cancelDrapedHandoff();
+      expect(internal.drapedHandoff).toBeUndefined();
+      expect(internal.setDrapedVisible).toHaveBeenLastCalledWith(false);
+      expect(dispose).not.toHaveBeenCalled();
+      expect(internal.sampledBridges).toEqual([bridge]);
+    });
+  });
+
+  it('reuses long-span sections for terrain and palette updates within the cache budget', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      const surface = bridge.surface.map((point: any) => ({ ...point, east: point.east * 100,
+        longitude: 23.76 + point.east * 0.001 }));
+      const long = { ...bridge, surface, bounds: planBounds(surface, 2), spanLength: 1500 };
+      internal.sampledBridges = [long];
+      internal.writeMeshes();
+      const resources = [...internal.bridgeResources.values()] as any[];
+      expect(resources.length).toBeGreaterThan(1);
+      const textures = resources.map((resource) => resource.deck.material.map);
+      const positions = resources.map((resource) => resource.deck.geometry.getAttribute('position').getY(0));
+      internal.sampledBridges = [{ ...long, surface: surface.map((point: any) => ({ ...point, deck: point.deck + 4 })) }];
+      internal.writeMeshes();
+      const updated = [...internal.bridgeResources.values()] as any[];
+      expect(updated).toEqual(resources);
+      updated.forEach((resource, index) => {
+        expect(resource.deck.material.map).toBe(textures[index]);
+        expect(resource.deck.geometry.getAttribute('position').getY(0)).toBeCloseTo(positions[index] + 4);
+      });
+      internal.map = { getLayer: () => true, getPaintProperty: () => '#123456' };
+      internal.refreshDeckPaint();
+      updated.forEach((resource, index) => expect(resource.deck.material.map).toBe(textures[index]));
+      internal.map = undefined;
+      // A full viewport gives each bridge one slot instead of dropping later bridges.
+      internal.sampledBridges = Array.from({ length: 240 }, (_, index) => ({ ...long,
+        surface: surface.map((point: any) => ({ ...point, longitude: point.longitude + index })) }));
+      internal.writeMeshes();
+      expect(internal.bridgeResources.size).toBe(240);
+      expect(internal.decks.children).toHaveLength(480);
+    });
+  });
+
+  it('reuses resources across pans and updates terrain heights in place', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const deck = internal.decks.children[0] as THREE.Mesh;
+      const shadow = internal.decks.children[1] as THREE.Mesh;
+      const geometry = deck.geometry;
+      const texture = (deck.material as THREE.MeshLambertMaterial).map;
+      const normalVersion = (geometry.getAttribute('normal') as THREE.BufferAttribute).version;
+      const newOrigin = { ...internal.sceneOrigin };
+      newOrigin.lng += 0.01;
+      newOrigin.lat += 0.01;
+      internal.sceneOrigin = newOrigin;
+      internal.sceneOriginElevation = 4;
+      internal.writeMeshes();
+      expect(internal.decks.children[0]).toBe(deck);
+      expect((geometry.getAttribute('normal') as THREE.BufferAttribute).version).toBe(normalVersion);
+      const first = new THREE.Vector3().fromBufferAttribute(geometry.getAttribute('position'), 0);
+      first.multiply(deck.scale).add(deck.position);
+      const expected = internal.toLocal(bridge.surface[0].longitude, bridge.surface[0].latitude, 12);
+      expect(first.x).toBeCloseTo(expected.east, 3);
+      expect(first.y).toBeCloseTo(expected.up, 3);
+      expect(first.z).toBeCloseTo(expected.north, 3);
+
+      internal.sampledBridges = [{ ...bridge, surface: bridge.surface.map((point: any) => ({ ...point, ground: 5, deck: 16 })) }];
+      internal.writeMeshes();
+      expect(internal.decks.children[0]).toBe(deck);
+      expect(deck.geometry).toBe(geometry);
+      expect((deck.material as THREE.MeshLambertMaterial).map).toBe(texture);
+      expect(geometry.getAttribute('position').getY(0) + deck.position.y).toBeCloseTo(12);
+      expect(shadow.geometry.getAttribute('position').getY(0) + shadow.position.y).toBeCloseTo(1.12);
+      expect(layer.getPerformanceStats()).toMatchObject({ built: 1, reused: 2, heightUpdates: 1 });
+    });
+  });
+
+  it('recenters during rendering without rebuilding meshes or uploading instance data', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const deck = internal.decks.children[0];
+      const pier = internal.pierMesh as THREE.InstancedMesh;
+      const instanceVersion = pier.instanceMatrix.version;
+      const instance = new THREE.Matrix4();
+      pier.getMatrixAt(0, instance);
+      const before = new THREE.Vector3().setFromMatrixPosition(instance);
+      const previousOrigin = { ...internal.sceneOrigin };
+      const center = { ...previousOrigin };
+      center.lng += 0.02;
+      center.lat += 0.01;
+      internal.map = { ...terrainViewMap(), getCenter: () => center, queryTerrainElevation: () => 4 };
+      internal.renderer = { resetState: vi.fn(), render: vi.fn(), dispose: vi.fn() };
+      const rebuild = vi.spyOn(internal, 'writeMeshes');
+      layer.render({} as any, { defaultProjectionData: { mainMatrix: new THREE.Matrix4().toArray() } } as any);
+      expect(rebuild).not.toHaveBeenCalled();
+      expect(internal.decks.children[0]).toBe(deck);
+      expect(pier.instanceMatrix.version).toBe(instanceVersion);
+      const translated = before.clone().multiply(pier.scale).add(pier.position);
+      const offset = internal.toLocal(previousOrigin.lng, previousOrigin.lat, 0);
+      expect(translated.x).toBeCloseTo(before.x * pier.scale.x + offset.east);
+      expect(translated.y).toBeCloseTo(before.y - 4);
+      expect(layer.getPerformanceStats().recenters).toBe(1);
+    });
+  });
+
+  it('rebuilds changed OSM content and evicts inactive resources within the bridge budget', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const first = internal.decks.children[0];
+      const disposed = vi.spyOn(first.geometry, 'dispose');
+      const textureDisposed = vi.spyOn(first.material.map, 'dispose');
+      // Same position with changed paint must not reuse the previous texture.
+      internal.sampledBridges = [{ ...bridge, parts: [{ kind: 'line', plan: [{ east: 0, north: 0 }, { east: 15, north: 0 }], width: 4, fill: '#fff', edge: '#000' }] }];
+      internal.writeMeshes();
+      expect(internal.decks.children[0]).not.toBe(first);
+      // Returning to an unchanged cluster reuses its retained resources.
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      expect(internal.decks.children[0]).toBe(first);
+      for (let index = 1; index <= 240; index += 1) {
+        internal.sampledBridges = [{ ...bridge, surface: bridge.surface.map((point: any) => ({ ...point, longitude: point.longitude + index * 0.001 })) }];
+        internal.writeMeshes();
+      }
+      expect(layer.getPerformanceStats().cachedBridges).toBe(240);
+      expect(internal.decks.children).toHaveLength(2);
+      expect(disposed).toHaveBeenCalledTimes(1);
+      expect(textureDisposed).toHaveBeenCalledTimes(1);
+      internal.clearMeshes();
+      expect(layer.getPerformanceStats().cachedBridges).toBe(0);
+      expect(disposed).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('refreshes tile geometry and DEM elevations while retaining unchanged clusters', () => {
+    withBridgeResources((layer, internal) => {
+      const feature = (lng: number, length = 0.001) => ({
+        properties: { brunnel: 'bridge', class: 'minor' },
+        geometry: { type: 'LineString', coordinates: [[lng, 61.5], [lng + length, 61.5]] },
+      });
+      let features = [feature(23.76), feature(24.0)];
+      let elevation: number | null = 10;
+      const terrainQuery = vi.fn(() => elevation);
+      internal.map = {
+        ...terrainViewMap(),
+        getTerrain: () => ({ source: 'terrain', exaggeration: 1 }),
+        getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+        getLayer: () => undefined, getSource: () => ({}), querySourceFeatures: () => features,
+        queryTerrainElevation: terrainQuery,
+      };
+      layer.updateBridges();
+      const original = internal.decks.children[0];
+      const originalTexture = original.material.map;
+      expect(layer.getPerformanceStats()).toMatchObject({ built: 1, sourceParts: 2, retainedParts: 1 });
+      // A newly loaded unrelated tile changes enumeration and the shared plan origin.
+      features = [feature(23.78), ...features];
+      layer.invalidateSource();
+      layer.updateBridges();
+      expect(internal.decks.children).toContain(original);
+      expect(layer.getPerformanceStats()).toMatchObject({ built: 2, reused: 1 });
+      elevation = null;
+      layer.invalidateTerrain();
+      layer.updateBridges();
+      expect(layer.needsElevationRetry()).toBe(true);
+      expect(internal.decks.children).toContain(original);
+      elevation = 20;
+      layer.invalidateTerrain();
+      terrainQuery.mockClear();
+      layer.updateBridges();
+      expect(terrainQuery).toHaveBeenCalled();
+      expect(original.material.map).toBe(originalTexture);
+      expect(layer.getPerformanceStats()).toMatchObject({ built: 2, heightUpdates: 2 });
+      expect(original.geometry.getAttribute('position').getY(0) + original.position.y).toBeCloseTo(0.06);
+      // A changed tile fragment extends one bridge, requiring a new texture/mesh.
+      features = [feature(23.78), feature(23.76, 0.0015)];
+      layer.invalidateSource();
+      layer.updateBridges();
+      expect(internal.decks.children).not.toContain(original);
+      expect(layer.getPerformanceStats().built).toBe(3);
+    });
+  });
+
+  it('detects centre-of-deck terrain rises and retries missing interior samples', () => {
+    withBridgeResources((layer, internal) => {
+      const origin = planOriginFromLngLat(23.76, 61.5);
+      const plan = [{ east: 0, north: 0 }, { east: 200, north: 0 }];
+      const line = {
+        kind: 'line', plan, width: 6,
+        coordinates: plan.map((point) => planToLngLat(point, origin)),
+        properties: { className: 'minor', layer: 0, ramp: false },
+      };
+      let ready = false;
+      const terrain = vi.fn((coordinate: { lng: number; lat: number }) => {
+        const point = lngLatsToPlan([[coordinate.lng, coordinate.lat]], origin)[0];
+        const onRidge = point.east > 70 && point.east < 130 && Math.abs(point.north) < 1;
+        return onRidge ? (ready ? 9 : null) : 0;
+      });
+      const map = { queryTerrainElevation: terrain };
+      const sample = () => internal.sampleCluster(map, origin, [line], [], 200, 15);
+      expect(sample()).toBeNull();
+      expect(layer.needsElevationRetry()).toBe(true);
+      ready = true;
+      layer.invalidateTerrain();
+      const sampled = sample();
+      expect(sampled).not.toBeNull();
+      expect(sampled.surface.every((point: any) => point.ground === 0)).toBe(true);
+      expect(Math.max(...sampled.surface.map((point: any) => point.deck))).toBeGreaterThan(9.7);
+      internal.sampledBridges = [sampled];
+      internal.writeMeshes();
+      const mesh = internal.decks.children[0];
+      const texture = mesh.material.map;
+      const queries = terrain.mock.calls.length;
+      sample();
+      expect(terrain).toHaveBeenCalledTimes(queries);
+      // A DEM update removes the obstruction; reuse resources and restore the profile.
+      terrain.mockImplementation(() => 0);
+      layer.invalidateTerrain();
+      internal.sampledBridges = [sample()];
+      internal.writeMeshes();
+      expect(internal.decks.children[0]).toBe(mesh);
+      expect(mesh.material.map).toBe(texture);
+      expect(layer.getPerformanceStats()).toMatchObject({ built: 1, heightUpdates: 1 });
+      expect(Math.max(...internal.sampledBridges[0].surface.map((point: any) => point.deck))).toBeCloseTo(bridgeArchMetres(200) + 0.7);
+    });
+  });
+
+  it('resamples after terrain source or exaggeration changes without a camera move', () => {
+    const layer = new BridgeModelLayer();
+    const internal = layer as any;
+    let terrain = { source: 'terrain', exaggeration: 1 };
+    internal.map = {
+      ...terrainViewMap(), getTerrain: () => terrain,
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }), queryTerrainElevation: () => 0,
+    };
+    internal.sampleVisibleBridges = vi.fn(() => ({ bridges: [], pending: false }));
+    internal.writeMeshes = vi.fn();
+    layer.updateBridges();
+    internal.elevationCache.set('old', 10);
+    terrain = { source: 'replacement-terrain', exaggeration: 1 };
+    layer.updateBridges();
+    expect(internal.elevationCache.size).toBe(0);
+    terrain = { ...terrain, exaggeration: 2 };
+    layer.updateBridges();
+    expect(internal.sampleVisibleBridges).toHaveBeenCalledTimes(3);
+    layer.updateBridges();
+    expect(internal.sampleVisibleBridges).toHaveBeenCalledTimes(3);
   });
 
   it('does not render when terrain is off', () => {
@@ -848,5 +1530,180 @@ describe('setDrapedElevatedBridgeLayersVisible', () => {
     expect(filters.some(([id]) => id === 'global-footways')).toBe(true);
     expect(filters.some(([id]) => id === 'global-cycleways')).toBe(true);
     expect(filters.some(([id]) => id === 'global-road-center-markings')).toBe(true);
+  });
+});
+
+
+describe('bridge active style paint', () => {
+  it('follows class and surface expressions, theme and cycle palette changes in place', () => {
+    const strokes: string[] = [];
+    const context = { setTransform() {}, beginPath() {}, moveTo() {}, lineTo() {}, strokeStyle: '',
+      stroke() { strokes.push(this.strokeStyle); } };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+    try {
+      const layer = new BridgeModelLayer() as any;
+      let road: unknown = ['case', ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa',
+        ['match', ['get', 'class'], 'motorway', '#f9f7ef', '#f4f2eb']];
+      layer.map = { getLayer: () => true, getZoom: () => 16,
+        getPaintProperty: (id: string) => id === 'global-roads' ? road : '#adb8af' };
+      const bridge = { surfaces: [], bounds: { minEast: 0, minNorth: 0, maxEast: 20, maxNorth: 5 },
+        parts: [{ kind: 'line', width: 5, plan: [{ east: 0, north: 0 }, { east: 20, north: 0 }],
+          fill: '#f1efe7', edge: '#87918d', properties: { className: 'motorway', layer: 0, ramp: false } }] };
+      layer.refreshDeckPaint();
+      layer.paintDeck(bridge);
+      expect(strokes.at(-1)).toBe('#f9f7ef');
+      bridge.parts[0].properties = { ...bridge.parts[0].properties, surface: 'unpaved' } as any;
+      layer.paintDeck(bridge);
+      expect(strokes.at(-1)).toBe('#d9cbaa');
+      const texture = new THREE.Texture();
+      const resource = { deck: { material: { map: texture } }, paintBridge: bridge, paintSignature: '' };
+      layer.bridgeResources.set('test', resource);
+      for (const paletteColor of ['#b8aa80', '#304050', '#f7f5ee']) {
+        road = paletteColor;
+        layer.refreshDeckPaint();
+        expect(strokes.at(-1)).toBe(paletteColor);
+        expect(resource.deck.material.map).toBe(texture);
+        const version = texture.version;
+        layer.refreshDeckPaint();
+        expect(texture.version).toBe(version);
+      }
+      texture.dispose();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('uses the cycleway fill and its own casing across active palettes', () => {
+    const strokes: string[] = [];
+    const context = { setTransform() {}, beginPath() {}, moveTo() {}, lineTo() {}, strokeStyle: '',
+      stroke() { strokes.push(this.strokeStyle); } };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+    try {
+      const layer = new BridgeModelLayer() as any;
+      const colors: Record<string, string> = {
+        'global-cycleways': '#b99a91', 'global-cycleway-casing': '#f3f0e9',
+        'global-path-casing': '#d8d4ca',
+      };
+      layer.map = { getLayer: (id: string) => id in colors, getZoom: () => 16,
+        getPaintProperty: (id: string) => colors[id] };
+      const bridge = { surfaces: [], bounds: { minEast: 0, minNorth: 0, maxEast: 20, maxNorth: 5 },
+        parts: [{ kind: 'line', width: 2.5, plan: [{ east: 0, north: 0 }, { east: 20, north: 0 }],
+          fill: '#e8ddd6', edge: '#b99a91',
+          properties: { className: 'path', subclass: 'cycleway', layer: 0, ramp: false } }] };
+      for (const [fill, casing] of [['#b99a91', '#f3f0e9'], ['#b99a91', '#8b9e9d'], ['#926e68', '#556677']]) {
+        colors['global-cycleways'] = fill;
+        colors['global-cycleway-casing'] = casing;
+        layer.refreshDeckPaint();
+        layer.paintDeck(bridge);
+        expect(strokes.slice(-2)).toEqual([casing, fill]);
+      }
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('allocates a narrow texture for a diagonal span without moving its geometry', () => {
+    const outer = [{ east: 0, north: 0 }, { east: 400, north: 400 },
+      { east: 404, north: 396 }, { east: 4, north: -4 }];
+    const bridge = { surfaces: [{ outer, holes: [] }], surface: outer.map((point) => ({ ...point,
+      longitude: 23, latitude: 61, ground: 0, deck: 5 })), parts: [], indices: [0, 1, 2, 0, 2, 3],
+      spanLength: 566, bounds: planBounds(outer, 2) };
+    const projected = bridgeTexturePlan(bridge);
+    const widths = [projected.bounds.maxEast - projected.bounds.minEast,
+      projected.bounds.maxNorth - projected.bounds.minNorth];
+    expect(Math.min(...widths)).toBeLessThan(11);
+    expect(Math.max(...widths)).toBeGreaterThan(560);
+    expect(projected.surface.map(({ longitude, latitude, deck }) => [longitude, latitude, deck]))
+      .toEqual(bridge.surface.map(({ longitude, latitude, deck }) => [longitude, latitude, deck]));
+  });
+});
+
+
+describe('long bridge texture sections', () => {
+  const fixture = (length: number, width = 8, hole = false) => {
+    const outer = [{ east: 0, north: 0 }, { east: length, north: 0 },
+      { east: length, north: width }, { east: 0, north: width }];
+    const holes = hole ? [[{ east: length * 0.3, north: width * 0.3 },
+      { east: length * 0.7, north: width * 0.3 }, { east: length * 0.7, north: width * 0.7 },
+      { east: length * 0.3, north: width * 0.7 }]] : [];
+    const mesh = triangulateDeckSurface({ outer, holes })!;
+    return { surfaces: [{ outer, holes }], surface: mesh.points.map((point) => ({ ...point,
+      longitude: 23 + point.east / 50000, latitude: 61 + point.north / 100000,
+      ground: 0, deck: 5 + point.east / length })), indices: mesh.indices,
+      bounds: planBounds(outer, 2), spanLength: length, parts: [] };
+  };
+  const area = (bridge: Pick<ReturnType<typeof fixture>, 'surface' | 'indices'>) => {
+    let sum = 0;
+    for (let i = 0; i < bridge.indices.length; i += 3) {
+      sum += polygonAreaMetres(bridge.indices.slice(i, i + 3).map((index) => bridge.surface[index]));
+    }
+    return sum;
+  };
+
+  it('preserves mesh area, holes, and identical shared-edge elevations', () => {
+    const bridge = fixture(1200, 30, true);
+    const sections = bridgeTextureSections(bridge);
+    expect(sections.length).toBeGreaterThan(1);
+    expect(sections.reduce((sum, section) => sum + area(section.bridge), 0)).toBeCloseTo(area(bridge), 5);
+    for (let i = 1; i < sections.length; i += 1) {
+      const left = sections[i - 1].bridge.surface;
+      const right = sections[i].bridge.surface;
+      const edge = Math.max(...left.map((point) => point.east));
+      const boundary = (points: typeof left) => points.filter((point) => Math.abs(point.east - edge) < 1e-7)
+        .map(({ longitude, latitude, deck, ground }) => [longitude, latitude, deck, ground])
+        .sort((a, b) => a[1] - b[1]);
+      expect(boundary(left).length).toBeGreaterThan(1);
+      expect(boundary(right)).toEqual(boundary(left));
+      expect(sections[i - 1].paintBridge.bounds.maxEast).toBeGreaterThan(sections[i].paintBridge.bounds.minEast);
+    }
+    expect(bridgeTextureSections(bridge)).toEqual(sections);
+  });
+
+  it('limits section count and total texture pixels, including wide decks', () => {
+    vi.stubGlobal('document', { createElement: () => ({ width: 0, height: 0, getContext: () => null }) });
+    try {
+      for (const bridge of [fixture(1200), fixture(5000, 100), fixture(1200, 600)]) {
+        const sections = bridgeTextureSections(bridge);
+        expect(sections.length).toBeLessThanOrEqual(8);
+        let pixels = 0;
+        for (const { paintBridge } of sections) {
+          const canvas = paintBridgeCluster(paintBridge.surfaces, paintBridge.parts, paintBridge.bounds,
+            undefined, paintBridge.texturePixelBudget);
+          pixels += canvas.width * canvas.height;
+          expect(Math.max(canvas.width, canvas.height)).toBeLessThanOrEqual(2048);
+        }
+        expect(pixels).toBeLessThanOrEqual(2048 * 512);
+        expect(bridgeTextureSections(bridge, 1)).toHaveLength(1);
+      }
+      expect(bridgeTextureSections(fixture(100))).toHaveLength(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+
+describe('bridge rails', () => {
+  it('offsets both rails along bends without spikes or duplicate-point errors', () => {
+    const plan = [{ east: 0, north: 0 }, { east: 0, north: 0 }, { east: 20, north: 0 }, { east: 20, north: 20 }];
+    const rails = bridgeRailLines(plan);
+    expect(rails).toHaveLength(2);
+    expect(rails[0]).toHaveLength(3);
+    expect(Math.abs(rails[0][0].north - rails[1][0].north)).toBeCloseTo(1.5);
+    expect(Math.abs(rails[0][2].east - rails[1][2].east)).toBeCloseTo(1.5);
+    for (const line of rails) expect(Math.hypot(line[1].east - 20, line[1].north)).toBeLessThan(1.51);
+    expect(bridgeRailLines([{ east: 0, north: 0 }])).toEqual([]);
+  });
+
+  it('paints two rails in the active rail color only for railway and transit lines', () => {
+    const strokes: string[] = [];
+    const context = { setTransform() {}, save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
+      strokeStyle: '', stroke() { strokes.push(this.strokeStyle); } };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+    try {
+      const plan = [{ east: 0, north: 0 }, { east: 100, north: 0 }];
+      for (const className of ['rail', 'transit', 'track', 'path', 'primary']) {
+        strokes.length = 0;
+        paintBridgeCluster([], [{ kind: 'line', plan, width: 5.5, fill: '#dedede', edge: '#aabbcc',
+          properties: { className, layer: 0, ramp: false } }], planBounds(plan, 4),
+          () => ({ fill: '#dedede', edge: '#aabbcc', rail: '#6b8295' }));
+        expect(strokes).toEqual(className === 'rail' || className === 'transit'
+          ? ['#aabbcc', '#dedede', '#6b8295', '#6b8295'] : ['#aabbcc', '#dedede']);
+      }
+    } finally { vi.unstubAllGlobals(); }
   });
 });
