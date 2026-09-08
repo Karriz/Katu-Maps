@@ -3475,7 +3475,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const fascia = resource.fascia;
     const edges = resource.fasciaEdges;
     if (!fascia || !edges) return;
-    const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
+    // Cached decks retain their original local frame when the scene recenters.
+    // Their positions already contain the updated heights in that same frame.
+    const positions = resource.deck.geometry.getAttribute('position');
+    const deckPoints = bridge.surface.map((_, index) => ({
+      east: positions.getX(index),
+      north: positions.getZ(index),
+      up: positions.getY(index),
+    }));
     const geometry = this.fasciaGeometry(bridge, deckPoints, edges, resource.elevation);
     if (!geometry) return;
     fascia.geometry.dispose();

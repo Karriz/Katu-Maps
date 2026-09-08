@@ -1503,6 +1503,17 @@ describe('BridgeModelLayer', () => {
       const fascia = deck.children[0] as THREE.Mesh;
       expect(fascia).toBeTruthy();
       expect(fascia.geometry.getAttribute('position').count).toBeGreaterThan(0);
+      const resource = [...internal.bridgeResources.values()][0] as any;
+      const walls = fascia.geometry.getAttribute('position');
+      const deckPositions = geometry.getAttribute('position');
+      resource.fasciaEdges.forEach(([a, b]: [number, number], edge: number) => {
+        [a, b].forEach((vertex, corner) => {
+          const wallVertex = edge * 4 + corner;
+          expect(walls.getX(wallVertex)).toBeCloseTo(deckPositions.getX(vertex), 3);
+          expect(walls.getY(wallVertex)).toBeCloseTo(deckPositions.getY(vertex), 3);
+          expect(walls.getZ(wallVertex)).toBeCloseTo(deckPositions.getZ(vertex), 3);
+        });
+      });
     });
   });
 
