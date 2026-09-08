@@ -5,6 +5,7 @@ import {
   bridgeClearanceProbes,
   bridgeArchMetres,
   bridgeApproachMix,
+  bridgeShadowEndFade,
   bridgeSurfaceClearance,
   bridgeWallBottom,
   bridgeBoundaryEdges,
@@ -163,7 +164,7 @@ describe('bridge terrain clearance', () => {
       { east: 100, north: 0 }], 6);
     ribbon.points.forEach((point, index) => expect(ribbon.t[index]).toBeCloseTo(point.east / 100));
     const refined = refineBridgeApproaches(ribbon.points, ribbon.indices, ribbon.t, 100);
-    for (const metres of [2, 5, 8, 10, 90, 92, 95, 98]) {
+    for (const metres of [3, 7.5, 12, 15, 85, 88, 92.5, 97]) {
       expect(refined.points.some((point) => Math.abs(point.east - metres) < 1e-8)).toBe(true);
     }
   });
@@ -172,10 +173,10 @@ describe('bridge terrain clearance', () => {
     const points = [{ east: 0, north: 0 }, { east: 0, north: 6 },
       { east: 100, north: 0 }, { east: 100, north: 6 }];
     const refined = refineBridgeApproaches(points, [0, 1, 2, 1, 3, 2], [0, 0, 1, 1], 100);
-    for (const station of [0.02, 0.05, 0.08, 0.1, 0.9, 0.92, 0.95, 0.98]) {
+    for (const station of [0.03, 0.075, 0.12, 0.15, 0.85, 0.88, 0.925, 0.97]) {
       expect(refined.t.some((value) => Math.abs(value - station) < 1e-9)).toBe(true);
     }
-    expect(refined.t.some((value) => value > 0.100001 && value < 0.899999)).toBe(false);
+    expect(refined.t.some((value) => value > 0.150001 && value < 0.849999)).toBe(false);
     let area = 0;
     for (let i = 0; i < refined.indices.length; i += 3) {
       area += polygonAreaMetres(refined.indices.slice(i, i + 3).map((index) => refined.points[index]));
@@ -197,8 +198,15 @@ describe('bridge terrain clearance', () => {
       const heights = t.map((value) => bridgeSurfaceClearance(value, length));
       expect(terrainClearedDeck(t, heights, t.map(() => 0), length)).toBe(heights);
     }
-    expect(bridgeApproachMix(0.05, 100)).toBeCloseTo(0.5);
-    expect(bridgeApproachMix(0.1, 100)).toBe(1);
+    expect(bridgeApproachMix(0.075, 100)).toBeCloseTo(0.5);
+    expect(bridgeApproachMix(0.15, 100)).toBe(1);
+    // The 5m overlap no longer has to absorb the whole vertical transition.
+    expect(bridgeApproachMix(0.05, 100)).toBeLessThan(0.3);
+    const profile = Array.from({ length: 16 }, (_, metres) => bridgeApproachMix(metres / 100, 100));
+    const slopes = profile.slice(1).map((height, index) => height - profile[index]);
+    expect(Math.max(...slopes)).toBeLessThan(0.1);
+    expect(slopes[0]).toBeLessThan(0.02);
+    expect(slopes.at(-1)).toBeLessThan(0.02);
   });
 
   it('leaves an already clear deck unchanged', () => {
@@ -224,14 +232,55 @@ describe('bridge terrain clearance', () => {
   });
 
   it('clears sampled triangle interiors even when all original vertices clear terrain', () => {
-    const points = [{ east: 0, north: 0 }, { east: 100, north: 0 }, { east: 50, north: 8 }];
+    const points = [{ east: 20, north: 0 }, { east: 80, north: 0 }, { east: 50, north: 8 }];
     const probes = bridgeClearanceProbes(points, [0, 1, 2], 100).map((probe) => ({ ...probe, ground: 8 }));
-    const deck = terrainClearedDeck([0, 1, 0.5], [1, 1, 1], [0, 0, 0], 100, probes);
+    const deck = terrainClearedDeck([0.2, 0.8, 0.5], [1, 1, 1], [0, 0, 0], 100, probes);
     for (const probe of probes) {
       const interpolated = probe.vertices.reduce((sum, vertex, index) => sum + deck[vertex] * probe.weights[index], 0);
-      const probeT = probe.vertices.reduce((sum, vertex, index) => sum + [0, 1, 0.5][vertex] * probe.weights[index], 0);
+      const probeT = probe.vertices.reduce((sum, vertex, index) => sum + [0.2, 0.8, 0.5][vertex] * probe.weights[index], 0);
       expect(interpolated).toBeGreaterThanOrEqual(8 + bridgeSurfaceClearance(probeT, 100) - 1e-9);
     }
+  });
+
+  it('keeps ground contacts attached when nearby terrain raises the span', () => {
+    const t = [0, 0.02, 0.05, 0.08, 0.1, 0.5, 0.9, 0.92, 0.95, 0.98, 1];
+    const ground = t.map((value) => value === 0.1 || value === 0.9 ? 8 : 0);
+    const base = t.map((value) => bridgeSurfaceClearance(value, 100));
+    const deck = terrainClearedDeck(t, base, ground, 100);
+    expect(deck[0]).toBeCloseTo(0.06);
+    expect(deck.at(-1)).toBeCloseTo(0.06);
+    deck.forEach((height, index) => {
+      expect(height).toBeGreaterThanOrEqual(base[index] + ground[index] * bridgeApproachMix(t[index], 100) ** 2 - 1e-9);
+    });
+    expect(deck[1] - base[1]).toBeLessThan(deck[2] - base[2]);
+    expect(deck.at(-2)! - base.at(-2)!).toBeLessThan(deck.at(-3)! - base.at(-3)!);
+  });
+
+  it('softens approach probes without amplifying their lift beside a pinned ground contact', () => {
+    const t = [0, 0.02, 0.05];
+    const base = t.map((value) => bridgeSurfaceClearance(value, 100));
+    const probe = { point: { east: 2, north: 0 }, vertices: [0, 1, 2] as [number, number, number],
+      weights: [1 / 3, 1 / 3, 1 / 3] as [number, number, number], ground: 2 };
+    const deck = terrainClearedDeck(t, base, [0, 0, 0], 100, [probe]);
+    expect(deck[0]).toBeCloseTo(0.06);
+    expect(deck[2]).toBeGreaterThan(base[2]);
+    expect(Math.max(...deck.map((height, index) => height - base[index]))).toBeLessThan(0.2);
+  });
+
+  it('spreads a required approach lift into the deck without an immediate dip', () => {
+    const t = [0, 0.03, 0.05, 0.075, 0.1, 0.15, 0.5, 0.85, 0.9, 0.925, 0.95, 0.97, 1];
+    const base = t.map((value) => bridgeSurfaceClearance(value, 100));
+    const ground = t.map((value) => value === 0.05 || value === 0.95 ? 4 : 0);
+    const deck = terrainClearedDeck(t, base, ground, 100);
+    const lift = deck.map((height, index) => height - base[index]);
+    expect(lift[2]).toBeCloseTo(4 * bridgeApproachMix(0.05, 100) ** 2);
+    expect(lift[2]).toBeLessThan(0.3);
+    expect(lift[2] - lift[3]).toBeLessThanOrEqual(0.300001);
+    expect(lift[10] - lift[9]).toBeLessThanOrEqual(0.300001);
+    expect(deck[0]).toBeCloseTo(0.06);
+    expect(deck.at(-1)).toBeCloseTo(0.06);
+    deck.forEach((height, index) => expect(height)
+      .toBeGreaterThanOrEqual(base[index] + ground[index] * bridgeApproachMix(t[index], 100) ** 2 - 1e-9));
   });
 
   it('bounds and deterministically spreads extra samples on very long spans', () => {
@@ -411,6 +460,14 @@ describe('bridge shadows', () => {
     expect(Math.hypot(inflated[1].east, inflated[1].north))
       .toBeGreaterThan(Math.hypot(10, 2));
     expect(inflatePlanPoints([{ east: 0, north: 0 }], 2)).toEqual([{ east: 0, north: 0 }]);
+  });
+
+  it('weakens the ground shadow toward the abutments', () => {
+    expect(bridgeShadowEndFade(0)).toBe(0);
+    expect(bridgeShadowEndFade(0.05)).toBe(0);
+    expect(bridgeShadowEndFade(2.5)).toBe(1);
+    expect(bridgeShadowEndFade(0.6)).toBeGreaterThan(0);
+    expect(bridgeShadowEndFade(0.6)).toBeLessThan(bridgeShadowEndFade(1.8));
   });
 });
 
@@ -755,17 +812,44 @@ describe('clustered bridge decks', () => {
     const extended = extendClusterAbutments([deck, road, path], origin);
     const nextRoad = extended.find((drawable) => drawable.kind === 'line' && drawable.properties.className === 'primary');
     const nextPath = extended.find((drawable) => drawable.kind === 'line' && drawable.properties.className === 'path');
-    expect(nextRoad?.plan[0].east).toBeCloseTo(-10);
-    expect(nextRoad?.plan[nextRoad.plan.length - 1].east).toBeCloseTo(90);
-    expect(nextPath?.plan[0].east).toBeCloseTo(-10);
-    expect(nextPath?.plan[nextPath.plan.length - 1].east).toBeCloseTo(90);
+    expect(nextRoad?.plan[0].east).toBeCloseTo(-5);
+    expect(nextRoad?.plan[nextRoad.plan.length - 1].east).toBeCloseTo(85);
+    expect(nextPath?.plan[0].east).toBeCloseTo(-5);
+    expect(nextPath?.plan[nextPath.plan.length - 1].east).toBeCloseTo(85);
     const surfaces = clusterSurfaces(extended);
-    expect(surfaces[0].outer).toEqual(deck.plan);
+    expect(planBounds(surfaces[0].outer, 0)).toEqual({ minEast: -5, maxEast: 85, minNorth: -8, maxNorth: 10 });
+    expect(polygonAreaMetres(surfaces[0].outer)).toBeCloseTo(90 * 18);
+    for (const line of [nextRoad!, nextPath!]) {
+      expect(lineOverhangStubs(line, extended.filter((part) => part.kind === 'polygon'))).toEqual([]);
+      expect(line.plan.every((point) => pointInFilledPolygon(
+        { ...point, east: Math.max(-4.999, Math.min(84.999, point.east)) }, surfaces[0].outer,
+      ))).toBe(true);
+    }
     expect(shouldMeshClusterLines(
       extended.filter((drawable) => drawable.kind === 'line'),
       extended.filter((drawable) => drawable.kind === 'polygon'),
       surfaces,
     )).toBe(false);
+  });
+
+  it('extends polygon-only decks while preserving openings and a valid triangulated surface', () => {
+    const origin = planOriginFromLngLat(23.76, 61.498);
+    const holed = { ...deck, holes: [[
+      { east: 1, north: -2 }, { east: 7, north: -2 },
+      { east: 7, north: 2 }, { east: 1, north: 2 },
+    ]] };
+    const original = structuredClone(holed);
+    const [extended] = extendClusterAbutments([holed], origin);
+    expect(holed).toEqual(original);
+    expect(planBounds(extended.plan, 0)).toEqual({ minEast: -5, maxEast: 85, minNorth: -8, maxNorth: 10 });
+    const surface = { outer: extended.plan, holes: extended.holes! };
+    expect(pointInFilledPolygon({ east: 2, north: 0 }, surface.outer, surface.holes)).toBe(false);
+    const mesh = triangulateDeckSurface(surface, false)!;
+    let area = 0;
+    for (let index = 0; index < mesh.indices.length; index += 3) {
+      area += polygonAreaMetres(mesh.indices.slice(index, index + 3).map((vertex) => mesh.points[vertex]));
+    }
+    expect(area).toBeCloseTo(polygonAreaMetres(surface.outer) - polygonAreaMetres(surface.holes[0]));
   });
 
   it('keeps interchange ramps as separate spans', () => {

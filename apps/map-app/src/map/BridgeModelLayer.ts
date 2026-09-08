@@ -58,7 +58,9 @@ const INTERCHANGE_DECK_AREA_METRES = 3_200;
 const MIN_POLYGON_MESH_AREA_METRES = 80;
 const PARALLEL_BUNDLE_DOT = 0.9;
 const DECK_WATER_CLEARANCE_METRES = 0.7;
-const ABUTMENT_EXTEND_METRES = 10;
+const ABUTMENT_EXTEND_METRES = 5;
+// Blend height farther into the existing deck than the horizontal overlap.
+const BRIDGE_APPROACH_METRES = 15;
 const FASCIA_METRES = 0.6;
 const ABUTMENT_BURY_METRES = 0.85;
 const MIN_FASCIA_EDGE_METRES = 0.12;
@@ -80,6 +82,7 @@ const SHADOW_INFLATE_METRES = 1.6;
 const SHADOW_BLUR_METRES = 3;
 export const BRIDGE_SHADOW_HOVER_METRES = 0.55;
 export const BRIDGE_SHADOW_OPACITY = 0.2;
+const SHADOW_GROUND_FADE_METRES = 1.8;
 const MAX_CANVAS_LONG = 2048;
 const MAX_CANVAS_SHORT = 512;
 const MAX_CANVAS_PIXELS_PER_METRE = 6;
@@ -613,7 +616,7 @@ export function splitBridgeMesh<T extends PlanPoint>(
 }
 
 export function refineBridgeApproaches(points: PlanPoint[], indices: number[], t: number[], spanLength: number) {
-  const approach = Math.min(ABUTMENT_EXTEND_METRES, spanLength / 4);
+  const approach = Math.min(BRIDGE_APPROACH_METRES, spanLength / 4);
   const cuts = [0.2, 0.5, 0.8, 1].flatMap((fraction) => {
     const value = fraction * approach / Math.max(1, spanLength);
     return [value, 1 - value];
@@ -632,10 +635,10 @@ export function refineBridgeSpan(points: PlanPoint[], indices: number[], t: numb
     indices: refined.indices, t: refined.points.map((point) => point.t) };
 }
 
-/** Ease the existing approach extension into terrain without changing the main span. */
+/** Ease into terrain across the overlap and the adjoining part of the deck. */
 export function bridgeApproachMix(t: number, spanLength: number) {
   const distance = Math.max(0, Math.min(t, 1 - t)) * spanLength;
-  const approach = Math.min(ABUTMENT_EXTEND_METRES, spanLength / 4);
+  const approach = Math.min(BRIDGE_APPROACH_METRES, spanLength / 4);
   const u = Math.min(1, distance / Math.max(1, approach));
   return u * u * (3 - 2 * u);
 }
@@ -643,6 +646,12 @@ export function bridgeApproachMix(t: number, spanLength: number) {
 export function bridgeSurfaceClearance(t: number, spanLength: number) {
   // A small offset avoids coplanar flicker where the deck meets the draped road.
   return 0.06 + (DECK_WATER_CLEARANCE_METRES - 0.06) * bridgeApproachMix(t, spanLength);
+}
+
+/** Shadow alpha: gone where the deck meets the ground, full once it has lifted. */
+export function bridgeShadowEndFade(clearanceMetres: number) {
+  const u = Math.min(1, Math.max(0, (clearanceMetres - 0.08) / SHADOW_GROUND_FADE_METRES));
+  return u * u * (3 - 2 * u);
 }
 
 export function bridgeWallBottom(deck: number, ground: number, t: number | undefined, spanLength: number) {
@@ -692,7 +701,7 @@ export function bridgeFasciaPositions(
   return positions;
 }
 
-/** Raise only obstructed sections, spreading lift along the span without lowering clearance. */
+/** Clear the main span, treating terrain clearance near ground joins as a soft constraint. */
 export function terrainClearedDeck(
   t: number[],
   deck: number[],
@@ -701,31 +710,42 @@ export function terrainClearedDeck(
   probes: Array<BridgeClearanceProbe & { ground: number }> = [],
 ) {
   const required = deck.map((height, index) => Math.max(0, ground[index] + bridgeSurfaceClearance(t[index], spanLength) - height));
+  const approachMix = t.map((value) => bridgeApproachMix(value, spanLength));
   for (const probe of probes) {
     const height = probe.vertices.reduce((sum, vertex, index) => sum + deck[vertex] * probe.weights[index], 0);
     const probeT = probe.vertices.reduce((sum, vertex, index) => sum + t[vertex] * probe.weights[index], 0);
     const lift = Math.max(0, probe.ground + bridgeSurfaceClearance(probeT, spanLength) - height);
-    // Applying the deficit to each contributing vertex also clears the interpolated
-    // triangle, rather than only lifting a theoretical profile between vertices.
     probe.vertices.forEach((vertex, index) => {
-      if (probe.weights[index] > 0) required[vertex] = Math.max(required[vertex], lift);
+      if (probe.weights[index] <= 0) return;
+      required[vertex] = Math.max(required[vertex], lift);
     });
   }
+  // DEM bumps near the join should not dictate the deck profile. In particular,
+  // do not amplify an interior probe to compensate for a pinned terminal edge.
+  // Relax clearance smoothly through the approach, retaining full strength in
+  // the main span. The existing base profile still meets terrain at the ends.
+  required.forEach((lift, index) => { required[index] = lift * approachMix[index] ** 2; });
   if (!required.some((lift) => lift > 1e-6)) return deck;
   const stations = new Map<number, number>();
   const keys = t.map((value) => Math.round(value * 1e6) / 1e6);
   keys.forEach((key, index) => stations.set(key, Math.max(stations.get(key) ?? 0, required[index])));
   const ordered = [...stations.keys()].sort((left, right) => left - right);
   const lifts = ordered.map((key) => stations.get(key)!);
-  // A slope-limited upper envelope keeps the correction continuous and leaves
-  // unaffected approaches alone. Equal span stations receive equal lift across width.
+  const mixes = ordered.map((key) => bridgeApproachMix(key, spanLength));
+  const propagate = (from: number, to: number) => {
+    const fall = Math.abs(ordered[to] - ordered[from]) * spanLength * CLEARANCE_LIFT_SLOPE;
+    // Taper only while moving toward a ground contact. Toward the main span,
+    // retain the slope limit so a required approach lift cannot become a spike.
+    const taper = mixes[from] > 1e-8 ? Math.min(1, mixes[to] / mixes[from]) : 1;
+    lifts[to] = Math.max(lifts[to], Math.max(0, lifts[from] - fall) * taper);
+  };
+  // Integrate the contact constraint into propagation. Multiplying the final
+  // envelope by the taper afterwards can create dips beside required lifts.
   for (let index = 1; index < lifts.length; index += 1) {
-    const fall = (ordered[index] - ordered[index - 1]) * spanLength * CLEARANCE_LIFT_SLOPE;
-    lifts[index] = Math.max(lifts[index], lifts[index - 1] - fall);
+    propagate(index - 1, index);
   }
   for (let index = lifts.length - 2; index >= 0; index -= 1) {
-    const fall = (ordered[index + 1] - ordered[index]) * spanLength * CLEARANCE_LIFT_SLOPE;
-    lifts[index] = Math.max(lifts[index], lifts[index + 1] - fall);
+    propagate(index + 1, index);
   }
   ordered.forEach((key, index) => stations.set(key, lifts[index]));
   return deck.map((height, index) => height + stations.get(keys[index])!);
@@ -1768,6 +1788,44 @@ export function extendClusterAbutments(cluster: BridgeDrawable[], origin: PlanOr
   const minT = Math.min(...projections);
   const maxT = Math.max(...projections);
   const range = Math.max(1, maxT - minT);
+  if (polygons.length > 0) {
+    // Apply one continuous end stretch to the deck, its holes, and its paint.
+    // Extending only centerlines leaves narrow road/path ribbons beyond the slab.
+    const band = Math.min(ABUTMENT_EXTEND_METRES, range / 4);
+    const cuts = [minT + band, maxT - band];
+    const stretch = (point: PlanPoint): PlanPoint => {
+      const span = projectSpan(point, spanOrigin, axis);
+      const start = Math.max(0, Math.min(1, (minT + band - span) / band));
+      const end = Math.max(0, Math.min(1, (span - maxT + band) / band));
+      const offset = (end - start) * ABUTMENT_EXTEND_METRES;
+      return { east: point.east + axis.east * offset, north: point.north + axis.north * offset };
+    };
+    const stretchPlan = (plan: PlanPoint[], closed: boolean) => {
+      const points: PlanPoint[] = [];
+      for (let index = 0; index < plan.length; index += 1) {
+        const a = plan[index];
+        points.push(stretch(a));
+        if (!closed && index === plan.length - 1) break;
+        const b = plan[(index + 1) % plan.length];
+        const from = projectSpan(a, spanOrigin, axis);
+        const delta = projectSpan(b, spanOrigin, axis) - from;
+        if (Math.abs(delta) < 1e-8) continue;
+        // Preserve the unchanged middle even when a source edge spans the deck.
+        const fractions = cuts.map((cut) => (cut - from) / delta)
+          .filter((fraction) => fraction > 1e-8 && fraction < 1 - 1e-8).sort((a, b) => a - b);
+        for (const fraction of fractions) points.push(stretch({
+          east: a.east + (b.east - a.east) * fraction,
+          north: a.north + (b.north - a.north) * fraction,
+        }));
+      }
+      return points;
+    };
+    return cluster.map((drawable) => {
+      const plan = stretchPlan(drawable.plan, drawable.kind === 'polygon');
+      return { ...drawable, plan, coordinates: plan.map((point) => planToLngLat(point, origin)),
+        holes: drawable.holes?.map((hole) => stretchPlan(hole, true)) };
+    });
+  }
   const atAbutment = (point: PlanPoint) => {
     const t = (projectSpan(point, spanOrigin, axis) - minT) / range;
     return t <= 0.16 || t >= 0.84;
@@ -3385,6 +3443,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
         });
         deckPositions.needsUpdate = true;
         shadowPositions.needsUpdate = true;
+        fadeBridgeShadowGeometry(resource.shadow.geometry, bridge.surface);
         resource.deck.geometry.computeVertexNormals();
         this.updateFasciaGeometry(resource, bridge);
         resource.heights = heights;
@@ -3414,6 +3473,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
     const deckGeometry = texturedIndexedGeometry(deckPoints, plan, paintBridge.bounds, bridge.indices);
     const shadowGeometry = texturedIndexedGeometry(groundPoints, plan, paintBridge.bounds, bridge.indices);
+    if (shadowGeometry) fadeBridgeShadowGeometry(shadowGeometry, bridge.surface);
     if (!deckGeometry || !shadowGeometry) {
       deckGeometry?.dispose();
       shadowGeometry?.dispose();
@@ -3444,6 +3504,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const shadowMaterial = new THREE.MeshBasicMaterial({
       map: shadowTexture,
       color: CARTOON_SHADOW_COLOR,
+      vertexColors: true,
       transparent: true,
       opacity: BRIDGE_SHADOW_OPACITY * (1 - night * 0.65),
       depthTest: false,
@@ -3840,6 +3901,23 @@ export function bridgeTextureSections(bridge: SampledBridge, maxSections = MAX_T
       bridge: { ...bridge, surface, indices: localIndices, bounds: planBounds(surface, 2), texturePixelBudget },
       paintBridge: { ...paintBridge, surface: projected, indices: localIndices, bounds, texturePixelBudget } }];
   });
+}
+
+function fadeBridgeShadowGeometry(
+  geometry: THREE.BufferGeometry,
+  surface: Array<{ ground: number; deck: number }>,
+) {
+  const count = geometry.getAttribute('position').count;
+  const colors = new Float32Array(count * 4);
+  for (let index = 0; index < count; index += 1) {
+    const point = surface[index];
+    const strength = point ? bridgeShadowEndFade(point.deck - point.ground) : 1;
+    colors[index * 4] = 1;
+    colors[index * 4 + 1] = 1;
+    colors[index * 4 + 2] = 1;
+    colors[index * 4 + 3] = strength;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4));
 }
 
 function texturedIndexedGeometry(
