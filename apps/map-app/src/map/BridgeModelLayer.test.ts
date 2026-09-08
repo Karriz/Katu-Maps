@@ -6,6 +6,10 @@ import {
   bridgeArchMetres,
   bridgeApproachMix,
   bridgeSurfaceClearance,
+  bridgeWallBottom,
+  bridgeBoundaryEdges,
+  bridgeFasciaEdges,
+  bridgeFasciaPositions,
   refineBridgeApproaches,
   refineBridgeSpan,
   terrainClearedDeck,
@@ -20,6 +24,9 @@ import {
   bridgeSurfaceStrip,
   bridgeWidthMetres,
   clusterBridgeDrawables,
+  BRIDGE_SHADOW_HOVER_METRES,
+  BRIDGE_SHADOW_OPACITY,
+  inflatePlanPoints,
   clusterOutline,
   clusterSurfaces,
   deckAreaAllowed,
@@ -355,6 +362,55 @@ describe('linePartsFromGeometry', () => {
         [[23.7620, 61.4980], [23.7630, 61.4980]],
       ],
     })).toHaveLength(2);
+  });
+});
+
+describe('bridge fascia and abutments', () => {
+  const ribbon = lineRibbonMesh([{ east: 0, north: 0 }, { east: 80, north: 0 }], 8);
+
+  it('keeps only exterior edges of a ribbon', () => {
+    const edges = bridgeBoundaryEdges(ribbon.indices);
+    expect(edges.length).toBeGreaterThan(0);
+    expect(edges.every(([a, b]) => a !== b)).toBe(true);
+    expect(bridgeFasciaEdges(ribbon.points, ribbon.indices).length).toBe(edges.length);
+  });
+
+  it('uses a short fascia at mid-span and buries the walls into terrain at the abutments', () => {
+    expect(bridgeWallBottom(10, 0, 0.5, 80)).toBeCloseTo(9.4);
+    expect(bridgeWallBottom(0.06, 0, 0, 80)).toBeCloseTo(-0.85);
+    expect(bridgeWallBottom(0.06, 0, 1, 80)).toBeCloseTo(-0.85);
+    expect(bridgeWallBottom(8, 0, undefined, 80)).toBeCloseTo(7.4);
+    expect(bridgeWallBottom(0.05, 0, 0.5, 80)).toBeCloseTo(-0.55);
+  });
+
+  it('extrudes each boundary edge as an outward wall', () => {
+    const points = ribbon.points.map((point, index) => ({
+      east: point.east, north: point.north, up: ribbon.t[index] === 0 || ribbon.t[index] === 1 ? 0.06 : 10,
+    }));
+    const t = ribbon.t;
+    const bottoms = points.map((point, index) => bridgeWallBottom(point.up, 0, t[index], 80));
+    const edges = bridgeFasciaEdges(ribbon.points, ribbon.indices);
+    const positions = bridgeFasciaPositions(points, bottoms, edges);
+    expect(positions.length).toBe(edges.length * 12);
+    const end = edges.findIndex(([a, b]) => t[a] === 0 && t[b] === 0);
+    expect(end).toBeGreaterThanOrEqual(0);
+    expect(positions[end * 12 + 7]).toBeCloseTo(-0.85);
+    const mid = edges.findIndex(([a, b]) => Math.min(t[a], t[b]) <= 0.5 && Math.max(t[a], t[b]) >= 0.5);
+    expect(mid).toBeGreaterThanOrEqual(0);
+    expect(positions[mid * 12 + 1]).toBeGreaterThan(9);
+    expect(Math.min(positions[mid * 12 + 7], positions[mid * 12 + 10])).toBeGreaterThan(8.5);
+  });
+});
+
+describe('bridge shadows', () => {
+  it('grows the ground footprint so a blurred silhouette can fade out', () => {
+    const inflated = inflatePlanPoints([
+      { east: -10, north: -2 }, { east: 10, north: -2 },
+      { east: 10, north: 2 }, { east: -10, north: 2 },
+    ], 2);
+    expect(Math.hypot(inflated[1].east, inflated[1].north))
+      .toBeGreaterThan(Math.hypot(10, 2));
+    expect(inflatePlanPoints([{ east: 0, north: 0 }], 2)).toEqual([{ east: 0, north: 0 }]);
   });
 });
 
@@ -694,6 +750,24 @@ describe('clustered bridge decks', () => {
     expect(next?.plan).toEqual(sidePath.plan);
   });
 
+  it('overlaps cycleways and roads onto the connecting ground at the abutments', () => {
+    const origin = planOriginFromLngLat(23.76, 61.498);
+    const extended = extendClusterAbutments([deck, road, path], origin);
+    const nextRoad = extended.find((drawable) => drawable.kind === 'line' && drawable.properties.className === 'primary');
+    const nextPath = extended.find((drawable) => drawable.kind === 'line' && drawable.properties.className === 'path');
+    expect(nextRoad?.plan[0].east).toBeCloseTo(-10);
+    expect(nextRoad?.plan[nextRoad.plan.length - 1].east).toBeCloseTo(90);
+    expect(nextPath?.plan[0].east).toBeCloseTo(-10);
+    expect(nextPath?.plan[nextPath.plan.length - 1].east).toBeCloseTo(90);
+    const surfaces = clusterSurfaces(extended);
+    expect(surfaces[0].outer).toEqual(deck.plan);
+    expect(shouldMeshClusterLines(
+      extended.filter((drawable) => drawable.kind === 'line'),
+      extended.filter((drawable) => drawable.kind === 'polygon'),
+      surfaces,
+    )).toBe(false);
+  });
+
   it('keeps interchange ramps as separate spans', () => {
     const trunk: BridgeDrawable = {
       ...road,
@@ -898,6 +972,35 @@ describe('clustered bridge decks', () => {
     expect(canvas.width).toBeGreaterThan(16);
     expect(canvas.height).toBeGreaterThan(8);
   });
+
+  it('keeps path paint on the deck and on abutment overlaps', () => {
+    if (typeof document === 'undefined') return;
+    const pathPlan = [{ east: -20, north: 6 }, { east: 100, north: 6 }];
+    const bounds = planBounds([...deck.plan, ...pathPlan], 2);
+    const canvas = paintBridgeCluster(
+      [{ outer: deck.plan, holes: [] }],
+      [
+        { kind: 'polygon', plan: deck.plan, width: 0, fill: '#f1efe7', edge: '#87918d' },
+        { kind: 'line', plan: pathPlan, width: 2.5, fill: '#e8ddd6', edge: '#b99a91' },
+      ],
+      bounds,
+    );
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const spanEast = Math.max(1, bounds.maxEast - bounds.minEast);
+    const spanNorth = Math.max(1, bounds.maxNorth - bounds.minNorth);
+    const sample = (east: number, north: number) => {
+      const x = Math.floor((east - bounds.minEast) / spanEast * canvas.width);
+      const y = Math.floor((bounds.maxNorth - north) / spanNorth * canvas.height);
+      return context.getImageData(x, y, 1, 1).data;
+    };
+    const onDeck = sample(40, 6);
+    const overlap = sample(-12, 6);
+    expect(onDeck[3]).toBeGreaterThan(80);
+    expect(onDeck[0]).toBeLessThan(235);
+    expect(overlap[3]).toBeGreaterThan(80);
+    expect(overlap[0]).toBeLessThan(235);
+  });
 });
 
 describe('bridge support placement', () => {
@@ -1031,7 +1134,7 @@ describe('BridgeModelLayer', () => {
     const texture = new THREE.Texture();
     const geometry = new THREE.BufferGeometry();
     const deckMaterial = new THREE.MeshBasicMaterial({ map: texture });
-    const shadowMaterial = new THREE.MeshBasicMaterial({ map: texture, opacity: 0.32, depthWrite: false });
+    const shadowMaterial = new THREE.MeshBasicMaterial({ map: texture, opacity: BRIDGE_SHADOW_OPACITY, depthWrite: false });
     (layer as any).decks.add(new THREE.Mesh(geometry, deckMaterial), new THREE.Mesh(geometry, shadowMaterial));
     const rebuild = vi.spyOn(layer as any, 'writeMeshes');
     const dispose = vi.spyOn(texture, 'dispose');
@@ -1039,14 +1142,14 @@ describe('BridgeModelLayer', () => {
 
     layer.setDayNightLighting(lighting);
     expect(deckMaterial.color.r).toBe(1);
-    expect(shadowMaterial.opacity).toBeCloseTo(0.32 * 0.35);
+    expect(shadowMaterial.opacity).toBeCloseTo(BRIDGE_SHADOW_OPACITY * 0.35);
     layer.setDayNightLighting(lighting);
     expect(map.triggerRepaint).toHaveBeenCalledTimes(1);
     layer.setDayNightLighting(null);
     layer.setDayNightLighting(null);
     expect(map.triggerRepaint).toHaveBeenCalledTimes(2);
     expect(deckMaterial.color.r).toBe(1);
-    expect(shadowMaterial.opacity).toBe(0.32);
+    expect(shadowMaterial.opacity).toBe(BRIDGE_SHADOW_OPACITY);
     layer.setTheme(true);
     layer.setTheme(true);
     expect(map.triggerRepaint).toHaveBeenCalledTimes(3);
@@ -1315,8 +1418,12 @@ describe('BridgeModelLayer', () => {
       expect(deck.geometry).toBe(geometry);
       expect((deck.material as THREE.MeshLambertMaterial).map).toBe(texture);
       expect(geometry.getAttribute('position').getY(0) + deck.position.y).toBeCloseTo(12);
-      expect(shadow.geometry.getAttribute('position').getY(0) + shadow.position.y).toBeCloseTo(1.12);
+      expect(shadow.geometry.getAttribute('position').getY(0) + shadow.position.y)
+        .toBeCloseTo(1 + BRIDGE_SHADOW_HOVER_METRES);
       expect(layer.getPerformanceStats()).toMatchObject({ built: 1, reused: 2, heightUpdates: 1 });
+      const fascia = deck.children[0] as THREE.Mesh;
+      expect(fascia).toBeTruthy();
+      expect(fascia.geometry.getAttribute('position').count).toBeGreaterThan(0);
     });
   });
 

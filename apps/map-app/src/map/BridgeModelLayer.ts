@@ -51,6 +51,9 @@ const MIN_POLYGON_MESH_AREA_METRES = 80;
 const PARALLEL_BUNDLE_DOT = 0.9;
 const DECK_WATER_CLEARANCE_METRES = 0.7;
 const ABUTMENT_EXTEND_METRES = 10;
+const FASCIA_METRES = 0.6;
+const ABUTMENT_BURY_METRES = 0.85;
+const MIN_FASCIA_EDGE_METRES = 0.12;
 const POLYGON_SPAN_GAP_METRES = 22;
 const MAX_ELONGATED_DECK_AREA_METRES = 50_000;
 const ELONGATED_DECK_MIN_SPAN_METRES = 150;
@@ -65,6 +68,10 @@ const PIER_CLEARANCE_METERS = 5;
 const PIER_SPACING_METERS = 28;
 const PIER_END_MARGIN = 0.16;
 const SHADOW_OFFSET_METERS = 2.8;
+const SHADOW_INFLATE_METRES = 1.6;
+const SHADOW_BLUR_METRES = 3;
+export const BRIDGE_SHADOW_HOVER_METRES = 0.55;
+export const BRIDGE_SHADOW_OPACITY = 0.2;
 const MAX_CANVAS_LONG = 2048;
 const MAX_CANVAS_SHORT = 512;
 const MAX_CANVAS_PIXELS_PER_METRE = 6;
@@ -91,6 +98,7 @@ const RAIL_EDGE = '#6f7874';
 const PATH_EDGE = '#d8d4ca';
 const CYCLEWAY_EDGE = '#b99a91';
 const PIER_COLOR = new THREE.Color('#a6ada8');
+const FASCIA_COLOR = new THREE.Color('#8c9692');
 
 export type BridgeViewState = {
   west: number;
@@ -152,6 +160,7 @@ type SampledPoint = {
   deck: number;
   east: number;
   north: number;
+  t?: number;
 };
 
 export type BridgePaintPart = {
@@ -177,6 +186,8 @@ type SampledBridge = {
 
 type BridgeResources = {
   deck: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  fascia?: THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>;
+  fasciaEdges?: Array<[number, number]>;
   paintBridge: SampledBridge;
   paintSignature: string;
   shadow: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
@@ -192,6 +203,38 @@ type LocalPoint = {
 };
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
+
+export function inflatePlanPoints<T extends PlanPoint>(points: T[], metres: number) {
+  if (points.length === 0 || metres === 0) return points;
+  const origin = {
+    east: points.reduce((sum, point) => sum + point.east, 0) / points.length,
+    north: points.reduce((sum, point) => sum + point.north, 0) / points.length,
+  };
+  return points.map((point) => {
+    const east = point.east - origin.east;
+    const north = point.north - origin.north;
+    const length = Math.hypot(east, north);
+    if (length < 1e-6) return point;
+    const scale = (length + metres) / length;
+    return { ...point, east: origin.east + east * scale, north: origin.north + north * scale };
+  });
+}
+
+export function softenBridgeShadowCanvas(source: HTMLCanvasElement, blurPixels: number) {
+  if (blurPixels <= 0 || source.width < 2 || source.height < 2) return source;
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const context = canvas.getContext('2d');
+  if (!context || typeof context.filter !== 'string') return source;
+  context.filter = `blur(${Math.max(1, Math.round(blurPixels))}px)`;
+  context.drawImage(source, 0, 0);
+  context.filter = 'none';
+  context.globalCompositeOperation = 'source-in';
+  context.fillStyle = '#000';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas;
+}
 
 export function viewportSpanMeters(bounds: {
   west: number;
@@ -588,6 +631,53 @@ export function bridgeApproachMix(t: number, spanLength: number) {
 export function bridgeSurfaceClearance(t: number, spanLength: number) {
   // A small offset avoids coplanar flicker where the deck meets the draped road.
   return 0.06 + (DECK_WATER_CLEARANCE_METRES - 0.06) * bridgeApproachMix(t, spanLength);
+}
+
+export function bridgeWallBottom(deck: number, ground: number, t: number | undefined, spanLength: number) {
+  const mix = t === undefined ? 1 : bridgeApproachMix(t, spanLength);
+  const bottom = (deck - FASCIA_METRES) * mix + (ground - ABUTMENT_BURY_METRES) * (1 - mix);
+  return Math.min(bottom, deck - 0.08);
+}
+
+/** Oriented boundary edges, walking each triangle so the exterior stays to the right. */
+export function bridgeBoundaryEdges(indices: number[]) {
+  const unpaired = new Map<string, [number, number]>();
+  for (let index = 0; index < indices.length; index += 3) {
+    const corners = [indices[index], indices[index + 1], indices[index + 2]];
+    for (let edge = 0; edge < 3; edge += 1) {
+      const a = corners[edge];
+      const b = corners[(edge + 1) % 3];
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (unpaired.has(key)) unpaired.delete(key);
+      else unpaired.set(key, [a, b]);
+    }
+  }
+  return [...unpaired.values()];
+}
+
+export function bridgeFasciaEdges(points: PlanPoint[], indices: number[]) {
+  return bridgeBoundaryEdges(indices).filter(([a, b]) => {
+    const east = points[b].east - points[a].east;
+    const north = points[b].north - points[a].north;
+    return Math.hypot(east, north) >= MIN_FASCIA_EDGE_METRES;
+  });
+}
+
+export function bridgeFasciaPositions(
+  tops: Array<{ east: number; north: number; up: number }>,
+  bottoms: number[],
+  edges: Array<[number, number]>,
+) {
+  const positions: number[] = [];
+  for (const [a, b] of edges) {
+    positions.push(
+      tops[a].east, tops[a].up, tops[a].north,
+      tops[b].east, tops[b].up, tops[b].north,
+      tops[b].east, bottoms[b], tops[b].north,
+      tops[a].east, bottoms[a], tops[a].north,
+    );
+  }
+  return positions;
 }
 
 /** Raise only obstructed sections, spreading lift along the span without lowering clearance. */
@@ -1247,11 +1337,27 @@ function polygonWidthMetres(outer: PlanPoint[]) {
 function lineMostlyCoveredByPolygons(line: BridgeDrawable, polygons: BridgeDrawable[]) {
   const samples = densifyPlanLine(line.plan, SAMPLE_SPACING_METERS);
   if (samples.length === 0) return false;
+  const total = planLineLength(line.plan);
+  let distance = 0;
+  const interior = samples.filter((point, index) => {
+    if (index > 0) {
+      distance += Math.hypot(point.east - samples[index - 1].east, point.north - samples[index - 1].north);
+    }
+    return distance >= ABUTMENT_EXTEND_METRES && distance <= total - ABUTMENT_EXTEND_METRES;
+  });
+  const check = interior.length >= 2 ? interior : samples;
   const reach = Math.max(2, line.width / 2 + 1.5);
-  const covered = samples.filter((point) => (
+  const covered = check.filter((point) => (
     polygons.some((polygon) => coveredByPolygon(point, polygon, reach))
   )).length;
-  return covered >= Math.ceil(samples.length * 0.8);
+  return covered >= Math.ceil(check.length * 0.8);
+}
+
+function clusterRoadSpanMetres(lines: BridgeDrawable[]) {
+  const roads = lines.filter((line) => !isPathClass(line.properties.className));
+  const usable = roads.length > 0 ? roads : lines;
+  if (usable.length === 0) return 0;
+  return Math.max(...usable.map((line) => lineLengthMetres(line.coordinates)));
 }
 
 function polygonLooksLikeWideDeck(polygons: BridgeDrawable[], lines: BridgeDrawable[]) {
@@ -1260,9 +1366,7 @@ function polygonLooksLikeWideDeck(polygons: BridgeDrawable[], lines: BridgeDrawa
   if (lines.length > 0 && lines.every((line) => lineMostlyCoveredByPolygons(line, polygons))) return true;
   const width = Math.max(...polygons.map((polygon) => polygonWidthMetres(polygon.plan)));
   const polygonSpan = surfaceSpanLength(polygons.map(deckSurfaceFromPolygon));
-  const lineSpan = lines.length > 0
-    ? Math.max(...lines.map((line) => lineLengthMetres(line.coordinates)))
-    : 0;
+  const lineSpan = clusterRoadSpanMetres(lines);
   if (lineSpan > polygonSpan + 30 && lineSpan > polygonSpan * 1.2) return false;
   if (width >= 14) return true;
   if (width >= 8 && (lines.length === 0 || lineSpan <= polygonSpan * 1.45)) return true;
@@ -1536,8 +1640,11 @@ export function shouldMeshClusterLines(
   if (polygonLooksLikeWideDeck(polygons, lines)) return false;
   if (compactPathJunctionSurface([...polygons, ...lines])) return false;
   if (polygons.length === 0) return true;
-  if (lines.length >= 2 && !linesDiverge(lines)) return true;
-  const lineSpan = Math.max(...lines.map((line) => lineLengthMetres(line.coordinates)));
+  const roads = lines.filter((line) => !isPathClass(line.properties.className));
+  // Parallel walkways on a mapped deck must not replace that deck with ribbons.
+  if (roads.length >= 2 && !linesDiverge(roads)) return true;
+  if (roads.length === 0 && lines.length >= 2 && !linesDiverge(lines)) return true;
+  const lineSpan = clusterRoadSpanMetres(lines);
   const polygonSpan = surfaceSpanLength(surfaces);
   if (lineSpan > polygonSpan + 30 && lineSpan > polygonSpan * 1.2) return true;
   const area = polygons.reduce((sum, polygon) => sum + drawableArea(polygon), 0);
@@ -1634,6 +1741,7 @@ export function extendClusterAbutments(cluster: BridgeDrawable[], origin: PlanOr
     : lines.flatMap((line) => line.plan);
   if (axisSource.length < 2) return cluster;
   const longest = lines
+    .filter((line) => polygons.length === 0 || !isPathClass(line.properties.className))
     .slice()
     .sort((left, right) => lineLengthMetres(right.coordinates) - lineLengthMetres(left.coordinates))[0];
   const preferred = longest
@@ -1652,9 +1760,16 @@ export function extendClusterAbutments(cluster: BridgeDrawable[], origin: PlanOr
     const t = (projectSpan(point, spanOrigin, axis) - minT) / range;
     return t <= 0.16 || t >= 0.84;
   };
+  const alongSpan = (plan: PlanPoint[]) => {
+    if (plan.length < 2) return false;
+    const heading = lineHeading(plan);
+    return Math.abs(heading.east * axis.east + heading.north * axis.north) >= 0.72;
+  };
   return cluster.map((drawable) => {
     if (drawable.kind !== 'line' || drawable.plan.length < 2) return drawable;
-    if (polygons.length > 0 && isPathClass(drawable.properties.className)) return drawable;
+    // Keep side exits in place; bike/footways that run with the span still
+    // need the same ground overlap as the carriageway.
+    if (!alongSpan(drawable.plan)) return drawable;
     const extendStart = atAbutment(drawable.plan[0]);
     const extendEnd = atAbutment(drawable.plan[drawable.plan.length - 1]);
     if (!extendStart && !extendEnd) return drawable;
@@ -1990,18 +2105,19 @@ export function paintBridgeCluster(
     fillPlanPolygon(context, part.plan, bounds, scale, colors.fill, colors.edge, 1.15, part.holes ?? []);
   }
   for (const part of lines) {
-    const clipToDeck = paintFilledDecks && (part.fill === PATH_FILL || part.fill === CYCLEWAY_FILL);
-    if (clipToDeck) {
+    const pathPaint = part.fill === PATH_FILL || part.fill === CYCLEWAY_FILL;
+    const envelope = pathPaint ? offsetPolyline(part.plan, part.width / 2 + 1.25) : [];
+    if (paintFilledDecks && envelope.length >= 3) {
       context.save();
       context.beginPath();
-      for (const surface of surfaces) {
-        tracePlanRing(context, surface.outer, bounds, scale);
-      }
+      // Clip to the walkway ribbon only. Union with the deck polygon can
+      // cancel the overlap (opposite winding) and erase the on-deck stripe.
+      tracePlanRing(context, envelope, bounds, scale);
       context.clip();
     }
     const colors = resolve(part);
     strokePlanLine(context, part.plan, bounds, scale, part.width, colors.fill, colors.edge);
-    if (clipToDeck) context.restore();
+    if (paintFilledDecks && envelope.length >= 3) context.restore();
   }
   // Paint from complete centerlines so section boundaries never restart the rails.
   for (const part of lines) {
@@ -3012,6 +3128,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
         deck: deck[index],
         east: point.east,
         north: point.north,
+        t: meshT[index],
       })),
       indices: meshIndices,
       parts: cluster.map((drawable) => {
@@ -3190,11 +3307,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
         const shadowPositions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
         bridge.surface.forEach((point, index) => {
           deckPositions.setY(index, point.deck - resource!.elevation);
-          shadowPositions.setY(index, point.ground - resource!.elevation + 0.12);
+          shadowPositions.setY(index, point.ground - resource!.elevation + BRIDGE_SHADOW_HOVER_METRES);
         });
         deckPositions.needsUpdate = true;
         shadowPositions.needsUpdate = true;
         resource.deck.geometry.computeVertexNormals();
+        this.updateFasciaGeometry(resource, bridge);
         resource.heights = heights;
         this.performanceStats.heightUpdates += 1;
       }
@@ -3206,24 +3324,17 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const shadowEast = -Math.sin(azimuth) * SHADOW_OFFSET_METERS;
     const shadowNorth = -Math.cos(azimuth) * SHADOW_OFFSET_METERS;
     const canvas = this.paintDeck(paintBridge);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.flipY = false;
-    texture.generateMipmaps = true;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = Math.min(8, this.renderer?.capabilities.getMaxAnisotropy() ?? 1);
-    texture.needsUpdate = true;
+    const texture = this.createDeckTexture(canvas);
+    const shadowTexture = this.createDeckTexture(this.shadowCanvas(canvas, paintBridge.bounds));
 
     const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
-    const groundPoints = bridge.surface.map((point) => this.toLocal(
-      point.longitude,
-      point.latitude,
-      point.ground,
-    )).map((point) => ({
+    const groundPoints = inflatePlanPoints(
+      bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.ground)),
+      SHADOW_INFLATE_METRES,
+    ).map((point) => ({
       east: point.east + shadowEast,
       north: point.north + shadowNorth,
-      up: point.up + 0.12,
+      up: point.up + BRIDGE_SHADOW_HOVER_METRES,
     }));
     const plan = paintBridge.surface;
 
@@ -3233,6 +3344,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       deckGeometry?.dispose();
       shadowGeometry?.dispose();
       texture.dispose();
+      shadowTexture.dispose();
       return;
     }
 
@@ -3249,25 +3361,31 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
     const deckMesh = new THREE.Mesh(deckGeometry, deckMaterial);
     deckMesh.frustumCulled = false;
+    deckMesh.renderOrder = 1;
+    const fascia = this.createFasciaMesh(bridge, deckPoints, this.sceneOriginElevation);
+    if (fascia) {
+      fascia.mesh.renderOrder = 1;
+      deckMesh.add(fascia.mesh);
+    }
     const shadowMaterial = new THREE.MeshBasicMaterial({
-      map: texture,
+      map: shadowTexture,
       color: CARTOON_SHADOW_COLOR,
       transparent: true,
-      opacity: 0.32 * (1 - night * 0.65),
-      alphaTest: 0.2,
+      opacity: BRIDGE_SHADOW_OPACITY * (1 - night * 0.65),
+      depthTest: false,
       depthWrite: false,
       side: THREE.DoubleSide,
       forceSinglePass: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
     });
     const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
     shadowMesh.frustumCulled = false;
+    shadowMesh.renderOrder = -1;
 
     this.bridgeResources.set(key, {
       paintBridge,
       paintSignature: this.paintSignature,
-      deck: deckMesh, shadow: shadowMesh, origin: this.sceneOrigin,
+      deck: deckMesh, fascia: fascia?.mesh, fasciaEdges: fascia?.edges,
+      shadow: shadowMesh, origin: this.sceneOrigin,
       elevation: this.sceneOriginElevation, heights,
     });
     this.performanceStats.built += 1;
@@ -3288,12 +3406,87 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (this.pierMesh) position(this.pierMesh, this.pierOrigin, this.pierOriginElevation);
   }
 
+  private createFasciaMesh(
+    bridge: SampledBridge,
+    deckPoints: LocalPoint[],
+    originElevation: number,
+  ) {
+    const edges = bridgeFasciaEdges(bridge.surface, bridge.indices);
+    const geometry = this.fasciaGeometry(bridge, deckPoints, edges, originElevation);
+    if (!geometry) return undefined;
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({
+      color: FASCIA_COLOR,
+      flatShading: true,
+      transparent: true,
+    }));
+    mesh.frustumCulled = false;
+    return { mesh, edges };
+  }
+
+  private fasciaGeometry(
+    bridge: SampledBridge,
+    deckPoints: LocalPoint[],
+    edges: Array<[number, number]>,
+    originElevation: number,
+  ) {
+    if (edges.length === 0) return undefined;
+    const bottoms = bridge.surface.map((point) => (
+      bridgeWallBottom(point.deck, point.ground, point.t, bridge.spanLength) - originElevation
+    ));
+    const positions = bridgeFasciaPositions(deckPoints, bottoms, edges);
+    const indices: number[] = [];
+    for (let edge = 0; edge < edges.length; edge += 1) {
+      const vertex = edge * 4;
+      indices.push(vertex, vertex + 1, vertex + 2, vertex, vertex + 2, vertex + 3);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+
+  private updateFasciaGeometry(resource: BridgeResources, bridge: SampledBridge) {
+    const fascia = resource.fascia;
+    const edges = resource.fasciaEdges;
+    if (!fascia || !edges) return;
+    const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
+    const geometry = this.fasciaGeometry(bridge, deckPoints, edges, resource.elevation);
+    if (!geometry) return;
+    fascia.geometry.dispose();
+    fascia.geometry = geometry;
+  }
+
   private disposeResource(resource: BridgeResources) {
+    resource.fascia?.geometry.dispose();
+    if (resource.fascia) {
+      resource.fascia.material.dispose();
+      resource.deck.remove(resource.fascia);
+    }
     resource.deck.geometry.dispose();
     resource.shadow.geometry.dispose();
     resource.deck.material.map?.dispose();
+    resource.shadow.material.map?.dispose();
     resource.deck.material.dispose();
     resource.shadow.material.dispose();
+  }
+
+  private createDeckTexture(canvas: HTMLCanvasElement) {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = false;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(8, this.renderer?.capabilities.getMaxAnisotropy() ?? 1);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private shadowCanvas(source: HTMLCanvasElement, bounds: PlanBounds) {
+    const span = Math.max(1, bounds.maxEast - bounds.minEast, bounds.maxNorth - bounds.minNorth);
+    const metresPerPixel = span / Math.max(source.width, source.height, 1);
+    return softenBridgeShadowCanvas(source, SHADOW_BLUR_METRES / metresPerPixel);
   }
 
   private clearDeckGroup() {
@@ -3466,15 +3659,18 @@ export class BridgeModelLayer implements CustomLayerInterface {
       for (const material of materials) material.opacity = this.bridgeOpacity;
     }
     const deckNight = Math.max(this.darkMode ? 0.45 : 0, this.nightMix);
-    for (const child of this.decks.children) {
-      if (!(child instanceof THREE.Mesh)) continue;
-      const material = child.material;
-      if (material instanceof THREE.MeshBasicMaterial && !material.depthWrite) {
-        material.opacity = 0.32 * (1 - deckNight * 0.65) * this.bridgeOpacity;
-      } else if (material instanceof THREE.MeshBasicMaterial) {
-        material.opacity = this.bridgeOpacity;
+    const apply = (object: THREE.Object3D) => {
+      if (object instanceof THREE.Mesh) {
+        const material = object.material;
+        if (material instanceof THREE.MeshBasicMaterial && !material.depthWrite) {
+          material.opacity = BRIDGE_SHADOW_OPACITY * (1 - deckNight * 0.65) * this.bridgeOpacity;
+        } else if (material instanceof THREE.MeshBasicMaterial || material instanceof THREE.MeshLambertMaterial) {
+          material.opacity = this.bridgeOpacity;
+        }
       }
-    }
+      for (const child of object.children) apply(child);
+    };
+    apply(this.decks);
   }
 }
 
