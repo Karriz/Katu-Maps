@@ -72,6 +72,9 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) 
   });
   setPaint(map, 'global-railway-bed', 'line-color', `#${new Color(RAIL_BED_DAY).lerp(new Color(RAIL_BED_NIGHT), night).getHexString()}`);
   setPaint(map, 'global-railway-sleepers', 'line-color', `#${new Color(RAIL_SLEEPER_DAY).lerp(new Color(RAIL_SLEEPER_NIGHT), night).getHexString()}`);
+  // Building colors now use per-building color expressions from properties
+  // We still apply the theme colors as fallbacks, but the expressions will
+  // use property-based colors when available
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
     setPaint(map, id, 'fill-color', colors.building);
     setPaint(map, id, 'fill-outline-color', colors.boundary);
