@@ -55,18 +55,18 @@ const PALETTE_SIZE = BUILDING_COLOR_PALETTE.length;
  */
 export function buildingColorExpression(): ExpressionSpecification {
   // match expression: ['match', input, case1, result1, case2, result2, ..., default]
-  const expr: ExpressionSpecification = ['match', ['%', ['id'], PALETTE_SIZE]] as ExpressionSpecification;
+  const expr: Array<unknown> = ['match', ['%', ['id'], PALETTE_SIZE]];
   
   // Add color for each index: [index, color, index, color, ...]
   for (let i = 0; i < PALETTE_SIZE; i++) {
-    (expr as Array<unknown>).push(i);
-    (expr as Array<unknown>).push(BUILDING_COLOR_PALETTE[i]);
+    expr.push(i);
+    expr.push(BUILDING_COLOR_PALETTE[i]);
   }
   
   // Default fallback
-  (expr as Array<unknown>).push(BASE_BUILDING_COLOR);
+  expr.push(BASE_BUILDING_COLOR);
   
-  return expr;
+  return expr as unknown as ExpressionSpecification;
 }
 
 /**
