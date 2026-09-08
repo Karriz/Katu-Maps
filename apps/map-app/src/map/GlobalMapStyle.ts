@@ -188,33 +188,52 @@ const PIER_LINE_FILTER: ExpressionSpecification = [
   ['==', ['get', 'class'], 'pier'],
 ] as ExpressionSpecification;
 
+const CLOSEUP_ROAD_GRAY = '#cfd3d8';
+const CLOSEUP_ROAD_CASING = '#ffffff';
+
 const ROAD_COLOR: ExpressionSpecification = [
-  'case',
-  ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa',
-  [
-    'match', ['get', 'class'],
-    'motorway', '#f9f7ef',
-    'trunk', '#f8f6ee',
-    'primary', MAP_COLORS.road,
-    'secondary', '#f5f3ec',
-    'tertiary', '#f4f2eb',
-    'service', '#f3f1ea',
-    '#f4f2eb',
+  'interpolate', ['linear'], ['zoom'],
+  13, [
+    'case',
+    ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa',
+    [
+      'match', ['get', 'class'],
+      'motorway', '#f9f7ef',
+      'trunk', '#f8f6ee',
+      'primary', MAP_COLORS.road,
+      'secondary', '#f5f3ec',
+      'tertiary', '#f4f2eb',
+      'service', '#f3f1ea',
+      '#f4f2eb',
+    ],
+  ],
+  15.5, [
+    'case',
+    ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa',
+    CLOSEUP_ROAD_GRAY,
   ],
 ] as ExpressionSpecification;
 
 const BRIDGE_ROAD_COLOR: ExpressionSpecification = [
-  'case',
-  ['==', ['get', 'surface'], 'unpaved'], '#d3c4a5',
-  [
-    'match', ['get', 'class'],
-    'motorway', '#f4f2ea',
-    'trunk', '#f3f1e9',
-    'primary', '#f2f0e8',
-    'secondary', '#f1efe7',
-    'tertiary', '#f0eee6',
-    'service', '#efede5',
-    '#f1efe7',
+  'interpolate', ['linear'], ['zoom'],
+  13, [
+    'case',
+    ['==', ['get', 'surface'], 'unpaved'], '#d3c4a5',
+    [
+      'match', ['get', 'class'],
+      'motorway', '#f4f2ea',
+      'trunk', '#f3f1e9',
+      'primary', '#f2f0e8',
+      'secondary', '#f1efe7',
+      'tertiary', '#f0eee6',
+      'service', '#efede5',
+      '#f1efe7',
+    ],
+  ],
+  15.5, [
+    'case',
+    ['==', ['get', 'surface'], 'unpaved'], '#d3c4a5',
+    CLOSEUP_ROAD_GRAY,
   ],
 ] as ExpressionSpecification;
 
@@ -1215,11 +1234,21 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: BRIDGE_AREA_FILTER,
       paint: {
         'fill-color': [
-          'match', ['get', 'class'],
-          'rail', '#c8ceca',
-          'transit', '#c8ceca',
-          'path', '#ded9cd',
-          '#d8dad4',
+          'interpolate', ['linear'], ['zoom'],
+          13, [
+            'match', ['get', 'class'],
+            'rail', '#c8ceca',
+            'transit', '#c8ceca',
+            'path', '#ded9cd',
+            '#d8dad4',
+          ],
+          15.5, [
+            'match', ['get', 'class'],
+            'rail', '#c8ceca',
+            'transit', '#c8ceca',
+            'path', '#ded9cd',
+            CLOSEUP_ROAD_GRAY,
+          ],
         ],
         'fill-opacity': 0.98,
       },
@@ -1380,7 +1409,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        'line-color': MAP_COLORS.roadCasing,
+        'line-color': [
+          'interpolate', ['linear'], ['zoom'],
+          13, MAP_COLORS.roadCasing,
+          15.5, CLOSEUP_ROAD_CASING,
+        ],
         'line-width': roadWidthExpression(61.4981, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.78],
       },
@@ -1437,8 +1470,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        // A dark deck rim separates the bridge from the road or water below.
-        'line-color': '#87918d',
+        // A dark deck rim separates the bridge from the road or water below,
+        // easing to a white casing at close zoom to match surface roads.
+        'line-color': [
+          'interpolate', ['linear'], ['zoom'],
+          13, '#87918d',
+          15.5, CLOSEUP_ROAD_CASING,
+        ],
         'line-width': roadWidthExpression(61.4981, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.84],
       },
@@ -1474,7 +1512,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        'line-color': '#c7ccc8',
+        'line-color': '#ffffff',
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
           15, 0.5,
@@ -1484,8 +1522,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           15, 0,
-          15.8, 0.4,
-          18, 0.52,
+          15.8, 0.55,
+          18, 0.68,
         ],
       },
     },

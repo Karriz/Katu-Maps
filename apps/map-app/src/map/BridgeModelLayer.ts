@@ -117,6 +117,15 @@ const PIER_COLOR = new THREE.Color('#c4cbc8');
 const FASCIA_COLOR = new THREE.Color('#e5e9e7');
 const BRIDGE_DAY_PATH_LIGHTEN = 0.12;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const COLOR_PROPERTY_SPEC: any = {
+  type: 'color',
+  'property-type': 'data-driven',
+  expression: { interpolated: true, 'zoom-interpolated': true },
+  transition: false,
+  overridable: true,
+};
+
 export type BridgeViewState = {
   west: number;
   south: number;
@@ -3913,7 +3922,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
         if (!Array.isArray(value)) return fallback;
         let compiled = this.paintExpressions.get(id);
         if (!compiled) {
-          compiled = createExpression(value, 'bridge-color');
+          compiled = createExpression(value, 'bridge-color', COLOR_PROPERTY_SPEC);
           this.paintExpressions.set(id, compiled);
         }
         if (compiled.result !== 'success') return fallback;
@@ -3921,7 +3930,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
           type: part.kind === 'polygon' ? 'Polygon' : 'LineString',
           properties: { ...properties, class: properties.className, brunnel: 'bridge' },
         });
-        return typeof result === 'string' ? result : fallback;
+        if (typeof result === 'string') return result;
+        return result && typeof result.toString === 'function' ? result.toString() : fallback;
       };
       const fill = color(fillLayer, part.fill);
       const edge = color(edgeLayer, part.edge);

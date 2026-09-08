@@ -2186,10 +2186,10 @@ describe('bridge active style paint', () => {
           fill: '#f1efe7', edge: '#87918d', properties: { className: 'motorway', layer: 0, ramp: false } }] };
       layer.refreshDeckPaint();
       layer.paintDeck(bridge);
-      expect(strokes.slice(-2)).toEqual(['#adb8af', '#f9f7ef']);
+      expect(strokes.slice(-2)).toEqual(['#adb8af', 'rgba(249,247,239,1)']);
       bridge.parts[0].properties = { ...bridge.parts[0].properties, surface: 'unpaved' } as any;
       layer.paintDeck(bridge);
-      expect(strokes.slice(-2)).toEqual(['#adb8af', '#d9cbaa']);
+      expect(strokes.slice(-2)).toEqual(['#adb8af', 'rgba(217,203,170,1)']);
       const texture = new THREE.Texture();
       const resource = { deck: { material: { map: texture } }, paintBridge: bridge, paintSignature: '' };
       layer.bridgeResources.set('test', resource);
