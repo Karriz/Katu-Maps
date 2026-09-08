@@ -16,7 +16,11 @@ import {
   CARTOON_SUN_POLAR_DEGREES,
   sunCartesian,
 } from './CartoonLighting';
-import { OPENFREEMAP_SOURCE_ID, setDrapedElevatedBridgeLayersVisible } from './GlobalMapStyle';
+import {
+  OPENFREEMAP_SOURCE_ID,
+  refreshMapRenderState,
+  setDrapedElevatedBridgeLayersVisible,
+} from './GlobalMapStyle';
 
 export const BRIDGE_MODEL_LAYER_ID = 'bridge-models-3d';
 
@@ -28,6 +32,7 @@ const MAX_CACHED_MESH_VERTICES = 60_000;
 const MAX_GEOMETRY_CACHE_VERTICES = 500_000;
 const SAMPLE_FRAME_BUDGET_MS = 6;
 const PAINT_FRAME_BUDGET_MS = 3;
+const PENDING_RETRY_MS = 160;
 const BRIDGE_VIEW_PADDING_METERS = 600;
 // Covers stitching gaps, deck widths and abutment extension without clipping geometry.
 const BRIDGE_NEIGHBOUR_METERS = 40;
@@ -2472,6 +2477,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private readonly elevationCache = new Map<string, number>();
   private sampledBridges: SampledBridge[] = [];
   private drapedVisible = true;
+  private drapedStyleRefreshId = 0;
   private drapedHandoff?: { frames: number; fadeStarted?: number };
   private bridgeOpacity = 1;
   private pendingElevation = false;
@@ -2634,18 +2640,29 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const view = this.currentView(map);
     const visible = shouldRenderBridgesForView(view);
     const signature = visible ? JSON.stringify(view) : 'hidden';
-    if (signature === this.lastUpdateSignature && !this.samplingJob && !this.meshWrite) return;
+    const now = performance.now();
+    if (signature === this.lastUpdateSignature && !this.samplingJob && !this.meshWrite) {
+      if (!this.pendingElevation || now - this.jobStarted < PENDING_RETRY_MS) return;
+    }
     if (signature === this.lastUpdateSignature && !this.samplingJob && this.meshWrite) {
       this.writeMeshes();
       this.recordJobDuration();
       map.triggerRepaint();
       return;
     }
-    // Record attempts too: missing terrain is retried when source data arrives,
-    // rather than creating an idle/repaint retry loop.
-    this.lastUpdateSignature = signature;
     if (!visible) {
       this.cancelBridgeJobs();
+      this.lastUpdateSignature = signature;
+      this.jobStarted = now;
+      const waitingForTerrain = !view.terrainEnabled
+        && view.zoom >= BRIDGE_MIN_ZOOM
+        && viewportSpanMeters(view) <= BRIDGE_MAX_VIEWPORT_METERS;
+      if (waitingForTerrain) {
+        this.pendingElevation = true;
+        if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
+        map.triggerRepaint();
+        return;
+      }
       this.pendingElevation = false;
       if (view.terrainEnabled && this.sampledBridges.length > 0) {
         this.beginDrapedHandoff();
@@ -2656,11 +2673,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
       return;
     }
 
+    this.lastUpdateSignature = signature;
     this.cancelDrapedHandoff();
     if (!this.terrainElevationReady(map)) {
       this.pendingElevation = true;
+      this.jobStarted = now;
       this.cancelBridgeJobs();
       if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
+      map.triggerRepaint();
       return;
     }
     if (!this.samplingJob) this.beginPerformanceJob();
@@ -2674,6 +2694,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       this.pendingElevation = true;
       this.recordJobDuration();
       if (this.sampledBridges.length === 0) this.setDrapedVisible(true);
+      map.triggerRepaint();
       return;
     }
     this.pendingElevation = false;
@@ -2693,7 +2714,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const renderer = this.renderer;
     if (!map || !renderer) return;
     if (!this.userEnabled) return;
-    if (this.samplingJob || this.meshWrite) this.updateBridges();
+    if (this.samplingJob || this.meshWrite || this.pendingElevation) this.updateBridges();
     const view = this.currentView(map);
     if (!view.terrainEnabled || this.sampledBridges.length === 0) return;
     if (!shouldRenderBridgesForView(view)) {
@@ -2740,6 +2761,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.cancelBridgeJobs();
     this.clearCpuCaches();
     this.drapedHandoff = undefined;
+    this.drapedStyleRefreshId += 1;
     this.setDrapedVisible(true);
     this.clearMeshes();
     this.pierMesh?.geometry.dispose();
@@ -2888,7 +2910,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
     });
 
     const seed = mergedLines[0]?.coordinates[0] ?? polygons[0]?.coordinates[0];
-    if (!seed) return { bridges: [], pending: false };
+    if (!seed) {
+      const waitingForTiles = typeof map.isSourceLoaded === 'function' && !map.isSourceLoaded(this.sourceId);
+      return { bridges: [] as SampledBridge[], pending: waitingForTiles };
+    }
     const origin = planOriginFromLngLat(seed[0], seed[1]);
     const drawables: BridgeDrawable[] = [
       ...mergedLines.map((line) => ({
@@ -3568,6 +3593,22 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (!map) return;
     setDrapedElevatedBridgeLayersVisible(map, visible);
     this.drapedVisible = visible;
+    this.scheduleDrapedStyleRefresh();
+  }
+
+  private scheduleDrapedStyleRefresh() {
+    const map = this.map;
+    if (!map) return;
+    const id = ++this.drapedStyleRefreshId;
+    queueMicrotask(() => {
+      if (id !== this.drapedStyleRefreshId || this.map !== map) return;
+      if (
+        typeof map.jumpTo !== 'function'
+        || typeof map.redraw !== 'function'
+        || typeof map.getPadding !== 'function'
+      ) return;
+      refreshMapRenderState(map);
+    });
   }
 
   private paintSignature = '';

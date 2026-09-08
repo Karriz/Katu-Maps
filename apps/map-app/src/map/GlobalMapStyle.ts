@@ -2944,9 +2944,17 @@ export function applyMapTheme(
 const mapThemePaints = new WeakMap<MapLibreMap, Map<string, Record<string, unknown>>>();
 
 function refreshMapAfterTheme(map: MapLibreMap) {
-  // A camera event also marks MapLibre's source/render state dirty. Re-apply
-  // the current camera values to get that update path without changing what
-  // the user is looking at; this is needed for retained close-zoom buckets.
+  refreshMapRenderState(map);
+}
+
+/** Force terrain-draped layers to rebuild without a user camera gesture. */
+export function refreshMapRenderState(map: Pick<
+  MapLibreMap,
+  'jumpTo' | 'redraw' | 'getCenter' | 'getZoom' | 'getBearing' | 'getPitch' | 'getPadding'
+>) {
+  // Terrain keeps a render-to-texture of draped vector layers. Visibility and
+  // filter changes do not invalidate that cache until a camera event. Re-apply
+  // the current camera so MapLibre rebuilds buckets without moving the view.
   map.jumpTo({
     center: map.getCenter(),
     zoom: map.getZoom(),

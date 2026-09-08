@@ -2166,6 +2166,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
       bridgeLayer.invalidateSource();
       modelDataRevision += 1;
+      // Tile arrival does not change the camera, so idle may already have
+      // passed. Rebuild 3D bridges once the transportation tiles exist.
+      scheduleTreeUpdate();
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {

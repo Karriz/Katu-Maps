@@ -1225,11 +1225,90 @@ describe('BridgeModelLayer', () => {
     layer.updateBridges();
     layer.updateBridges();
     expect(sample).toHaveBeenCalledTimes(1);
-    expect(map.triggerRepaint).not.toHaveBeenCalled();
+    expect(map.triggerRepaint).toHaveBeenCalled();
     expect(layer.needsElevationRetry()).toBe(true);
     layer.invalidateTerrain();
     layer.updateBridges();
     expect(sample).toHaveBeenCalledTimes(2);
+  });
+
+  it('builds once terrain is enabled without needing a camera move', () => {
+    const layer = new BridgeModelLayer();
+    let terrain: object | null = null;
+    const map = {
+      ...terrainViewMap(),
+      getTerrain: () => terrain,
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      queryTerrainElevation: () => 0,
+    };
+    const sample = vi.fn(() => ({ bridges: [{ id: 1 }], pending: false }));
+    (layer as any).map = map;
+    (layer as any).sampleVisibleBridges = sample;
+    (layer as any).writeMeshes = vi.fn();
+    layer.updateBridges();
+    expect(sample).not.toHaveBeenCalled();
+    expect(layer.needsElevationRetry()).toBe(true);
+    terrain = {};
+    layer.updateBridges();
+    expect(sample).toHaveBeenCalledTimes(1);
+    expect((layer as any).writeMeshes).toHaveBeenCalled();
+  });
+
+  it('hides draped bridges without waiting for a camera move', async () => {
+    const layer = new BridgeModelLayer();
+    const jumpTo = vi.fn();
+    const redraw = vi.fn();
+    const visibility: Array<[string, string]> = [];
+    const map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      getBearing: () => 0,
+      getPadding: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+      queryTerrainElevation: () => 0,
+      getLayer: () => ({}),
+      setLayoutProperty: (id: string, property: string, value: string) => {
+        if (property === 'visibility') visibility.push([id, value]);
+      },
+      setFilter: vi.fn(),
+      jumpTo,
+      redraw,
+    };
+    (layer as any).map = map;
+    (layer as any).sampleVisibleBridges = vi.fn(() => ({ bridges: [{ id: 1 }], pending: false }));
+    (layer as any).writeMeshes = vi.fn();
+
+    layer.updateBridges();
+    await Promise.resolve();
+
+    expect(visibility).toContainEqual(['global-road-bridges', 'none']);
+    expect(visibility).toContainEqual(['global-bridge-decks', 'none']);
+    expect(jumpTo).toHaveBeenCalledWith(expect.objectContaining({
+      zoom: 15,
+      pitch: 40,
+      bearing: 0,
+    }));
+    expect(redraw).toHaveBeenCalled();
+  });
+
+  it('keeps waiting when transportation tiles have not loaded yet', () => {
+    const layer = new BridgeModelLayer();
+    const map = {
+      ...terrainViewMap(),
+      getSource: () => ({}),
+      isSourceLoaded: () => false,
+      querySourceFeatures: () => [],
+    };
+    const setDrapedVisible = vi.fn();
+    (layer as any).map = map;
+    (layer as any).setDrapedVisible = setDrapedVisible;
+    (layer as any).writeMeshes = vi.fn();
+
+    layer.updateBridges();
+
+    expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+    expect((layer as any).sampledBridges).toEqual([]);
+    expect(setDrapedVisible).toHaveBeenCalledWith(true);
+    expect(layer.needsElevationRetry()).toBe(true);
   });
 
   const withBridgeResources = (run: (layer: BridgeModelLayer, internal: any, bridge: any) => void) => {
