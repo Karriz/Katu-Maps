@@ -1891,6 +1891,44 @@ describe('bridge active style paint', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
+  it('darkens rail decks with the active railway and land palette', () => {
+    const strokes: string[] = [];
+    const context = { setTransform() {}, save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
+      strokeStyle: '', stroke() { strokes.push(this.strokeStyle); } };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+    try {
+      const layer = new BridgeModelLayer() as any;
+      const colors: Record<string, string> = {
+        'global-railways': '#8ea097',
+        'global-railway-bed': '#6f7874',
+        'global-bridge-decks': '#dedede',
+      };
+      layer.map = { getLayer: (id: string) => id in colors, getZoom: () => 16,
+        getPaintProperty: (id: string) => colors[id] };
+      const bridge = { surfaces: [], bounds: { minEast: 0, minNorth: 0, maxEast: 20, maxNorth: 5 },
+        parts: [{ kind: 'line', width: 5.5, plan: [{ east: 0, north: 0 }, { east: 20, north: 0 }],
+          fill: '#c8ceca', edge: '#6f7874',
+          properties: { className: 'rail', layer: 0, ramp: false } }] };
+      const deckFill = (rail: string, land: string) => (
+        `#${new THREE.Color(rail).lerp(new THREE.Color(land), 0.65).getHexString()}`
+      );
+      layer.refreshDeckPaint();
+      layer.paintDeck(bridge);
+      expect(strokes.slice(-4)).toEqual([
+        '#6f7874', deckFill('#8ea097', '#dedede'), '#8ea097', '#8ea097',
+      ]);
+      colors['global-railways'] = '#6b8295';
+      colors['global-railway-bed'] = '#3d5163';
+      colors['global-bridge-decks'] = '#10253a';
+      layer.refreshDeckPaint();
+      layer.paintDeck(bridge);
+      const nightDeck = deckFill('#6b8295', '#10253a');
+      expect(strokes.slice(-4)).toEqual(['#3d5163', nightDeck, '#6b8295', '#6b8295']);
+      expect(new THREE.Color(nightDeck).getHSL({ h: 0, s: 0, l: 0 }).l)
+        .toBeLessThan(new THREE.Color(deckFill('#8ea097', '#dedede')).getHSL({ h: 0, s: 0, l: 0 }).l);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('allocates a narrow texture for a diagonal span without moving its geometry', () => {
     const outer = [{ east: 0, north: 0 }, { east: 400, north: 400 },
       { east: 404, north: 396 }, { east: 4, north: -4 }];

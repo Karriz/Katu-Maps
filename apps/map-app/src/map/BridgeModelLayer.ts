@@ -3637,9 +3637,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
         return typeof result === 'string' ? result : fallback;
       };
       const fill = color(fillLayer, part.fill);
-      // Keep the active rail palette tint, but give the broad deck a light gray surface.
+      // Rail lines keep the palette tint; the slab follows the themed deck/land color.
       const deckFill = rail
-        ? `#${new THREE.Color(fill).lerp(new THREE.Color('#dedede'), 0.65).getHexString()}`
+        ? `#${new THREE.Color(fill).lerp(
+          new THREE.Color(color('global-bridge-decks', '#dedede')),
+          0.65,
+        ).getHexString()}`
         : fill;
       return { fill: deckFill, edge: color(edgeLayer, part.edge), rail: rail ? fill : undefined };
     }, bridge.texturePixelBudget);
