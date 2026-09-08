@@ -278,14 +278,14 @@ const ROAD_CENTER_MARKING_FILTER: FilterSpecification = [
 
 const ROAD_CENTER_MARKING_FILTER_WITHOUT_BRIDGES: FilterSpecification = [
   'all',
-  ROAD_CENTER_MARKING_FILTER,
+  ROAD_CENTER_MARKING_FILTER as ExpressionSpecification,
   ['!', ['==', ['get', 'brunnel'], 'bridge']],
 ];
 
-const NOT_BRIDGE: FilterSpecification = ['!', ['==', ['get', 'brunnel'], 'bridge']];
+const NOT_BRIDGE: ExpressionSpecification = ['!', ['==', ['get', 'brunnel'], 'bridge']];
 
 function excludingBridges(filter: FilterSpecification): FilterSpecification {
-  return ['all', filter, NOT_BRIDGE];
+  return ['all', filter as ExpressionSpecification, NOT_BRIDGE];
 }
 
 const PATH_CASING_FILTER: FilterSpecification = [
