@@ -7,10 +7,15 @@ import {
 import * as THREE from 'three';
 import {
   CARTOON_AMBIENT_GROUND_COLOR,
+  CARTOON_NIGHT_SHADOW_COLOR,
+  CARTOON_AMBIENT_BASE_INTENSITY,
+  CARTOON_AMBIENT_DAY_INTENSITY,
   CARTOON_AMBIENT_SKY_COLOR,
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
   CARTOON_SUN_COLOR,
+  CARTOON_SUN_BASE_INTENSITY,
+  CARTOON_SUN_DAY_INTENSITY,
   CARTOON_SUN_POLAR_DEGREES,
   sunCartesian,
 } from './CartoonLighting';
@@ -281,7 +286,7 @@ function displayedTreeKey(tree: TreeInstance) {
 
 function treeShadowOpacity(zoom: number) {
   if (zoom <= 14) return 0.1 + Math.max(0, zoom - TREE_MIN_ZOOM) * 0.04;
-  return Math.min(0.27, 0.18 + (zoom - 14) * 0.045);
+  return Math.min(0.33, 0.2 + (zoom - 14) * 0.05);
 }
 
 function treeGrowth(start: number, now: number) {
@@ -742,6 +747,12 @@ export class TreeModelLayer implements CustomLayerInterface {
   setTheme(dark: boolean) {
     if (this.darkMode === dark && this.nightMix === 0) return;
     this.darkMode = dark;
+    if (this.shadowMesh) {
+      const material = this.shadowMesh.material as THREE.MeshBasicMaterial;
+      const shadowNight = Math.max(this.darkMode ? 0.85 : 0, this.nightMix);
+      material.color.set(CARTOON_SHADOW_COLOR).lerp(new THREE.Color(CARTOON_NIGHT_SHADOW_COLOR), shadowNight);
+      material.opacity = treeShadowOpacity(this.map?.getZoom() ?? 14) * (1 - shadowNight * 0.7);
+    }
     if (this.map) this.writeTreeMeshes(performance.now());
     this.map?.triggerRepaint();
   }
@@ -760,15 +771,17 @@ export class TreeModelLayer implements CustomLayerInterface {
     const position = sunCartesian(azimuth, polar);
     this.sunlight?.position.set(position.x, position.y, position.z);
     if (this.sunlight) {
-      this.sunlight.intensity = 0.55 + (1 - this.nightMix) * 1.85;
+      this.sunlight.intensity = CARTOON_SUN_BASE_INTENSITY + (1 - this.nightMix) * CARTOON_SUN_DAY_INTENSITY;
       this.sunlight.color.set(this.nightMix > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR);
     }
     if (this.hemisphereLight) {
-      this.hemisphereLight.intensity = 0.55 + (1 - this.nightMix) * 1.25;
+      this.hemisphereLight.intensity = CARTOON_AMBIENT_BASE_INTENSITY + (1 - this.nightMix) * CARTOON_AMBIENT_DAY_INTENSITY;
     }
     if (this.shadowMesh) {
       const material = this.shadowMesh.material as THREE.MeshBasicMaterial;
-      material.opacity = treeShadowOpacity(this.map?.getZoom() ?? 14) * (1 - this.nightMix * 0.7);
+      const shadowNight = Math.max(this.darkMode ? 0.85 : 0, this.nightMix);
+      material.color.set(CARTOON_SHADOW_COLOR).lerp(new THREE.Color(CARTOON_NIGHT_SHADOW_COLOR), shadowNight);
+      material.opacity = treeShadowOpacity(this.map?.getZoom() ?? 14) * (1 - shadowNight * 0.7);
     }
     if (this.displayedTrees.size > 0) this.writeTreeMeshes(performance.now());
     this.map?.triggerRepaint();
@@ -1045,7 +1058,7 @@ export class TreeModelLayer implements CustomLayerInterface {
         * biomeProfile.crownWidthScale;
 
       // Stretch away from the sun while keeping the trunk inside the shadow.
-      const shadowRadius = canopyRadius * 1.18 * growth;
+      const shadowRadius = canopyRadius * 1.3 * growth;
       const offsetLength = Math.hypot(this.shadowOffsetEast, this.shadowOffsetNorth);
       const shadowLength = Math.min(offsetLength, shadowRadius * 1.5);
       const offsetScale = offsetLength > 0 ? shadowLength / offsetLength : 0;

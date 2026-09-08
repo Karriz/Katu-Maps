@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
 import type { TreeModelLayer } from './TreeModelLayer';
+import type { BridgeModelLayer } from './BridgeModelLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { MapLayerState } from './MapControls';
@@ -10,9 +11,11 @@ import { TRAFFIC_CAMERA_LAYER_IDS } from './TrafficCamerasLayer';
 import { CHARGING_STATION_LAYER_IDS } from './ChargingStationsLayer';
 import { ROAD_WEATHER_LAYER_IDS } from './RoadWeatherLayer';
 import { ROAD_TRAFFIC_LAYER_IDS } from './RoadTrafficLayer';
+import { applyGroundPatternTheme } from './GroundPatterns';
 
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
+  bridgeLayerRef: RefObject<BridgeModelLayer | null>;
   transitRouteOverlayRef: RefObject<TransitRouteOverlay | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   treeRefreshRef: RefObject<(() => void) | null>;
@@ -55,7 +58,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
+  treeLayerRef, bridgeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
@@ -71,6 +74,12 @@ export function useMapLayerVisibility({
       return;
     }
     setVisibility(['tree-models-3d', 'tree-points'], layerToggles.trees);
+    terrainEnabledRef.current = layerToggles.terrain;
+    syncTerrain3d(map, { userEnabled: layerToggles.terrain, source: terrainSourceRef.current });
+    if (map.getLayer('terrain-hillshade')) {
+      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
+    }
+    bridgeLayerRef.current?.setEnabled(layerToggles.bridges);
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
       .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'), layerToggles.transit);
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
@@ -89,11 +98,6 @@ export function useMapLayerVisibility({
     if (layerToggles.transitLines) void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
     setVisibility(waterEffectLayerIds, true);
     map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
-    terrainEnabledRef.current = layerToggles.terrain;
-    syncTerrain3d(map, { userEnabled: layerToggles.terrain, source: terrainSourceRef.current });
-    if (map.getLayer('terrain-hillshade')) {
-      map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
-    }
     map.triggerRepaint();
     treeRefreshRef.current?.();
     if (!layerToggles.transit) onTransitDisabled();
@@ -101,15 +105,17 @@ export function useMapLayerVisibility({
     if (!layerToggles.chargingStations) onChargingStationsDisabled();
     if (!layerToggles.roadWeather) onRoadWeatherDisabled();
     if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
-  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds]);
+  }, [mapLoaded, layerToggles, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds, bridgeLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     treeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    bridgeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    applyGroundPatternTheme(map, resolvedTheme);
     if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
-  }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, transitVehicleLayerRef, treeLayerRef]);
+  }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme, bridgeLayerRef, transitVehicleLayerRef, treeLayerRef]);
 }

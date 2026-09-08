@@ -312,7 +312,9 @@ export function dayNightAppearance(date: Date, latitude: number, longitude: numb
     palette,
     shadeOpacity,
     lightsIntensity: night * (0.35 + shadeOpacity * 0.65),
-    lightIntensity: 0.08 + (1 - night) * 0.26,
+    // Let wall orientation do more of the shading work than the extrusion
+    // gradient while retaining a gentle ambient floor at night.
+    lightIntensity: 0.12 + (1 - night) * 0.32,
     lightPosition: [CARTOON_MAP_LIGHT_POSITION[0], azimuth, polar],
     buildingShadowTranslate: [
       shadowTranslate[0] * shadowScale,

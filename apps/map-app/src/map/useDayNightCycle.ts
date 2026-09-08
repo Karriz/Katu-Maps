@@ -6,6 +6,7 @@ import { applyDayNightStyle, restoreDayNightStyle } from './DayNightStyle';
 import { useGlobeCloudCover } from './useGlobeCloudCover';
 import { screenLockedSunDirection, timeZoneAt } from './DayNightSun';
 import type { TreeModelLayer } from './TreeModelLayer';
+import type { BridgeModelLayer } from './BridgeModelLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { ResolvedTheme } from '../theme';
 
@@ -21,8 +22,9 @@ export function useDayNightCycle({
   utcMs,
   flightActive,
   resolvedTheme,
-  treeLayerRef,
-  transitVehicleLayerRef,
+    treeLayerRef,
+    bridgeLayerRef,
+    transitVehicleLayerRef,
 }: {
   mapRef: RefObject<Map | null>;
   mapLoaded: boolean;
@@ -32,6 +34,7 @@ export function useDayNightCycle({
   flightActive: boolean;
   resolvedTheme: ResolvedTheme;
   treeLayerRef: RefObject<TreeModelLayer | null>;
+  bridgeLayerRef: RefObject<BridgeModelLayer | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
 }) {
   const layerRef = useRef<DayNightShadeLayer | null>(null);
@@ -55,6 +58,7 @@ export function useDayNightCycle({
       }
       layerRef.current?.setAppearance([1, 0, 0], 0, 0);
       treeLayerRef.current?.setDayNightLighting(null);
+      bridgeLayerRef.current?.setDayNightLighting(null);
       transitVehicleLayerRef.current?.setDayNightLighting(null);
       wasActiveRef.current = false;
       applyRef.current = () => {};
@@ -86,6 +90,7 @@ export function useDayNightCycle({
           true,
         );
         treeLayerRef.current?.setDayNightLighting(null);
+        bridgeLayerRef.current?.setDayNightLighting(null);
         transitVehicleLayerRef.current?.setDayNightLighting(null);
         map.triggerRepaint();
         return;
@@ -94,6 +99,12 @@ export function useDayNightCycle({
       applyDayNightStyle(map, appearance);
       layerRef.current?.setAppearance(appearance.sunDirection, appearance.shadeOpacity, appearance.lightsIntensity);
       treeLayerRef.current?.setDayNightLighting({
+        azimuth: appearance.azimuth,
+        polar: appearance.polar,
+        nightMix: appearance.treeNightMix,
+        shadowOffset: appearance.treeShadowOffset,
+      });
+      bridgeLayerRef.current?.setDayNightLighting({
         azimuth: appearance.azimuth,
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,
@@ -131,7 +142,7 @@ export function useDayNightCycle({
     };
   }, [
     enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
-    treeLayerRef, transitVehicleLayerRef,
+    treeLayerRef, bridgeLayerRef, transitVehicleLayerRef,
   ]);
 
   useGlobeCloudCover(mapRef, layerRef, mapLoaded, flightActive, cloudsEnabled);

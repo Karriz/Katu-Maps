@@ -59,6 +59,7 @@ import {
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
+import { BridgeModelLayer } from './BridgeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
@@ -157,6 +158,12 @@ import {
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
+import {
+  createGroundPattern,
+  groundPatternImageId,
+  groundPatternKinds,
+  groundPatternLayers,
+} from './GroundPatterns';
 const TAMPERE: [number, number] = [23.7609, 61.4981];
 const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
@@ -646,9 +653,9 @@ function createWaterPattern(size: number) {
       const vertical = (y / size) * tau;
       // Integer-frequency waves meet at every edge, making the generated
       // image seamless when MapLibre repeats it across water polygons.
-      const broad = Math.sin(horizontal + vertical * 2) * 0.29;
-      const crossing = Math.cos(horizontal * 2 - vertical) * 0.14;
-      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.07;
+      const broad = Math.sin(horizontal + vertical * 2) * 0.38;
+      const crossing = Math.cos(horizontal * 2 - vertical) * 0.2;
+      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.1;
       const shade = Math.max(0, Math.min(1, 0.5 + broad + crossing + detail));
       const offset = (y * size + x) * 4;
 
@@ -676,10 +683,10 @@ function globalWaterPatternLayer(): FillLayerSpecification {
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
         6, 0,
-        7, 0.025,
-        10, 0.08,
-        14, 0.12,
-        18, 0.17,
+        7, 0.04,
+        10, 0.12,
+        14, 0.18,
+        18, 0.24,
       ],
     },
   };
@@ -692,6 +699,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const mapRef = useRef<Map | null>(null);
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
+  const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
   const roadWeatherLayerRef = useRef<RoadWeatherLayer | null>(null);
@@ -880,6 +888,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       globe: true,
       trees: !mobileDefault2d,
       buildings: !mobileDefault2d,
+      bridges: !mobileDefault2d,
       terrain: !mobileDefault2d,
       cycling: false,
       hiking: false,
@@ -901,6 +910,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   });
   const is3dMode = layerToggles.terrain
     && layerToggles.buildings
+    && layerToggles.bridges
     && layerToggles.trees
     && layerToggles.transitModels;
   const handleTransitDisabled = useCallback(() => {
@@ -950,6 +960,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     resolvedTheme,
     dayNightEnabled: layerToggles.dayNight,
     treeLayerRef,
+    bridgeLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
     treeRefreshRef,
@@ -985,6 +996,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     flightActive: flight.active,
     resolvedTheme,
     treeLayerRef,
+    bridgeLayerRef,
     transitVehicleLayerRef,
   });
   useEffect(() => {
@@ -1041,7 +1053,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.setLayoutProperty('tree-models-3d', 'visibility', 'none');
     }
     flightTreeLayer.updateTrees();
-    const intervalId = window.setInterval(() => flightTreeLayer.updateTrees(), 4000);
+    bridgeLayerRef.current?.updateBridges();
+    const intervalId = window.setInterval(() => {
+      flightTreeLayer.updateTrees();
+      bridgeLayerRef.current?.updateBridges();
+    }, 4000);
 
     return () => {
       window.clearInterval(intervalId);
@@ -1980,6 +1996,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       biomeLayer: 'global-globe-biomes',
     });
     treeLayerRef.current = treeLayer;
+    const bridgeLayer = new BridgeModelLayer();
+    bridgeLayerRef.current = bridgeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
     const transitStopsLayer = new TransitStopsLayer((pose) => {
@@ -2102,6 +2120,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         scheduleTreeUpdate();
         return;
       }
+      bridgeLayer.updateBridges();
       const nextSignature = modelUpdateSignature();
       if (nextSignature === lastModelUpdateSignature) return;
       treeLayer.updateTrees();
@@ -2140,12 +2159,22 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transitRouteOverlay.update(map.getBounds(), map.getZoom());
     };
     const invalidateAndScheduleModels = () => {
+      bridgeLayer.invalidateTerrain();
       modelDataRevision += 1;
       scheduleTreeUpdate();
     };
     const handleModelSourceData = (event: MapSourceDataEvent) => {
+      if (event.sourceId === terrainSourceRef.current && event.sourceDataType === 'content') {
+        bridgeLayer.invalidateTerrain();
+        scheduleTreeUpdate();
+        return;
+      }
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
+      bridgeLayer.invalidateSource();
       modelDataRevision += 1;
+      // Tile arrival does not change the camera, so idle may already have
+      // passed. Rebuild 3D bridges once the transportation tiles exist.
+      scheduleTreeUpdate();
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
@@ -2381,6 +2410,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // providing broad variation at every zoom without a custom shader.
       map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
+      // Ground textures use a large, quiet repeat so they read as material
+      // variation rather than map noise. Both palettes are registered up
+      // front so theme changes only swap the image used by each layer.
+      for (const kind of groundPatternKinds()) {
+        for (const theme of ['light', 'dark'] as const) {
+          map.addImage(groundPatternImageId(kind, theme), createGroundPattern(256, kind, theme), { pixelRatio: 0.5 });
+        }
+      }
+      for (const layer of groundPatternLayers()) map.addLayer(layer, 'global-pedestrian-areas');
+      map.addLayer(bridgeLayer, 'global-road-labels');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
       try {
@@ -2903,7 +2942,10 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // idle handles the final set of newly loaded tiles. Flight trees have a
     // dedicated refresh interval, so avoid updating the hidden regular layer.
     const handleIdleTreeUpdate = () => {
-      if (flightActiveRef.current) return;
+      if (flightActiveRef.current) {
+        bridgeLayer.updateBridges();
+        return;
+      }
       scheduleTreeUpdate();
     };
     map.on('idle', handleIdleTreeUpdate);
@@ -2967,6 +3009,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       mapRef.current = null;
       treeRefreshRef.current = null;
       treeLayerRef.current = null;
+      bridgeLayerRef.current = null;
       flightTreeLayerRef.current = null;
       transitStopsLayerRef.current = null;
       trafficCamerasLayerRef.current = null;
@@ -3699,11 +3742,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             }}
             is3dMode={is3dMode}
             onToggle3dMode={() => setLayerToggles((current) => {
-              const enabled = !(current.terrain && current.buildings && current.trees && current.transitModels);
+              const enabled = !(current.terrain && current.buildings && current.bridges && current.trees && current.transitModels);
               return {
                 ...current,
                 terrain: enabled,
                 buildings: enabled,
+                bridges: enabled,
                 trees: enabled,
                 transit: true,
                 transitModels: enabled,

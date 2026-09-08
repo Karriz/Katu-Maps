@@ -9,6 +9,13 @@ export const CARTOON_SUN_COLOR = MAP_COLORS.sun;
 export const CARTOON_AMBIENT_SKY_COLOR = MAP_COLORS.ambientSky;
 export const CARTOON_AMBIENT_GROUND_COLOR = MAP_COLORS.ambientGround;
 export const CARTOON_SHADOW_COLOR = MAP_COLORS.shadow;
+export const CARTOON_NIGHT_SHADOW_COLOR = '#081522';
+// Shared balance for Three.js models: a softer sun keeps faceted trees and
+// bridge walls from becoming much darker than MapLibre building faces.
+export const CARTOON_AMBIENT_BASE_INTENSITY = 0.7;
+export const CARTOON_AMBIENT_DAY_INTENSITY = 1.35;
+export const CARTOON_SUN_BASE_INTENSITY = 0.45;
+export const CARTOON_SUN_DAY_INTENSITY = 1.65;
 
 export const CARTOON_MAP_LIGHT_POSITION: [number, number, number] = [
   1.25,
