@@ -108,6 +108,7 @@ export function useDayNightCycle({
         azimuth: appearance.azimuth,
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,
+        shadowOffset: appearance.treeShadowOffset,
       });
       transitVehicleLayerRef.current?.setDayNightLighting({
         palette: appearance.palette,

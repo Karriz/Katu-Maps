@@ -11,6 +11,7 @@ import {
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
+import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
@@ -1740,11 +1741,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': [
           'match', ['get', 'class'],
-          'transit', '#c0c5c2',
-          '#c0c5c2',
+          'transit', RAIL_BED_DAY,
+          RAIL_BED_DAY,
         ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 14, 2.4, 18, 8],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 8.5, 0, 10, 0.82],
+        'line-width': railwayWidth(RAIL_BED_WIDTH),
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 8.5, 0, 10, 0.82, 16, 1],
       },
     },
     {
@@ -1760,9 +1761,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#e7ebe7',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 15, 2.4, 18, 9],
-        'line-dasharray': [0.18, 1.15],
+        'line-color': RAIL_SLEEPER_DAY,
+        'line-width': railwayWidth(SLEEPER_WIDTH),
+        'line-dasharray': [SLEEPER_THICKNESS / SLEEPER_WIDTH, (SLEEPER_SPACING - SLEEPER_THICKNESS) / SLEEPER_WIDTH],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           15, 0,
@@ -1788,15 +1789,13 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'transit', '#828c8d',
           '#828c8d',
         ],
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          11, 0.5,
-          18, ['match', ['get', 'class'], 'transit', 1.8, 1.4],
-        ],
+        'line-width': railwayWidth(RAIL_WIDTH),
+        'line-gap-width': railwayWidth(RAIL_GAUGE - RAIL_WIDTH, true),
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           8.5, 0,
           10, ['match', ['get', 'class'], 'transit', 0.9, 0.86],
+          16, 1,
         ],
       },
     },
@@ -1967,16 +1966,16 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 2.4,
-          15, 5.4,
-          18, 10,
+          13, 3,
+          15, 6.8,
+          18, 12,
         ],
         'line-translate': CARTOON_BUILDING_SHADOW_TRANSLATE,
         'line-translate-anchor': 'map',
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1.3,
-          18, 3.1,
+          13, 1.6,
+          18, 3.8,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -2004,20 +2003,20 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': CARTOON_SHADOW_COLOR,
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
-          13, 1.3,
-          15, 2.8,
-          18, 5.2,
+          13, 1.6,
+          15, 3.5,
+          18, 6,
         ],
         'line-blur': [
           'interpolate', ['linear'], ['zoom'],
-          13, 0.7,
-          18, 1.45,
+          13, 0.9,
+          18, 1.8,
         ],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0,
-          13.45, 0.22,
-          18, 0.4,
+          13.45, 0.26,
+          18, 0.46,
         ],
       },
     },
@@ -2045,7 +2044,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           13.45, 0.96,
           18, 1,
         ],
-        'fill-extrusion-vertical-gradient': true,
+        'fill-extrusion-vertical-gradient': false,
       },
     },
     {
@@ -2067,7 +2066,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           13.45, 0.96,
           18, 1,
         ],
-        'fill-extrusion-vertical-gradient': true,
+        'fill-extrusion-vertical-gradient': false,
       },
     },
     {
@@ -2980,6 +2979,8 @@ export function applyMapTheme(
   ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
+  set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);
+  set('global-railway-sleepers', 'line-color', RAIL_SLEEPER_NIGHT);
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', colors.building); set(id, 'fill-outline-color', colors.boundary); });
   set('global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
   set('global-buildings', 'fill-extrusion-color', colors.building);

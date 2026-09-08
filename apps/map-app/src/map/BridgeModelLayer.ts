@@ -6,14 +6,19 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
+import { RAIL_BED_DAY, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING } from './RailwayAppearance';
 import type { Feature, FeatureCollection } from 'geojson';
 import { createExpression } from '@maplibre/maplibre-gl-style-spec';
 import {
   CARTOON_AMBIENT_GROUND_COLOR,
+  CARTOON_AMBIENT_BASE_INTENSITY,
+  CARTOON_AMBIENT_DAY_INTENSITY,
   CARTOON_AMBIENT_SKY_COLOR,
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
   CARTOON_SUN_COLOR,
+  CARTOON_SUN_BASE_INTENSITY,
+  CARTOON_SUN_DAY_INTENSITY,
   CARTOON_SUN_POLAR_DEGREES,
   sunCartesian,
 } from './CartoonLighting';
@@ -80,8 +85,8 @@ const PIER_END_MARGIN = 0.16;
 const SHADOW_OFFSET_METERS = 2.8;
 const SHADOW_INFLATE_METRES = 1.6;
 const SHADOW_BLUR_METRES = 3;
-export const BRIDGE_SHADOW_HOVER_METRES = 0.55;
-export const BRIDGE_SHADOW_OPACITY = 0.2;
+export const BRIDGE_SHADOW_HOVER_METRES = 0.8;
+export const BRIDGE_SHADOW_OPACITY = 0.14;
 const SHADOW_GROUND_FADE_METRES = 1.8;
 const MAX_CANVAS_LONG = 2048;
 const MAX_CANVAS_SHORT = 512;
@@ -108,8 +113,9 @@ const ROAD_EDGE = '#87918d';
 const RAIL_EDGE = '#6f7874';
 const PATH_EDGE = '#d8d4ca';
 const CYCLEWAY_EDGE = '#b99a91';
-const PIER_COLOR = new THREE.Color('#a6ada8');
-const FASCIA_COLOR = new THREE.Color('#8c9692');
+const PIER_COLOR = new THREE.Color('#c4cbc8');
+const FASCIA_COLOR = new THREE.Color('#e5e9e7');
+const BRIDGE_DAY_PATH_LIGHTEN = 0.12;
 
 export type BridgeViewState = {
   west: number;
@@ -171,6 +177,9 @@ type SampledPoint = {
   latitude: number;
   ground: number;
   deck: number;
+  shadowLongitude?: number;
+  shadowLatitude?: number;
+  shadowGround?: number;
   east: number;
   north: number;
   t?: number;
@@ -205,6 +214,7 @@ type BridgeResources = {
   paintBridge: SampledBridge;
   paintSignature: string;
   shadow: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  shadowBasePoints: LocalPoint[];
   origin: maplibregl.LngLat;
   elevation: number;
   heights: string;
@@ -270,7 +280,7 @@ export function shouldRenderBridgesForView(view: BridgeViewState) {
 
 export function bridgeWidthMetres(properties: BridgeLineProperties) {
   const { className, subclass, ramp, service } = properties;
-  if (className === 'rail' || className === 'transit') return 5.5;
+  if (className === 'rail' || className === 'transit') return RAIL_BED_WIDTH;
   if (className === 'track') return 3;
   if (className === 'path_construction') return 2;
   if (className === 'path') {
@@ -652,6 +662,30 @@ export function bridgeSurfaceClearance(t: number, spanLength: number) {
 export function bridgeShadowEndFade(clearanceMetres: number) {
   const u = Math.min(1, Math.max(0, (clearanceMetres - 0.08) / SHADOW_GROUND_FADE_METRES));
   return u * u * (3 - 2 * u);
+}
+
+/** Raise all vertices of a probed triangle enough to clear its interior terrain. */
+export function shadowTerrainHeights(ground: number[], probes: Array<{ vertices: number[]; weights: number[]; ground: number }>) {
+  const heights = ground.slice();
+  for (const probe of probes) {
+    const interpolated = probe.vertices.reduce((sum, vertex, i) => sum + ground[vertex] * probe.weights[i], 0);
+    const lift = Math.max(0, probe.ground - interpolated);
+    for (const vertex of probe.vertices) heights[vertex] = Math.max(heights[vertex], ground[vertex] + lift);
+  }
+  return heights;
+}
+
+/** Soften only the terrain-contact overlap; retain coverage where the ground paint is unknown. */
+export function bridgeEntranceOpacity(t: number | undefined, spanLength: number, clearance: number, fascia = false) {
+  if (t === undefined) return 1;
+  const distance = Math.max(0, Math.min(t, 1 - t)) * spanLength;
+  const band = Math.min(ABUTMENT_EXTEND_METRES, spanLength / 4);
+  const u = Math.min(1, distance / Math.max(1, band));
+  const along = u * u * (3 - 2 * u);
+  const height = Math.min(1, Math.max(0, (clearance - 0.08) / 0.62));
+  const raised = height * height * (3 - 2 * height);
+  const minimum = fascia ? 0 : 0.4;
+  return minimum + (1 - minimum) * Math.max(along, raised);
 }
 
 export function bridgeWallBottom(deck: number, ground: number, t: number | undefined, spanLength: number) {
@@ -2042,6 +2076,7 @@ function strokePlanLine(
   widthMetres: number,
   fillColor: string,
   edgeColor: string,
+  casingMetres = 1.1,
 ) {
   if (points.length < 2) return;
   const start = canvasPoint(points[0].east, points[0].north, bounds, scale);
@@ -2054,7 +2089,7 @@ function strokePlanLine(
     context.lineTo(next.x, next.y);
   }
   context.strokeStyle = edgeColor;
-  context.lineWidth = Math.max(2, (widthMetres + 1.1) * scale);
+  context.lineWidth = Math.max(casingMetres ? 2 : 1, (widthMetres + casingMetres) * scale);
   context.stroke();
   context.strokeStyle = fillColor;
   context.lineWidth = Math.max(1, widthMetres * scale);
@@ -2142,7 +2177,7 @@ export function bridgeRailLines(plan: PlanPoint[]) {
     const length = Math.hypot(incoming.east + outgoing.east, incoming.north + outgoing.north);
     const normal = length > 1e-6 ? { east: (incoming.east + outgoing.east) / length,
       north: (incoming.north + outgoing.north) / length } : outgoing;
-    const offset = side * 0.75 / Math.max(0.5, normal.east * outgoing.east + normal.north * outgoing.north);
+    const offset = side * RAIL_GAUGE / 2 / Math.max(0.5, normal.east * outgoing.east + normal.north * outgoing.north);
     return { east: point.east + normal.east * offset, north: point.north + normal.north * offset };
   }));
 }
@@ -2151,7 +2186,7 @@ export function paintBridgeCluster(
   surfaces: DeckSurface[],
   parts: BridgePaintPart[],
   bounds: PlanBounds,
-  resolve: (part: BridgePaintPart) => { fill: string; edge: string; rail?: string } = (part) => part,
+  resolve: (part: BridgePaintPart) => { fill: string; edge: string; rail?: string; sleeper?: string; sleeperOpacity?: number } = (part) => part,
   pixelBudget = MAX_TEXTURE_PIXELS_PER_BRIDGE,
 ) {
   const { canvas, scale } = createBridgeCanvas(bounds, pixelBudget);
@@ -2186,7 +2221,8 @@ export function paintBridgeCluster(
       context.clip();
     }
     const colors = resolve(part);
-    strokePlanLine(context, part.plan, bounds, scale, part.width, colors.fill, colors.edge);
+    const railPart = part.properties?.className === 'rail' || part.properties?.className === 'transit';
+    strokePlanLine(context, part.plan, bounds, scale, part.width, colors.fill, colors.edge, railPart ? 0 : 1.1);
     if (paintFilledDecks && envelope.length >= 3) context.restore();
   }
   // Paint from complete centerlines so section boundaries never restart the rails.
@@ -2195,8 +2231,36 @@ export function paintBridgeCluster(
     const colors = resolve(part);
     context.save();
     context.globalCompositeOperation = 'source-atop';
+    if (colors.sleeper && (colors.sleeperOpacity ?? 0) > 0) {
+      context.strokeStyle = colors.sleeper;
+      context.globalAlpha = colors.sleeperOpacity!;
+      context.lineWidth = SLEEPER_THICKNESS * scale;
+      context.beginPath();
+      let travelled = 0;
+      let next = 0;
+      for (let i = 1; i < part.plan.length; i += 1) {
+        const a = part.plan[i - 1];
+        const b = part.plan[i];
+        const dx = b.east - a.east;
+        const dy = b.north - a.north;
+        const length = Math.hypot(dx, dy);
+        if (length < 1e-6) continue;
+        for (; next < travelled + length; next += SLEEPER_SPACING) {
+          const t = (next - travelled) / length;
+          const east = a.east + dx * t;
+          const north = a.north + dy * t;
+          const p = canvasPoint(east - dy / length * SLEEPER_WIDTH / 2, north + dx / length * SLEEPER_WIDTH / 2, bounds, scale);
+          const q = canvasPoint(east + dy / length * SLEEPER_WIDTH / 2, north - dx / length * SLEEPER_WIDTH / 2, bounds, scale);
+          context.moveTo(p.x, p.y);
+          context.lineTo(q.x, q.y);
+        }
+        travelled += length;
+      }
+      context.stroke();
+      context.globalAlpha = 1;
+    }
     context.strokeStyle = colors.rail ?? part.edge;
-    context.lineWidth = Math.max(1, 0.18 * scale);
+    context.lineWidth = RAIL_WIDTH * scale;
     context.lineJoin = 'round';
     context.lineCap = 'butt';
     for (const rail of bridgeRailLines(part.plan)) {
@@ -2221,6 +2285,10 @@ function clusterBaseColors(parts: BridgePaintPart[]) {
   const cycleway = parts.find((part) => part.fill === CYCLEWAY_FILL);
   if (cycleway) return { fill: CYCLEWAY_FILL, edge: CYCLEWAY_EDGE };
   return { fill: PATH_FILL, edge: PATH_EDGE };
+}
+
+function lightenBridgePathColor(value: string) {
+  return `#${new THREE.Color(value).lerp(new THREE.Color('#ffffff'), BRIDGE_DAY_PATH_LIGHTEN).getHexString()}`;
 }
 
 function lngLatDelta(start: [number, number], end: [number, number]) {
@@ -2556,6 +2624,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private nightMix = 0;
   private sunAzimuth = CARTOON_SUN_AZIMUTH_DEGREES;
   private sunPolar = CARTOON_SUN_POLAR_DEGREES;
+  private shadowOffsetEast = -Math.sin(CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS) * SHADOW_OFFSET_METERS;
+  private shadowOffsetNorth = -Math.cos(CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS) * SHADOW_OFFSET_METERS;
   private lastUpdateSignature?: string;
   private terrainSignature?: string;
   private userEnabled = true;
@@ -2648,17 +2718,29 @@ export class BridgeModelLayer implements CustomLayerInterface {
     azimuth: number;
     polar: number;
     nightMix: number;
+    shadowOffset?: [number, number];
   } | null) {
     const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
     const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
     const nightMix = lighting?.nightMix ?? 0;
-    if (this.sunAzimuth === azimuth && this.sunPolar === polar && this.nightMix === nightMix) return;
+    const shadowOffsetEast = lighting?.shadowOffset?.[0] ?? -Math.sin(azimuth * DEGREES_TO_RADIANS) * SHADOW_OFFSET_METERS;
+    const shadowOffsetNorth = lighting?.shadowOffset?.[1] ?? -Math.cos(azimuth * DEGREES_TO_RADIANS) * SHADOW_OFFSET_METERS;
+    if (
+      this.sunAzimuth === azimuth &&
+      this.sunPolar === polar &&
+      this.nightMix === nightMix &&
+      this.shadowOffsetEast === shadowOffsetEast &&
+      this.shadowOffsetNorth === shadowOffsetNorth
+    ) return;
     this.sunAzimuth = azimuth;
     this.sunPolar = polar;
     this.nightMix = nightMix;
+    this.shadowOffsetEast = shadowOffsetEast;
+    this.shadowOffsetNorth = shadowOffsetNorth;
     const position = sunCartesian(azimuth, polar);
     this.sunlight?.position.set(position.x, position.y, position.z);
     this.applyLighting();
+    this.updateShadowOffsets();
     this.map?.triggerRepaint();
   }
 
@@ -3199,6 +3281,22 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
     if (ground.length < 3) return null;
 
+    const azimuth = CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
+    const shadowPlan = inflatePlanPoints(meshPoints, SHADOW_INFLATE_METRES).map((point) => ({
+      east: point.east - Math.sin(azimuth) * SHADOW_OFFSET_METERS,
+      north: point.north - Math.cos(azimuth) * SHADOW_OFFSET_METERS,
+    }));
+    const shadowCoordinates = shadowPlan.map((point) => planToLngLat(point, origin));
+    const shadowGround = this.sampleGround(map, shadowCoordinates, terrainZoomBucket);
+    const shadowProbes = bridgeClearanceProbes(shadowPlan, meshIndices, spanLength);
+    const shadowProbeGround = this.sampleGround(map, shadowProbes.map((probe) => planToLngLat(probe.point, origin)), terrainZoomBucket);
+    if (shadowGround === null || shadowProbeGround === null) {
+      this.pendingElevation = true;
+      return null;
+    }
+    const shadowHeights = shadowTerrainHeights(shadowGround,
+      shadowProbes.map((probe, index) => ({ ...probe, ground: shadowProbeGround[index] })));
+
     const startSamples = meshT.flatMap((t, index) => (t <= 0.08 ? [ground[index]] : []));
     const endSamples = meshT.flatMap((t, index) => (t >= 0.92 ? [ground[index]] : []));
     const startGround = averageOr(startSamples, ground[0]);
@@ -3241,6 +3339,9 @@ export class BridgeModelLayer implements CustomLayerInterface {
         latitude: coordinates[index][1],
         ground: ground[index],
         deck: deck[index],
+        shadowLongitude: shadowCoordinates[index][0],
+        shadowLatitude: shadowCoordinates[index][1],
+        shadowGround: shadowHeights[index],
         east: point.east,
         north: point.north,
         t: meshT[index],
@@ -3302,7 +3403,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private textureSections(bridge: SampledBridge, limit: number) {
     const started = performance.now();
     const key = `${limit}:${bridgeResourceKey(bridge)}`;
-    const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck]));
+    const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck, point.shadowGround]));
     let cached = this.sectionCache.get(key);
     if (cached) {
       this.sectionCache.delete(key);
@@ -3313,6 +3414,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
           const updated = section.weights.map((weights) => ({
             ground: weights.reduce((sum, [index, weight]) => sum + bridge.surface[index].ground * weight, 0),
             deck: weights.reduce((sum, [index, weight]) => sum + bridge.surface[index].deck * weight, 0),
+            shadowGround: weights.reduce((sum, [index, weight]) => sum + (bridge.surface[index].shadowGround ?? bridge.surface[index].ground) * weight, 0),
           }));
           section.bridge = { ...section.bridge, surface: section.bridge.surface.map((point, index) => ({ ...point, ...updated[index] })) };
           section.paintBridge = { ...section.paintBridge, surface: section.paintBridge.surface.map((point, index) => ({ ...point, ...updated[index] })) };
@@ -3428,7 +3530,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
   private writeMeshEntry(entry: { bridge: SampledBridge; paintBridge: SampledBridge; key: string }) {
     const { bridge, paintBridge, key } = entry;
-    const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck]));
+    const heights = JSON.stringify(bridge.surface.map((point) => [point.ground, point.deck, point.shadowGround]));
     let resource = this.bridgeResources.get(key);
     if (resource) {
       this.bridgeResources.delete(key);
@@ -3439,11 +3541,12 @@ export class BridgeModelLayer implements CustomLayerInterface {
         const shadowPositions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
         bridge.surface.forEach((point, index) => {
           deckPositions.setY(index, point.deck - resource!.elevation);
-          shadowPositions.setY(index, point.ground - resource!.elevation + BRIDGE_SHADOW_HOVER_METRES);
+          shadowPositions.setY(index, (point.shadowGround ?? point.ground) - resource!.elevation + BRIDGE_SHADOW_HOVER_METRES);
         });
         deckPositions.needsUpdate = true;
         shadowPositions.needsUpdate = true;
         fadeBridgeShadowGeometry(resource.shadow.geometry, bridge.surface);
+        fadeBridgeEntranceGeometry(resource.deck.geometry, bridge);
         resource.deck.geometry.computeVertexNormals();
         this.updateFasciaGeometry(resource, bridge);
         resource.heights = heights;
@@ -3453,26 +3556,27 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     const night = Math.max(this.darkMode ? 0.45 : 0, this.nightMix);
-    const azimuth = CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
-    const shadowEast = -Math.sin(azimuth) * SHADOW_OFFSET_METERS;
-    const shadowNorth = -Math.cos(azimuth) * SHADOW_OFFSET_METERS;
     const canvas = this.paintDeck(paintBridge);
     const texture = this.createDeckTexture(canvas);
     const shadowTexture = this.createDeckTexture(this.shadowCanvas(canvas, paintBridge.bounds));
 
     const deckPoints = bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.deck));
-    const groundPoints = inflatePlanPoints(
+    const fallbackGroundPoints = inflatePlanPoints(
       bridge.surface.map((point) => this.toLocal(point.longitude, point.latitude, point.ground)),
       SHADOW_INFLATE_METRES,
     ).map((point) => ({
-      east: point.east + shadowEast,
-      north: point.north + shadowNorth,
+      east: point.east + this.shadowOffsetEast,
+      north: point.north + this.shadowOffsetNorth,
       up: point.up + BRIDGE_SHADOW_HOVER_METRES,
     }));
+    const groundPoints = bridge.surface.map((point, index) => point.shadowLongitude !== undefined && point.shadowLatitude !== undefined
+      ? this.toLocal(point.shadowLongitude, point.shadowLatitude, (point.shadowGround ?? point.ground) + BRIDGE_SHADOW_HOVER_METRES)
+      : fallbackGroundPoints[index]);
     const plan = paintBridge.surface;
 
     const deckGeometry = texturedIndexedGeometry(deckPoints, plan, paintBridge.bounds, bridge.indices);
     const shadowGeometry = texturedIndexedGeometry(groundPoints, plan, paintBridge.bounds, bridge.indices);
+    if (deckGeometry) fadeBridgeEntranceGeometry(deckGeometry, bridge);
     if (shadowGeometry) fadeBridgeShadowGeometry(shadowGeometry, bridge.surface);
     if (!deckGeometry || !shadowGeometry) {
       deckGeometry?.dispose();
@@ -3486,7 +3590,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
       toneMapped: false,
       map: texture,
       transparent: true,
-      alphaTest: 0.2,
+      vertexColors: true,
+      alphaTest: 0.01,
       side: THREE.DoubleSide,
       forceSinglePass: true,
       polygonOffset: true,
@@ -3507,7 +3612,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       vertexColors: true,
       transparent: true,
       opacity: BRIDGE_SHADOW_OPACITY * (1 - night * 0.65),
-      depthTest: false,
+      depthTest: true,
       depthWrite: false,
       side: THREE.DoubleSide,
       forceSinglePass: true,
@@ -3521,6 +3626,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       paintSignature: this.paintSignature,
       deck: deckMesh, fascia: fascia?.mesh, fasciaEdges: fascia?.edges,
       shadow: shadowMesh, origin: this.sceneOrigin,
+      shadowBasePoints: groundPoints.map((point) => ({ ...point, east: point.east - this.shadowOffsetEast, north: point.north - this.shadowOffsetNorth })),
       elevation: this.sceneOriginElevation, heights,
     });
     this.performanceStats.built += 1;
@@ -3541,6 +3647,19 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (this.pierMesh) position(this.pierMesh, this.pierOrigin, this.pierOriginElevation);
   }
 
+  private updateShadowOffsets() {
+    for (const resource of this.bridgeResources.values()) {
+      if (!resource.shadowBasePoints) continue;
+      const positions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
+      resource.shadowBasePoints.forEach((point, index) => {
+        positions.setX(index, point.east + this.shadowOffsetEast);
+        positions.setZ(index, point.north + this.shadowOffsetNorth);
+      });
+      positions.needsUpdate = true;
+      resource.shadow.geometry.computeBoundingSphere();
+    }
+  }
+
   private createFasciaMesh(
     bridge: SampledBridge,
     deckPoints: LocalPoint[],
@@ -3551,6 +3670,9 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (!geometry) return undefined;
     const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({
       color: FASCIA_COLOR,
+      emissive: new THREE.Color('#94a19b'),
+      emissiveIntensity: 0.18,
+      vertexColors: true,
       flatShading: true,
       transparent: true,
     }));
@@ -3577,6 +3699,11 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setIndex(indices);
+    const colors = edges.flatMap(([a, b]) => [a, b, b, a].flatMap((index) => {
+      const point = bridge.surface[index];
+      return [1, 1, 1, bridgeEntranceOpacity(point.t, bridge.spanLength, point.deck - point.ground, true)];
+    }));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
     geometry.computeVertexNormals();
     return geometry;
   }
@@ -3737,11 +3864,11 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const map = this.map;
     if (!map?.getPaintProperty) return;
     const ids = ['global-roads', 'global-road-casing', 'global-railways',
-      'global-railway-bed', 'global-footways', 'global-path-casing',
+      'global-railway-bed', 'global-railway-sleepers', 'global-footways', 'global-path-casing',
       'global-cycleways', 'global-cycleway-casing', 'global-tracks', 'global-bridge-decks'];
     const values = ids.map((id) => [id, map.getLayer(id)
       ? map.getPaintProperty(id, id === 'global-bridge-decks' ? 'fill-color' : 'line-color') : undefined] as const);
-    const signature = JSON.stringify(values);
+    const signature = JSON.stringify([values, Math.round((this.map?.getZoom?.() ?? 16) * 4) / 4]);
     if (signature !== this.paintSignature) {
       this.paintSignature = signature;
       this.paintValues = new Map(values);
@@ -3797,14 +3924,18 @@ export class BridgeModelLayer implements CustomLayerInterface {
         return typeof result === 'string' ? result : fallback;
       };
       const fill = color(fillLayer, part.fill);
-      // Rail lines keep the palette tint; the slab follows the themed deck/land color.
+      const edge = color(edgeLayer, part.edge);
       const deckFill = rail
-        ? `#${new THREE.Color(fill).lerp(
-          new THREE.Color(color('global-bridge-decks', '#dedede')),
-          0.65,
-        ).getHexString()}`
-        : fill;
-      return { fill: deckFill, edge: color(edgeLayer, part.edge), rail: rail ? fill : undefined };
+        ? color('global-railway-bed', RAIL_BED_DAY)
+        : path && !this.darkMode && this.nightMix < 0.55
+          ? lightenBridgePathColor(fill)
+          : fill;
+      const zoom = Math.round((this.map?.getZoom() ?? 16) * 4) / 4;
+      const sleeperOpacity = zoom <= 15 ? 0 : zoom < 16.5 ? (zoom - 15) / 1.5 * 0.56
+        : Math.min(0.7, 0.56 + (zoom - 16.5) / 1.5 * 0.14);
+      return { fill: deckFill, edge: rail ? deckFill : edge, rail: rail ? fill : undefined,
+        sleeper: properties.className === 'rail' ? color('global-railway-sleepers', '') : undefined,
+        sleeperOpacity };
     }, bridge.texturePixelBudget);
     this.performanceStats.paintMs += performance.now() - started;
     return canvas;
@@ -3812,9 +3943,9 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
   private applyLighting() {
     const night = Math.max(this.darkMode ? 0.75 : 0, this.nightMix);
-    if (this.hemisphereLight) this.hemisphereLight.intensity = 0.55 + (1 - night) * 1.25;
+    if (this.hemisphereLight) this.hemisphereLight.intensity = CARTOON_AMBIENT_BASE_INTENSITY + (1 - night) * CARTOON_AMBIENT_DAY_INTENSITY;
     if (this.sunlight) {
-      this.sunlight.intensity = 0.5 + (1 - night) * 1.9;
+      this.sunlight.intensity = CARTOON_SUN_BASE_INTENSITY + (1 - night) * CARTOON_SUN_DAY_INTENSITY;
       this.sunlight.color.set(night > 0.65 ? 0xc8d4f0 : CARTOON_SUN_COLOR);
     }
     if (this.pierMesh) {
@@ -3901,6 +4032,13 @@ export function bridgeTextureSections(bridge: SampledBridge, maxSections = MAX_T
       bridge: { ...bridge, surface, indices: localIndices, bounds: planBounds(surface, 2), texturePixelBudget },
       paintBridge: { ...paintBridge, surface: projected, indices: localIndices, bounds, texturePixelBudget } }];
   });
+}
+
+function fadeBridgeEntranceGeometry(geometry: THREE.BufferGeometry, bridge: SampledBridge) {
+  const colors = bridge.surface.flatMap((point) => [
+    1, 1, 1, bridgeEntranceOpacity(point.t, bridge.spanLength, point.deck - point.ground),
+  ]);
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
 }
 
 function fadeBridgeShadowGeometry(

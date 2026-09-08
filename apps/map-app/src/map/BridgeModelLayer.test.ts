@@ -5,7 +5,9 @@ import {
   bridgeClearanceProbes,
   bridgeArchMetres,
   bridgeApproachMix,
+  bridgeEntranceOpacity,
   bridgeShadowEndFade,
+  shadowTerrainHeights,
   bridgeSurfaceClearance,
   bridgeWallBottom,
   bridgeBoundaryEdges,
@@ -451,7 +453,55 @@ describe('bridge fascia and abutments', () => {
   });
 });
 
+describe('bridge entrance feathering', () => {
+  it('softens both terrain-contact ends while keeping a covered deck and hiding the end fascia', () => {
+    for (const t of [0, 1]) {
+      expect(bridgeEntranceOpacity(t, 100, 0.06)).toBeCloseTo(0.4);
+      expect(bridgeEntranceOpacity(t, 100, 0.06, true)).toBe(0);
+    }
+    expect(bridgeEntranceOpacity(0.025, 100, 0.06)).toBeGreaterThan(0.4);
+    expect(bridgeEntranceOpacity(0.025, 100, 0.06)).toBeLessThan(1);
+    expect(bridgeEntranceOpacity(0.05, 100, 0.06)).toBe(1);
+  });
+
+  it('keeps elevated ends, interior terrain contacts and unknown approaches solid', () => {
+    for (const fascia of [false, true]) {
+      expect(bridgeEntranceOpacity(0, 100, 2, fascia)).toBe(1);
+      expect(bridgeEntranceOpacity(0.5, 100, 0.06, fascia)).toBe(1);
+      expect(bridgeEntranceOpacity(undefined, 100, 0.06, fascia)).toBe(1);
+      expect(bridgeEntranceOpacity(0.25, 8, 0.06, fascia)).toBe(1);
+    }
+  });
+
+  it('assigns fascia opacity to matching top and bottom edge vertices', () => {
+    const layer = new BridgeModelLayer() as any;
+    const bridge = { spanLength: 100, surface: [
+      { t: 0, ground: 0, deck: 0.06 }, { t: 0.1, ground: 0, deck: 2 },
+    ] };
+    const geometry = layer.fasciaGeometry(bridge,
+      [{ east: 0, north: 0, up: 0.06 }, { east: 10, north: 0, up: 2 }], [[0, 1]], 0);
+    const colors = geometry.getAttribute('color');
+    expect([0, 1, 2, 3].map((index) => colors.getW(index))).toEqual([0, 1, 1, 0]);
+    geometry.dispose();
+  });
+});
+
 describe('bridge shadows', () => {
+  it('clears terrain rises inside shadow triangles without lowering neighbouring vertices', () => {
+    const ground = [0, 2, 1, 8];
+    const probes = [
+      { vertices: [0, 1, 2], weights: [0.25, 0.25, 0.5], ground: 4 },
+      { vertices: [1, 2, 3], weights: [0.25, 0.5, 0.25], ground: 6 },
+    ];
+    const heights = shadowTerrainHeights(ground, probes);
+    for (const probe of probes) {
+      expect(probe.vertices.reduce((sum, vertex, i) => sum + heights[vertex] * probe.weights[i], 0))
+        .toBeGreaterThanOrEqual(probe.ground);
+    }
+    heights.forEach((height, i) => expect(height).toBeGreaterThanOrEqual(ground[i]));
+    expect(shadowTerrainHeights(ground, [])).toEqual(ground);
+  });
+
   it('grows the ground footprint so a blurred silhouette can fade out', () => {
     const inflated = inflatePlanPoints([
       { east: -10, north: -2 }, { east: 10, north: -2 },
@@ -1476,6 +1526,21 @@ describe('BridgeModelLayer', () => {
     });
   });
 
+  it('moves existing bridge shadows when the sun offset changes', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.map = terrainViewMap();
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const resource = [...internal.bridgeResources.values()][0] as any;
+      const positions = resource.shadow.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const before = { x: positions.getX(0), z: positions.getZ(0) };
+      const oldOffset = { east: internal.shadowOffsetEast, north: internal.shadowOffsetNorth };
+      layer.setDayNightLighting({ azimuth: 90, polar: 45, nightMix: 0, shadowOffset: [10, -7] });
+      expect(positions.getX(0) - before.x).toBeCloseTo(10 - oldOffset.east);
+      expect(positions.getZ(0) - before.z).toBeCloseTo(-7 - oldOffset.north);
+    });
+  });
+
   it('continues drawing below the cutoff even before the next bridge update', () => {
     withBridgeResources((layer, internal, bridge) => {
       internal.sampledBridges = [bridge];
@@ -1574,6 +1639,36 @@ describe('BridgeModelLayer', () => {
       internal.writeMeshes();
       expect(internal.bridgeResources.size).toBe(240);
       expect(internal.decks.children).toHaveLength(480);
+    });
+  });
+
+  it('lets scene geometry occlude bridge shadows without shadows writing depth', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const shadow = internal.decks.children[1] as THREE.Mesh;
+      const material = shadow.material as THREE.MeshBasicMaterial;
+      expect(material.depthTest).toBe(true);
+      expect(material.depthWrite).toBe(false);
+    });
+  });
+
+  it('places shadows at their sampled footprint and updates when only shadow terrain changes', () => {
+    withBridgeResources((layer, internal, bridge) => {
+      bridge.surface = bridge.surface.map((point: any) => ({ ...point,
+        shadowLongitude: point.longitude + 0.0001, shadowLatitude: point.latitude, shadowGround: 12 }));
+      internal.sampledBridges = [bridge];
+      internal.writeMeshes();
+      const shadow = internal.decks.children[1] as THREE.Mesh;
+      const geometry = shadow.geometry;
+      const expected = internal.toLocal(bridge.surface[0].shadowLongitude, bridge.surface[0].shadowLatitude, 12 + BRIDGE_SHADOW_HOVER_METRES);
+      expect(geometry.getAttribute('position').getX(0) + shadow.position.x).toBeCloseTo(expected.east, 3);
+      expect(geometry.getAttribute('position').getY(0) + shadow.position.y).toBeCloseTo(expected.up, 3);
+      bridge.surface.forEach((point: any) => { point.shadowGround = 16; });
+      internal.writeMeshes();
+      expect(shadow.geometry).toBe(geometry);
+      expect(geometry.getAttribute('position').getY(0) + shadow.position.y)
+        .toBeCloseTo(16 - internal.sceneOriginElevation + BRIDGE_SHADOW_HOVER_METRES, 3);
     });
   });
 
@@ -2091,17 +2186,17 @@ describe('bridge active style paint', () => {
           fill: '#f1efe7', edge: '#87918d', properties: { className: 'motorway', layer: 0, ramp: false } }] };
       layer.refreshDeckPaint();
       layer.paintDeck(bridge);
-      expect(strokes.at(-1)).toBe('#f9f7ef');
+      expect(strokes.slice(-2)).toEqual(['#adb8af', '#f9f7ef']);
       bridge.parts[0].properties = { ...bridge.parts[0].properties, surface: 'unpaved' } as any;
       layer.paintDeck(bridge);
-      expect(strokes.at(-1)).toBe('#d9cbaa');
+      expect(strokes.slice(-2)).toEqual(['#adb8af', '#d9cbaa']);
       const texture = new THREE.Texture();
       const resource = { deck: { material: { map: texture } }, paintBridge: bridge, paintSignature: '' };
       layer.bridgeResources.set('test', resource);
       for (const paletteColor of ['#b8aa80', '#304050', '#f7f5ee']) {
         road = paletteColor;
         layer.refreshDeckPaint();
-        expect(strokes.at(-1)).toBe(paletteColor);
+        expect(strokes.slice(-2)).toEqual(['#adb8af', paletteColor]);
         expect(resource.deck.material.map).toBe(texture);
         const version = texture.version;
         layer.refreshDeckPaint();
@@ -2133,12 +2228,13 @@ describe('bridge active style paint', () => {
         colors['global-cycleway-casing'] = casing;
         layer.refreshDeckPaint();
         layer.paintDeck(bridge);
-        expect(strokes.slice(-2)).toEqual([casing, fill]);
+        const expectedFill = `#${new THREE.Color(fill).lerp(new THREE.Color('#ffffff'), 0.12).getHexString()}`;
+        expect(strokes.slice(-2)).toEqual([casing, expectedFill]);
       }
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('darkens rail decks with the active railway and land palette', () => {
+  it('keeps railway rails distinct from the bridge bed across palettes', () => {
     const strokes: string[] = [];
     const context = { setTransform() {}, save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
       strokeStyle: '', stroke() { strokes.push(this.strokeStyle); } };
@@ -2147,7 +2243,7 @@ describe('bridge active style paint', () => {
       const layer = new BridgeModelLayer() as any;
       const colors: Record<string, string> = {
         'global-railways': '#8ea097',
-        'global-railway-bed': '#6f7874',
+        'global-railway-bed': '#d5dad6',
         'global-bridge-decks': '#dedede',
       };
       layer.map = { getLayer: (id: string) => id in colors, getZoom: () => 16,
@@ -2156,23 +2252,17 @@ describe('bridge active style paint', () => {
         parts: [{ kind: 'line', width: 5.5, plan: [{ east: 0, north: 0 }, { east: 20, north: 0 }],
           fill: '#c8ceca', edge: '#6f7874',
           properties: { className: 'rail', layer: 0, ramp: false } }] };
-      const deckFill = (rail: string, land: string) => (
-        `#${new THREE.Color(rail).lerp(new THREE.Color(land), 0.65).getHexString()}`
-      );
       layer.refreshDeckPaint();
       layer.paintDeck(bridge);
-      expect(strokes.slice(-4)).toEqual([
-        '#6f7874', deckFill('#8ea097', '#dedede'), '#8ea097', '#8ea097',
-      ]);
+      const dayDeck = '#d5dad6';
+      expect(strokes.slice(-4)).toEqual([dayDeck, dayDeck, '#8ea097', '#8ea097']);
       colors['global-railways'] = '#6b8295';
       colors['global-railway-bed'] = '#3d5163';
       colors['global-bridge-decks'] = '#10253a';
       layer.refreshDeckPaint();
       layer.paintDeck(bridge);
-      const nightDeck = deckFill('#6b8295', '#10253a');
+      const nightDeck = '#3d5163';
       expect(strokes.slice(-4)).toEqual(['#3d5163', nightDeck, '#6b8295', '#6b8295']);
-      expect(new THREE.Color(nightDeck).getHSL({ h: 0, s: 0, l: 0 }).l)
-        .toBeLessThan(new THREE.Color(deckFill('#8ea097', '#dedede')).getHSL({ h: 0, s: 0, l: 0 }).l);
     } finally { vi.unstubAllGlobals(); }
   });
 
@@ -2256,6 +2346,20 @@ describe('long bridge texture sections', () => {
 
 
 describe('bridge rails', () => {
+  it('draws sleepers below paired rails when sleeper detail is enabled', () => {
+    const strokes: string[] = [];
+    const context = { setTransform() {}, save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {},
+      strokeStyle: '', stroke() { strokes.push(this.strokeStyle); } };
+    vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+    try {
+      const plan = [{ east: 0, north: 0 }, { east: 100, north: 0 }];
+      paintBridgeCluster([], [{ kind: 'line', plan, width: 5.5, fill: '#d5dad6', edge: '#d5dad6',
+        properties: { className: 'rail', layer: 0, ramp: false } }], planBounds(plan, 4),
+        () => ({ fill: '#d5dad6', edge: '#d5dad6', rail: '#828c8d', sleeper: '#b4bdb7', sleeperOpacity: 0.7 }));
+      expect(strokes).toEqual(['#d5dad6', '#d5dad6', '#b4bdb7', '#828c8d', '#828c8d']);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('offsets both rails along bends without spikes or duplicate-point errors', () => {
     const plan = [{ east: 0, north: 0 }, { east: 0, north: 0 }, { east: 20, north: 0 }, { east: 20, north: 20 }];
     const rails = bridgeRailLines(plan);

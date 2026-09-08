@@ -1,4 +1,4 @@
-import { validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
+import { createExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it } from 'vitest';
 import {
   aerowayWidthExpression,
@@ -15,6 +15,24 @@ import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
+  it('uses metre-scaled paired rails inside the ground railway bed at close zoom', () => {
+    const rail = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railways') as any;
+    const bed = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railway-bed') as any;
+    const evaluate = (expression: any, zoom: number) => {
+      const compiled = createExpression(expression, 'railway-width-test');
+      if (compiled.result !== 'success') throw new Error('Invalid railway expression');
+      return compiled.value.evaluate({ zoom });
+    };
+    expect(evaluate(rail.paint['line-gap-width'], 14)).toBe(0);
+    for (const zoom of [16, 18, 20]) {
+      const width = evaluate(rail.paint['line-width'], zoom);
+      const gap = evaluate(rail.paint['line-gap-width'], zoom);
+      const bedWidth = evaluate(bed.paint['line-width'], zoom);
+      expect((gap + width) / bedWidth).toBeCloseTo(1.5 / 5.5);
+      expect(gap + 2 * width).toBeLessThan(bedWidth);
+    }
+  });
+
   it('preserves an elevated flight camera through an immediate style redraw', () => {
     let elevation = 450;
     let roll = 20;
