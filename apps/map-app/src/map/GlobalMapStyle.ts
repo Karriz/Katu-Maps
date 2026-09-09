@@ -188,7 +188,7 @@ const PIER_LINE_FILTER: ExpressionSpecification = [
   ['==', ['get', 'class'], 'pier'],
 ] as ExpressionSpecification;
 
-const CLOSEUP_ROAD_GRAY = '#cfd3d8';
+const CLOSEUP_ROAD_GRAY = '#d8dce0';
 const CLOSEUP_ROAD_CASING = '#ffffff';
 
 const ROAD_COLOR: ExpressionSpecification = [
@@ -503,12 +503,12 @@ const NASINNEULA_BUILDING_OUTLINE_MATCH: ExpressionSpecification = [
     'all',
     // OpenFreeMap can merge building polygons and replace their source IDs.
     // Keep a narrow geometry/property fallback for this landmark outline.
+    ['==', ['get', 'render_height'], 135],
+    ['==', ['get', 'render_min_height'], 7],
     ['<=', ['distance', {
       type: 'Point',
       coordinates: [23.74329, 61.50496],
     }], 40],
-    ['==', ['get', 'render_height'], 135],
-    ['==', ['get', 'render_min_height'], 7],
   ],
 ] as ExpressionSpecification;
 
@@ -1574,14 +1574,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': [
           'interpolate', ['linear'], ['zoom'],
           15, 0.5,
-          18, 0.95,
+          16, 0.9,
+          18, 1.6,
         ],
         'line-dasharray': [3, 4],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
           15, 0,
-          15.8, 0.55,
-          18, 0.68,
+          15.8, 0.6,
+          18, 0.82,
         ],
       },
     },
@@ -2040,8 +2041,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'interpolate', ['linear'], ['zoom'],
           12, 0,
           12.7, 0.84,
-          15, 0.92,
-          18, 0.95,
+          14, 1,
         ],
         // Fill outlines render as a restrained one-pixel hairline in
         // MapLibre, keeping adjacent footprints legible without heavy rims.
@@ -2138,7 +2138,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'interpolate', ['linear'], ['zoom'],
           13, 0,
           13.45, 0.96,
-          18, 1,
+          14, 1,
         ],
         'fill-extrusion-vertical-gradient': false,
       },
@@ -2160,7 +2160,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'interpolate', ['linear'], ['zoom'],
           13, 0,
           13.45, 0.96,
-          18, 1,
+          14, 1,
         ],
         'fill-extrusion-vertical-gradient': false,
       },

@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
 import type { TreeModelLayer } from './TreeModelLayer';
 import type { BridgeModelLayer } from './BridgeModelLayer';
+import type { RoofModelLayer } from './RoofModelLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { MapLayerState } from './MapControls';
@@ -16,6 +17,7 @@ import { applyGroundPatternTheme } from './GroundPatterns';
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
   bridgeLayerRef: RefObject<BridgeModelLayer | null>;
+  roofLayerRef: RefObject<RoofModelLayer | null>;
   transitRouteOverlayRef: RefObject<TransitRouteOverlay | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   treeRefreshRef: RefObject<(() => void) | null>;
@@ -72,7 +74,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, bridgeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
+  treeLayerRef, bridgeLayerRef, roofLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
@@ -94,6 +96,7 @@ export function useMapLayerVisibility({
       map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
     }
     bridgeLayerRef.current?.setEnabled(layerToggles.bridges);
+    roofLayerRef.current?.setEnabled(layerToggles.proceduralRoofs);
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
       .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'), layerToggles.transit);
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
@@ -120,6 +123,7 @@ export function useMapLayerVisibility({
     if (!layerToggles.roadWeather) onRoadWeatherDisabled();
     if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
   }, [mapLoaded, layerToggles.globe, layerToggles.terrain, layerToggles.buildings, layerToggles.bridges,
+    layerToggles.proceduralRoofs,
     layerToggles.trees, layerToggles.cycling, layerToggles.hiking, layerToggles.transit,
     layerToggles.transitLines, layerToggles.transitModels, layerToggles.trafficCameras,
     layerToggles.chargingStations, layerToggles.roadWeather, layerToggles.roadTraffic,
@@ -127,20 +131,21 @@ export function useMapLayerVisibility({
     cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled,
     onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled,
     terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef,
-    waterEffectLayerIds, bridgeLayerRef]);
+    waterEffectLayerIds, bridgeLayerRef, roofLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     treeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     bridgeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    roofLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     applyGroundPatternTheme(map, resolvedTheme);
     if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
   }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme,
-    bridgeLayerRef, transitVehicleLayerRef, treeLayerRef]);
+    bridgeLayerRef, roofLayerRef, transitVehicleLayerRef, treeLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;

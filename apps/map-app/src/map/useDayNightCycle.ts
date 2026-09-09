@@ -78,10 +78,15 @@ export function useDayNightCycle({
     }
 
     let frame = 0;
+    let lastAppearanceSignature: string | undefined;
     const apply = () => {
       frame = 0;
       const center = map.getCenter();
       const zoom = map.getZoom();
+      const signature = JSON.stringify([center.lng, center.lat, zoom,
+        enabled ? utcMsRef.current : map.getBearing()]);
+      if (signature === lastAppearanceSignature) return;
+      lastAppearanceSignature = signature;
       if (!enabled) {
         // Decorative terminator locked to the screen, not the real sun.
         layerRef.current?.setAppearance(
@@ -126,11 +131,13 @@ export function useDayNightCycle({
       });
       map.triggerRepaint();
     };
-    applyRef.current = apply;
     const schedule = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(apply);
     };
+    // Slider changes and camera events share one latest-state update. Keep
+    // each palette atomic so bridge textures see only the completed palette.
+    applyRef.current = schedule;
     apply();
     map.on('move', schedule);
     map.on('zoom', schedule);
