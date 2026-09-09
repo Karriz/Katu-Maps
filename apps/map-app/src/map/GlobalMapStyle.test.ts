@@ -23,10 +23,17 @@ describe('global map overlay styles', () => {
     if (compiled.result !== 'success') throw new Error('Invalid building color expression');
     const vivid = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ff0000' } } as any);
     const vividYellow = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ffff00' } } as any);
+    const darkGray = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#303030' } } as any);
+    const darkRed = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#7f1818' } } as any);
+    const saturatedGreen = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#20a020' } } as any);
     const soft = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#f3caca' } } as any);
     expect(vivid.r).toBeGreaterThan(vivid.g);
     expect(vivid.g).toBeGreaterThan(0.75);
     expect(vividYellow.b).toBeGreaterThan(0.75);
+    expect(darkGray.r).toBeGreaterThan(0.7);
+    expect(darkRed.g).toBeGreaterThan(0.65);
+    expect(saturatedGreen.r).toBeGreaterThan(0.7);
+    expect(saturatedGreen.b).toBeGreaterThan(0.7);
     expect(soft.r).toBeCloseTo(0xf3 / 255, 2);
     expect(soft.g).toBeCloseTo(0xca / 255, 2);
     expect(compiled.value.evaluate({ zoom: 16 }, { properties: {} } as any).toString()).toBe('rgba(255,253,248,1)');
