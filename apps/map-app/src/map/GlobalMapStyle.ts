@@ -568,7 +568,7 @@ export function pastelBuildingColor(baseColor: string): ExpressionSpecification 
           ['let', 'lightness', ['/', ['+', brightest, darkest], 510],
             ['interpolate', ['linear'], ['max',
               ['interpolate', ['linear'], ['var', 'chroma'], 0.18, 0, 0.3, 0.5, 0.45, 0.72, 1, 0.9],
-              ['interpolate', ['linear'], ['var', 'lightness'], 0, 0.9, 0.3, 0.7, 0.55, 0],
+              ['interpolate', ['linear'], ['var', 'lightness'], 0, 0.96, 0.4, 0.85, 0.7, 0.2, 0.82, 0],
             ],
             0, ['var', 'tag'],
             1, baseColor,
@@ -580,12 +580,16 @@ export function pastelBuildingColor(baseColor: string): ExpressionSpecification 
       // Feature IDs are stable in the hosted vector tiles, so the restrained
       // fallback tint stays attached to the same building (and to its matching
       // footprint/facade renderings) instead of changing between redraws.
-      ['match', ['%', ['abs', ['to-number', ['id'], 0]], 8],
-        3, defaultTint(-5, -7, -9),
-        4, defaultTint(-7, -5, -2),
-        5, defaultTint(-3, -5, -7),
-        6, defaultTint(-8, -4, -5),
-        7, defaultTint(-6, -7, -3),
+      // Planetiler's building IDs end in a geometry-type digit. Remove that
+      // suffix before selecting a bucket or most buildings would hit only a
+      // small subset of the palette.
+      ['match', ['%', ['floor', ['/', ['abs', ['to-number', ['id'], 0]], 10]], 8],
+        2, defaultTint(-10, -14, -18),
+        3, defaultTint(-14, -10, -4),
+        4, defaultTint(-7, -11, -16),
+        5, defaultTint(-16, -7, -10),
+        6, defaultTint(-12, -15, -6),
+        7, defaultTint(-9, -13, -9),
         baseColor,
       ],
     ],

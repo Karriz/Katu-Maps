@@ -41,11 +41,11 @@ describe('global map overlay styles', () => {
     expect(soft.r).toBeCloseTo(0xf3 / 255, 2);
     expect(soft.g).toBeCloseTo(0xca / 255, 2);
     expect(untagged()).toBe('rgba(255,253,248,1)');
-    expect(untagged(1)).toBe('rgba(255,253,248,1)');
-    expect(untagged(3)).toBe('rgba(250,246,239,1)');
-    expect(untagged(4)).toBe('rgba(248,248,246,1)');
-    expect(untagged(3)).toBe(untagged(3));
-    expect(new Set(Array.from({ length: 8 }, (_, id) => untagged(id))).size).toBe(6);
+    expect(untagged(12)).toBe('rgba(255,253,248,1)');
+    expect(untagged(22)).toBe('rgba(245,239,230,1)');
+    expect(untagged(32)).toBe('rgba(241,243,244,1)');
+    expect(untagged(22)).toBe(untagged(22));
+    expect(new Set(Array.from({ length: 8 }, (_, id) => untagged(id * 10 + 2))).size).toBe(7);
     expect(buildingColorPaint('#fffdf8', false)).toBe('#fffdf8');
   });
 
