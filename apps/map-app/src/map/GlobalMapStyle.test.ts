@@ -7,6 +7,7 @@ import {
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
+  pastelBuildingColor,
   updateBridgeFallback,
   removeBridgeFallback,
   refreshMapRenderState,
@@ -15,6 +16,16 @@ import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
+  it('pastellizes OSM building colours toward the map building palette', () => {
+    const expression = pastelBuildingColor('#fffdf8') as any;
+    const compiled = createExpression(expression, 'building-color-test');
+    if (compiled.result !== 'success') throw new Error('Invalid building color expression');
+    const color = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ff0000' } } as any);
+    expect(color.r).toBeGreaterThan(color.g);
+    expect(color.g).toBeGreaterThan(0.7);
+    expect(compiled.value.evaluate({ zoom: 16 }, { properties: {} } as any).toString()).toBe('rgba(255,253,248,1)');
+  });
+
   it('uses metre-scaled paired rails inside the ground railway bed at close zoom', () => {
     const rail = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railways') as any;
     const bed = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railway-bed') as any;

@@ -6,7 +6,7 @@ import {
   CARTOON_SUN_COLOR,
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
-import { GLOBAL_MAP_STYLE, applyMapTheme } from './GlobalMapStyle';
+import { GLOBAL_MAP_STYLE, applyMapTheme, buildingColorPaint } from './GlobalMapStyle';
 import type { DayNightAppearance, DayNightPalette } from './DayNightAppearance';
 import { localStyleMix, nightFactor } from './DayNightAppearance';
 import { Color } from 'three';
@@ -32,7 +32,7 @@ function setPaint(map: MapLibreMap, id: string, property: string, value: unknown
   if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
 }
 
-function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) {
+function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, buildingColorsEnabled: boolean) {
   setPaint(map, 'global-background', 'background-color', colors.background);
   setPaint(map, 'global-globe-biomes', 'fill-color',
     globeBiomeColor(colors.land, localStyleMix(map.getZoom()) * (0.2 + night * 0.65)));
@@ -73,11 +73,11 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) 
   setPaint(map, 'global-railway-bed', 'line-color', `#${new Color(RAIL_BED_DAY).lerp(new Color(RAIL_BED_NIGHT), night).getHexString()}`);
   setPaint(map, 'global-railway-sleepers', 'line-color', `#${new Color(RAIL_SLEEPER_DAY).lerp(new Color(RAIL_SLEEPER_NIGHT), night).getHexString()}`);
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
-    setPaint(map, id, 'fill-color', colors.building);
+    setPaint(map, id, 'fill-color', buildingColorPaint(colors.building, buildingColorsEnabled));
     setPaint(map, id, 'fill-outline-color', colors.boundary);
   });
-  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
-  setPaint(map, 'global-buildings', 'fill-extrusion-color', colors.building);
+  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', buildingColorPaint(colors.buildingBand, buildingColorsEnabled));
+  setPaint(map, 'global-buildings', 'fill-extrusion-color', buildingColorPaint(colors.building, buildingColorsEnabled));
   const verticalGradient = false;
   setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-vertical-gradient', verticalGradient);
   setPaint(map, 'global-buildings', 'fill-extrusion-vertical-gradient', verticalGradient);
@@ -122,7 +122,7 @@ function captureLighting(map: MapLibreMap) {
   });
 }
 
-export function applyDayNightStyle(map: MapLibreMap, appearance: DayNightAppearance) {
+export function applyDayNightStyle(map: MapLibreMap, appearance: DayNightAppearance, buildingColorsEnabled = true) {
   captureLighting(map);
   const styleMix = localStyleMix(map.getZoom());
   const night = nightFactor(appearance.elevation);
@@ -133,7 +133,7 @@ export function applyDayNightStyle(map: MapLibreMap, appearance: DayNightAppeara
       paintMode.set(map, 'original');
     }
   } else {
-    applyPalette(map, appearance.palette, night);
+    applyPalette(map, appearance.palette, night, buildingColorsEnabled);
     paintMode.set(map, 'palette');
   }
   applyHillshadeDirection(map, appearance.azimuth);

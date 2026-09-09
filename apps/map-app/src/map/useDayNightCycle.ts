@@ -19,6 +19,7 @@ export function useDayNightCycle({
   mapLoaded,
   enabled,
   cloudsEnabled,
+  buildingColorsEnabled,
   utcMs,
   flightActive,
   resolvedTheme,
@@ -30,6 +31,7 @@ export function useDayNightCycle({
   mapLoaded: boolean;
   enabled: boolean;
   cloudsEnabled: boolean;
+  buildingColorsEnabled: boolean;
   utcMs: number;
   flightActive: boolean;
   resolvedTheme: ResolvedTheme;
@@ -96,7 +98,7 @@ export function useDayNightCycle({
         return;
       }
       const appearance = dayNightAppearance(new Date(utcMsRef.current), center.lat, center.lng, zoom);
-      applyDayNightStyle(map, appearance);
+      applyDayNightStyle(map, appearance, buildingColorsEnabled);
       layerRef.current?.setAppearance(appearance.sunDirection, appearance.shadeOpacity, appearance.lightsIntensity);
       treeLayerRef.current?.setDayNightLighting({
         azimuth: appearance.azimuth,
@@ -141,7 +143,7 @@ export function useDayNightCycle({
       applyRef.current = () => {};
     };
   }, [
-    enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
+    buildingColorsEnabled, enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
     treeLayerRef, bridgeLayerRef, transitVehicleLayerRef,
   ]);
 

@@ -542,6 +542,27 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
 const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
 const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
 
+/**
+ * Retain a restrained hint of an OSM building colour while pulling unusual,
+ * highly saturated tags into the map's base palette. OpenMapTiles exposes the
+ * OSM `building:colour` value as `colour` on building features.
+ */
+export function pastelBuildingColor(baseColor: string): ExpressionSpecification {
+  return [
+    'case',
+    ['has', 'colour'],
+    ['interpolate', ['linear'], 0.76,
+      0, ['to-color', ['get', 'colour'], baseColor],
+      1, baseColor,
+    ],
+    baseColor,
+  ] as ExpressionSpecification;
+}
+
+export function buildingColorPaint(baseColor: string, enabled: boolean): string | ExpressionSpecification {
+  return enabled ? pastelBuildingColor(baseColor) : baseColor;
+}
+
 const WATER_COLOR: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
   0, '#5fa9bc',
@@ -1956,7 +1977,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 12,
       maxzoom: 13.75,
       paint: {
-        'fill-color': GLOBAL_BUILDING_COLOR,
+        'fill-color': pastelBuildingColor(GLOBAL_BUILDING_COLOR),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0.78,
@@ -1977,7 +1998,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // This is the persistent flat representation used when 3D buildings
         // are disabled. It gains a little definition at close zooms without
         // trying to imitate extrusion lighting.
-        'fill-color': '#fffef9',
+        'fill-color': pastelBuildingColor('#fffef9'),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           12, 0,
@@ -2070,7 +2091,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
       ],
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_GROUND_COLOR,
+        'fill-extrusion-color': pastelBuildingColor(GLOBAL_BUILDING_GROUND_COLOR),
         // Keep the real height present while the layer fades in. The opacity
         // transition below handles the low-zoom handoff from footprints;
         // animating height here makes pitched, distant buildings look flat.
@@ -2093,7 +2114,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 13,
       filter: GLOBAL_BUILDING_3D_FILTER,
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_COLOR,
+        'fill-extrusion-color': pastelBuildingColor(GLOBAL_BUILDING_COLOR),
         'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,
         // Multi-storey buildings begin above the darker ground floor. Short
         // buildings remain a single extrusion from their normal base.
