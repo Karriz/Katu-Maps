@@ -16,7 +16,14 @@ const BUILDING_HUES = [
   '#a98591',
 ] as const;
 
-const OSM_COLOR_MIX = 0.72;
+// A warm neutral removes saturation independently of the active map theme.
+// Mixing only toward the theme (especially a white one) merely tints vivid
+// colors: red becomes pink, while black becomes almost white. This first pass
+// instead gives saturated colors an earthy, material-like appearance and
+// lifts very dark colors into visible grays.
+const OSM_PASTEL_NEUTRAL = '#a89e94';
+const OSM_NEUTRAL_MIX = 0.55;
+const OSM_THEME_MIX = 0.2;
 const GENERATED_COLOR_MIX = 0.86;
 
 function mixTowardTheme(
@@ -46,20 +53,25 @@ function mixTowardTheme(
  */
 export function buildingColorExpression(themeColor: ColorSpecification): ExpressionSpecification {
   const osmColor = ['to-color', ['get', 'colour'], themeColor] as ExpressionSpecification;
-  const generated: unknown[] = [
+  const pastelOsmColor = mixTowardTheme(
+    mixTowardTheme(osmColor, OSM_PASTEL_NEUTRAL, OSM_NEUTRAL_MIX),
+    themeColor,
+    OSM_THEME_MIX,
+  );
+  const generated = [
     'match',
     ['%', ['abs', ['to-number', ['id'], 0]], BUILDING_HUES.length],
-  ];
-
-  BUILDING_HUES.forEach((hue, index) => {
-    generated.push(index, mixTowardTheme(hue, themeColor, GENERATED_COLOR_MIX));
-  });
-  generated.push(themeColor);
+    ...BUILDING_HUES.flatMap((hue, index) => [
+      index,
+      mixTowardTheme(hue, themeColor, GENERATED_COLOR_MIX),
+    ]),
+    themeColor,
+  ] as unknown as ExpressionSpecification;
 
   return [
     'case',
     ['has', 'colour'],
-    mixTowardTheme(osmColor, themeColor, OSM_COLOR_MIX),
+    pastelOsmColor,
     generated,
-  ] as ExpressionSpecification;
+  ] as unknown as ExpressionSpecification;
 }
