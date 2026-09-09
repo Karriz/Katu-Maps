@@ -97,6 +97,14 @@ const TEXTURE_SECTION_METRES = 300;
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RECENTER_DISTANCE_METERS = 350;
+/** Extra metres beyond half roadway width when snapping travellers to a deck centerline. */
+const DECK_CENTERLINE_SLACK_METRES = 3;
+/** Ignore deck samples farther than this from the query point (mesh spacing is ~10 m). */
+const DECK_SAMPLE_RADIUS_METRES = 16;
+/** Direction-agnostic heading match between a traveller and the roadway tangent. */
+const MAX_DECK_HEADING_DIFF_RADIANS = Math.PI / 3;
+/** Cap the synthetic centerline corridor when a sampled cluster has no line parts. */
+const DECK_SYNTHETIC_WIDTH_CAP_METRES = 12;
 
 const BRIDGE_FEATURE_FILTER: FilterSpecification = ['==', ['get', 'brunnel'], 'bridge'];
 
@@ -1124,6 +1132,39 @@ function pointToSegment(point: PlanPoint, start: PlanPoint, end: PlanPoint) {
     (point.east - start.east) * east + (point.north - start.north) * north
   ) / lengthSquared));
   return Math.hypot(point.east - (start.east + east * t), point.north - (start.north + north * t));
+}
+
+/** Absolute heading difference in [0, π/2], treating opposite directions as equal. */
+export function smallestHeadingDelta(a: number, b: number) {
+  let diff = Math.abs(a - b);
+  if (diff > Math.PI) diff = 2 * Math.PI - diff;
+  if (diff > Math.PI / 2) diff = Math.PI - diff;
+  return diff;
+}
+
+/** Closest point on a polyline, with the heading of the nearest segment (atan2 east, north). */
+export function nearestPlanSegment(point: PlanPoint, line: PlanPoint[]): { distance: number; heading: number } | null {
+  if (line.length < 2) return null;
+  let best: { distance: number; heading: number } | null = null;
+  for (let index = 0; index < line.length - 1; index += 1) {
+    const start = line[index];
+    const end = line[index + 1];
+    const east = end.east - start.east;
+    const north = end.north - start.north;
+    const lengthSquared = east * east + north * north;
+    if (lengthSquared < 1e-9) continue;
+    const t = Math.min(1, Math.max(0, (
+      (point.east - start.east) * east + (point.north - start.north) * north
+    ) / lengthSquared));
+    const distance = Math.hypot(
+      point.east - (start.east + east * t),
+      point.north - (start.north + north * t),
+    );
+    if (!best || distance < best.distance) {
+      best = { distance, heading: Math.atan2(east, north) };
+    }
+  }
+  return best;
 }
 
 function polygonsTouch(left: BridgeDrawable, right: BridgeDrawable) {
@@ -2659,33 +2700,104 @@ export class BridgeModelLayer implements CustomLayerInterface {
     return { ...this.performanceStats, cachedBridges: this.bridgeResources.size, cachedGeometryVertices: this.geometryVertices, cachedSections: this.cachedSections };
   }
 
-  /**
-   * Absolute deck elevation (metres, same datum as queryTerrainElevation) at a
-   * lng/lat, interpolated from the sampled bridge surface mesh. Returns null
-   * when no sampled bridge deck covers the point, so callers can fall back to
-   * terrain. Used to lift 3D transit vehicles onto bridges instead of terrain.
-   */
   hasBridges(): boolean {
     return this.sampledBridges.length > 0;
   }
 
+  /**
+   * Absolute deck elevation (metres, same datum as queryTerrainElevation) at a
+   * lng/lat, interpolated from the sampled bridge surface mesh. Returns null
+   * when no sampled bridge deck covers the point. This is a footprint test,
+   * not an on-vs-under decision; travellers should use `deckPlacementAt`.
+   */
   deckElevationAt(lng: number, lat: number): number | null {
-    if (this.sampledBridges.length === 0) return null;    const pad = 0.0006; // ~65 m slack around the deck mesh bounds
-    const cosLat = Math.cos(lat * DEGREES_TO_RADIANS);
-    const metresPerDegLat = (Math.PI / 180) * EARTH_RADIUS_METERS;
-    const maxRadiusMetres = 16; // deck mesh samples are 10 m apart; allow a little slack
+    if (this.sampledBridges.length === 0) return null;
+    const pad = 0.0006; // ~65 m slack around the deck mesh bounds
     let nearest: Array<{ deck: number; d: number }> = [];
     for (const bridge of this.sampledBridges) {
       const b = this.lngLatBounds(bridge);
       if (lng < b.minLng - pad || lng > b.maxLng + pad || lat < b.minLat - pad || lat > b.maxLat + pad) continue;
-      for (const p of bridge.surface) {
-        const dLat = (lat - p.latitude) * metresPerDegLat;
-        const dLng = (lng - p.longitude) * cosLat * metresPerDegLat;
-        const d = Math.hypot(dLat, dLng);
-        if (d > maxRadiusMetres) continue;
-        nearest.push({ deck: p.deck, d });
-      }
+      this.collectDeckSamples(bridge, lng, lat, nearest);
     }
+    return this.interpolateDeckSamples(nearest);
+  }
+
+  /**
+   * Elevation of the bridge roadway a traveller is actually on. Returns null
+   * when the point only sits under the deck footprint (a crossing road, a
+   * parallel street, or a route that merely clips the mesh).
+   *
+   * Decision: snap to a painted bridge centerline (or a synthetic span
+   * centerline when the cluster has no line parts) and require the traveller
+   * heading to follow that local tangent.
+   */
+  deckPlacementAt(lng: number, lat: number, heading: number): number | null {
+    if (this.sampledBridges.length === 0) return null;
+    const pad = 0.0006;
+    let best: { bridge: SampledBridge; distance: number } | null = null;
+    for (const bridge of this.sampledBridges) {
+      const b = this.lngLatBounds(bridge);
+      if (lng < b.minLng - pad || lng > b.maxLng + pad || lat < b.minLat - pad || lat > b.maxLat + pad) continue;
+      const hit = this.roadwayHit(bridge, lng, lat, heading);
+      if (!hit) continue;
+      if (!best || hit.distance < best.distance) best = { bridge, distance: hit.distance };
+    }
+    if (!best) return null;
+    return this.interpolateDeckElevation(best.bridge, lng, lat);
+  }
+
+  private roadwayHit(bridge: SampledBridge, lng: number, lat: number, heading: number): { distance: number } | null {
+    const origin = this.planOriginOf(bridge);
+    if (!origin) return null;
+    const point = lngLatsToPlan([[lng, lat]], origin)[0];
+    const lines = bridge.parts.filter((part) => part.kind === 'line' && part.plan.length >= 2);
+    if (lines.length > 0) {
+      let best: { distance: number } | null = null;
+      for (const part of lines) {
+        const hit = nearestPlanSegment(point, part.plan);
+        if (!hit) continue;
+        if (hit.distance > part.width / 2 + DECK_CENTERLINE_SLACK_METRES) continue;
+        if (smallestHeadingDelta(heading, hit.heading) > MAX_DECK_HEADING_DIFF_RADIANS) continue;
+        if (!best || hit.distance < best.distance) best = { distance: hit.distance };
+      }
+      return best;
+    }
+    const span = this.bridgeSpan(bridge);
+    const centerline = lngLatsToPlan([span.start, span.end], origin);
+    const hit = nearestPlanSegment(point, centerline);
+    if (!hit) return null;
+    const eastSpan = bridge.bounds.maxEast - bridge.bounds.minEast;
+    const northSpan = bridge.bounds.maxNorth - bridge.bounds.minNorth;
+    const width = Math.min(DECK_SYNTHETIC_WIDTH_CAP_METRES, Math.max(6, Math.min(eastSpan, northSpan)));
+    if (hit.distance > width / 2 + DECK_CENTERLINE_SLACK_METRES) return null;
+    if (smallestHeadingDelta(heading, hit.heading) > MAX_DECK_HEADING_DIFF_RADIANS) return null;
+    return { distance: hit.distance };
+  }
+
+  private interpolateDeckElevation(bridge: SampledBridge, lng: number, lat: number): number | null {
+    const nearest: Array<{ deck: number; d: number }> = [];
+    this.collectDeckSamples(bridge, lng, lat, nearest);
+    return this.interpolateDeckSamples(nearest);
+  }
+
+  private collectDeckSamples(
+    bridge: SampledBridge,
+    lng: number,
+    lat: number,
+    nearest: Array<{ deck: number; d: number }>,
+  ) {
+    const cosLat = Math.cos(lat * DEGREES_TO_RADIANS);
+    const metresPerDegLat = (Math.PI / 180) * EARTH_RADIUS_METERS;
+    for (const p of bridge.surface) {
+      const dLat = (lat - p.latitude) * metresPerDegLat;
+      const dLng = (lng - p.longitude) * cosLat * metresPerDegLat;
+      const d = Math.hypot(dLat, dLng);
+      if (d > DECK_SAMPLE_RADIUS_METRES) continue;
+      nearest.push({ deck: p.deck, d });
+    }
+  }
+
+  private interpolateDeckSamples(nearest: Array<{ deck: number; d: number }>): number | null {
     if (nearest.length === 0) return null;
     nearest.sort((a, b) => a.d - b.d);
     const k = Math.min(3, nearest.length);
@@ -2718,29 +2830,20 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   private readonly bridgeSpanCache = new WeakMap<SampledBridge, { heading: number; start: [number, number]; end: [number, number] }>();
+  private readonly bridgePlanOriginCache = new WeakMap<SampledBridge, PlanOrigin>();
 
-  /**
-   * Returns the span geometry of the nearest bridge covering a point:
-   * heading and start/end endpoints. Returns null when no bridge covers it.
-   */
-  bridgeSpanAt(lng: number, lat: number): { heading: number; start: [number, number]; end: [number, number] } | null {
-    if (this.sampledBridges.length === 0) return null;
-    const pad = 0.0006;
-    const cosLat = Math.cos(lat * DEGREES_TO_RADIANS);
+  private planOriginOf(bridge: SampledBridge): PlanOrigin | null {
+    const cached = this.bridgePlanOriginCache.get(bridge);
+    if (cached) return cached;
+    const sample = bridge.surface[0];
+    if (!sample) return null;
     const metresPerDegLat = (Math.PI / 180) * EARTH_RADIUS_METERS;
-    let best: { span: { heading: number; start: [number, number]; end: [number, number] }; d: number } | null = null;
-    for (const bridge of this.sampledBridges) {
-      const b = this.lngLatBounds(bridge);
-      if (lng < b.minLng - pad || lng > b.maxLng + pad || lat < b.minLat - pad || lat > b.maxLat + pad) continue;
-      const span = this.bridgeSpan(bridge);
-      for (const p of bridge.surface) {
-        const dLat = (lat - p.latitude) * metresPerDegLat;
-        const dLng = (lng - p.longitude) * cosLat * metresPerDegLat;
-        const d = Math.hypot(dLat, dLng);
-        if (!best || d < best.d) best = { span, d };
-      }
-    }
-    return best?.span ?? null;
+    const latitude = sample.latitude - sample.north / metresPerDegLat;
+    const cosLat = Math.cos(latitude * DEGREES_TO_RADIANS);
+    const longitude = sample.longitude - sample.east / (cosLat * metresPerDegLat);
+    const origin = { longitude, latitude, cosLat };
+    this.bridgePlanOriginCache.set(bridge, origin);
+    return origin;
   }
 
   /** Compute span heading and endpoints from the farthest pair of surface points (cached). */
