@@ -62,6 +62,51 @@ export type MapLayerKey =
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
+export const MAP_3D_LAYER_KEYS = [
+  'terrain',
+  'buildings',
+  'buildingColors',
+  'bridges',
+  'proceduralBuildingDetails',
+  'trees',
+  'transitModels',
+] as const satisfies readonly MapLayerKey[];
+
+export function defaultMapLayerState(mobileDefault2d: boolean): MapLayerState {
+  return {
+    globe: true,
+    trees: !mobileDefault2d,
+    buildings: !mobileDefault2d,
+    buildingColors: !mobileDefault2d,
+    bridges: !mobileDefault2d,
+    proceduralBuildingDetails: !mobileDefault2d,
+    terrain: !mobileDefault2d,
+    cycling: false,
+    hiking: false,
+    transit: true,
+    transitLines: false,
+    transitModels: !mobileDefault2d,
+    trafficCameras: false,
+    chargingStations: false,
+    roadWeather: false,
+    roadTraffic: false,
+    weather: false,
+    clouds: true,
+    dayNight: false,
+  };
+}
+
+export function is3dModeEnabled(layers: MapLayerState): boolean {
+  return MAP_3D_LAYER_KEYS.every((key) => layers[key]);
+}
+
+export function toggle3dModeLayers(current: MapLayerState): MapLayerState {
+  const enabled = !is3dModeEnabled(current);
+  const next: MapLayerState = { ...current, transit: true };
+  for (const key of MAP_3D_LAYER_KEYS) next[key] = enabled;
+  return next;
+}
+
 type SearchResult = {
   id: string;
   primary: string;

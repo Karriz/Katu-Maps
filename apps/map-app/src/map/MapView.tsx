@@ -63,7 +63,7 @@ import { BridgeModelLayer } from './BridgeModelLayer';
 import { installTunnelPortals } from './TunnelPortals';
 import { RoofModelLayer } from './RoofModelLayer';
 import { FacadeModelLayer } from './FacadeModelLayer';
-import { MapControls, type MapLayerState } from './MapControls';
+import { MapControls, defaultMapLayerState, is3dModeEnabled, toggle3dModeLayers, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
 import type { TransitVehicleTripSelection } from './TransitStopsLayer';
@@ -879,38 +879,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
   }, [routeSearchTarget, routeSheetHeight]);
   const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
-    const mobileDefault2d = typeof window !== 'undefined' && window.innerWidth <= 760;
-    const defaults: MapLayerState = {
-      globe: true,
-      trees: !mobileDefault2d,
-      buildings: !mobileDefault2d,
-      buildingColors: true,
-      bridges: !mobileDefault2d,
-      proceduralBuildingDetails: !mobileDefault2d,
-      terrain: !mobileDefault2d,
-      cycling: false,
-      hiking: false,
-      transit: true,
-      transitLines: false,
-      transitModels: !mobileDefault2d,
-      trafficCameras: false,
-      chargingStations: false,
-      roadWeather: false,
-      roadTraffic: false,
-      weather: false,
-      clouds: true,
-      dayNight: false,
-    };
+    const defaults = defaultMapLayerState(typeof window !== 'undefined' && window.innerWidth <= 760);
     try {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
       return saved ? { ...defaults, ...saved } : defaults;
     } catch { return defaults; }
   });
-  const is3dMode = layerToggles.terrain
-    && layerToggles.buildings
-    && layerToggles.bridges
-    && layerToggles.trees
-    && layerToggles.transitModels;
+  const is3dMode = is3dModeEnabled(layerToggles);
   const handleTransitDisabled = useCallback(() => {
     transitStopsLayerRef.current?.clearSelection();
     setSelectedTransitStop(null);
@@ -3822,18 +3797,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               }
             }}
             is3dMode={is3dMode}
-            onToggle3dMode={() => setLayerToggles((current) => {
-              const enabled = !(current.terrain && current.buildings && current.bridges && current.trees && current.transitModels);
-              return {
-                ...current,
-                terrain: enabled,
-                buildings: enabled,
-                bridges: enabled,
-                trees: enabled,
-                transit: true,
-                transitModels: enabled,
-              };
-            })}
+            onToggle3dMode={() => setLayerToggles(toggle3dModeLayers)}
             onLocate={locateUser}
             onResetOrientation={resetMapOrientation}
             onZoomIn={zoomIn}

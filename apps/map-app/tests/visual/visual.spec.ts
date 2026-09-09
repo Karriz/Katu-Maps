@@ -1116,6 +1116,7 @@ for (const scenario of scenarios) {
           globe: true,
           trees: false,
           buildings: true,
+          buildingColors: true,
           bridges: false,
           terrain: false,
           transit: true,
