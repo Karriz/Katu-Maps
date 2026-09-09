@@ -509,7 +509,13 @@ export class TransitStopsLayer {
     if (this.trackedTrips.current || this.trackedTrips.next) this.startTripPolling();
   };
 
+  private selectedRoutesCallback: ((features: RouteLineFeature[]) => void) | null = null;
+
   constructor(private readonly onVehiclePose?: (pose: TransitVehiclePose | null) => void) {}
+
+  onSelectedRoutes(callback: ((features: RouteLineFeature[]) => void) | null) {
+    this.selectedRoutesCallback = callback;
+  }
 
   async install(
     map: Map,
@@ -998,6 +1004,7 @@ export class TransitStopsLayer {
     ));
     const source = this.map?.getSource(SELECTED_ROUTES_SOURCE_ID) as GeoJSONSource | undefined;
     source?.setData(features.length ? { type: 'FeatureCollection', features } : emptyRouteCollection());
+    this.selectedRoutesCallback?.(features);
   }
 
   private poseForTrackedTrip(tracked: TrackedTrip, now: number) {
@@ -1071,6 +1078,7 @@ export class TransitStopsLayer {
     routeSource?.setData(emptyRouteCollection());
     vehicleSource?.setData(emptyCollection());
     this.onVehiclePose?.(null);
+    this.selectedRoutesCallback?.([]);
   }
 
   clearSelection() {

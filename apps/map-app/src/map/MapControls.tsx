@@ -12,6 +12,7 @@ import {
   Crosshair,
   Footprints,
   Globe2,
+  Home,
   Code2,
   Layers3,
   Route,
@@ -42,7 +43,9 @@ export type MapLayerKey =
   | 'globe'
   | 'terrain'
   | 'buildings'
+  | 'buildingColors'
   | 'bridges'
+  | 'proceduralBuildingDetails'
   | 'trees'
   | 'cycling'
   | 'hiking'
@@ -127,6 +130,8 @@ const layerGroups: LayerGroup[] = [
 ];
 
 const advancedLayers: LayerDefinition[] = [
+  { key: 'buildingColors', label: 'Building colors', description: 'Pastel colors from OpenStreetMap', icon: Building2 },
+  { key: 'proceduralBuildingDetails', label: 'Procedural building details', description: 'Roofs, flat roof slabs & facade windows', icon: Home },
   { key: 'trees', label: 'Trees', description: '3D vegetation models', icon: Trees },
   { key: 'transitModels', label: '3D vehicles', description: 'Live vehicle models', icon: Box },
   { key: 'globe', label: 'Globe', description: 'World projection', icon: Globe2 },

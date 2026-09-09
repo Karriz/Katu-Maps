@@ -16,8 +16,29 @@ import {
 import type { DayNightPalette } from './DayNightAppearance';
 import type { TransitVehiclePose } from './TransitStopsLayer';
 
+/** Provides bridge deck elevations so vehicles can drive on 3D bridges. */
+export type BridgeDeckSource = {
+  deckElevationAt(lng: number, lat: number): number | null;
+  /** True if any bridges have been sampled and are available for lookup. */
+  hasBridges(): boolean;
+  /**
+   * Returns the span geometry of the nearest bridge covering a point:
+   * heading (radians, atan2(east, north)), and the start/end endpoints
+   * in lng/lat. Returns null when no bridge covers the point.
+   */
+  bridgeSpanAt(lng: number, lat: number): { heading: number; start: [number, number]; end: [number, number] } | null;
+};
+
 const MODEL_MIN_ZOOM = 12;
 const RECENTER_DISTANCE_METERS = 20_000;
+const EARTH_RADIUS_METERS = 6_378_137;
+const DEGREES_TO_RADIANS = Math.PI / 180;
+// Clamp pitch so DEM noise or sampling near deck edges cannot tip vehicles
+// unrealistically. Road and railway gradients rarely exceed 10 degrees.
+const MAX_PITCH_RADIANS = 0.22;
+// Only lift a vehicle onto a bridge deck when its heading is within this many
+// radians of the bridge span direction (both directions allowed).
+const MAX_BRIDGE_HEADING_DIFF_RADIANS = Math.PI / 3; // 60°
 
 type VehicleDimensions = {
   length: number;
@@ -28,6 +49,7 @@ type VehicleDimensions = {
 type LocalPartPose = {
   position: THREE.Vector3;
   heading: number;
+  pitch: number;
 };
 
 function dimensionsForMode(mode: string): VehicleDimensions {
@@ -351,6 +373,11 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   private sunlight?: THREE.DirectionalLight;
   private nightMix = 0;
   private dayNightPalette: DayNightPalette | null = null;
+  private bridgeDeckSource: BridgeDeckSource | null = null;
+
+  setBridgeDeckSource(source: BridgeDeckSource | null) {
+    this.bridgeDeckSource = source;
+  }
 
   setTheme(dark: boolean) {
     if (this.darkMode === dark) return;
@@ -469,6 +496,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
         connectorMaterial,
       );
       this.modelGroup.add(connector);
+      connector.rotation.order = 'YXZ';
       this.connectors.push(connector);
     }
     pose.parts.forEach((_part, index) => {
@@ -481,6 +509,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
         this.darkMode,
       );
       this.modelGroup!.add(section);
+      section.rotation.order = 'YXZ';
       this.sectionRoots.push(section);
     });
     this.applyWindowLighting();
@@ -494,6 +523,25 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
     this.originElevation = this.map?.queryTerrainElevation(this.origin) ?? 0;
     this.hasOrigin = true;
     this.currentInitialized = false;
+  }
+
+  private sampleElevation(map: MaplibreMap, lng: number, lat: number, heading: number): number {
+    const deckElev = this.bridgeDeckSource?.deckElevationAt(lng, lat) ?? null;
+    if (deckElev !== null) {
+      const span = this.bridgeDeckSource?.bridgeSpanAt(lng, lat) ?? null;
+      if (span !== null) {
+        let diff = Math.abs(heading - span.heading);
+        if (diff > Math.PI) diff = 2 * Math.PI - diff;
+        if (diff > Math.PI / 2) diff = Math.PI - diff;
+        // Only use deck elevation when the vehicle is traveling along the
+        // bridge, not passing under it on a perpendicular road.
+        if (diff <= MAX_BRIDGE_HEADING_DIFF_RADIANS) return deckElev;
+      } else {
+        return deckElev;
+      }
+    }
+    return map.queryTerrainElevation(new maplibregl.LngLat(lng, lat))
+      ?? this.originElevation;
   }
 
   private applyPose(pose: TransitVehiclePose) {
@@ -516,10 +564,27 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
 
     const nextOriginMercator = maplibregl.MercatorCoordinate.fromLngLat(this.origin);
     const nextUnits = nextOriginMercator.meterInMercatorCoordinateUnits();
+    const metresPerDegLat = DEGREES_TO_RADIANS * EARTH_RADIUS_METERS;
+    const sampleDistance = this.dimensions.length * 0.5;
     this.targetParts = pose.parts.map((part) => {
-      const location = new maplibregl.LngLat(part.coordinates[0], part.coordinates[1]);
-      const mercator = maplibregl.MercatorCoordinate.fromLngLat(location);
-      const elevation = map.queryTerrainElevation(location) ?? this.originElevation;
+      const mercator = maplibregl.MercatorCoordinate.fromLngLat(
+        { lng: part.coordinates[0], lat: part.coordinates[1] },
+      );
+      const elevation = this.sampleElevation(map, part.coordinates[0], part.coordinates[1], part.heading);
+      // Sample the ground/deck profile ahead and behind along the heading so the
+      // car body pitches to match the gradient rather than sitting level.
+      const cosLat = Math.cos(part.coordinates[1] * DEGREES_TO_RADIANS);
+      const eastStep = Math.sin(part.heading) * sampleDistance;
+      const northStep = Math.cos(part.heading) * sampleDistance;
+      const dLng = (metresPerDegLat * cosLat);
+      const aheadLng = part.coordinates[0] + eastStep / dLng;
+      const aheadLat = part.coordinates[1] + northStep / metresPerDegLat;
+      const behindLng = part.coordinates[0] - eastStep / dLng;
+      const behindLat = part.coordinates[1] - northStep / metresPerDegLat;
+      const elevAhead = this.sampleElevation(map, aheadLng, aheadLat, part.heading);
+      const elevBehind = this.sampleElevation(map, behindLng, behindLat, part.heading);
+      const pitch = Math.max(-MAX_PITCH_RADIANS, Math.min(MAX_PITCH_RADIANS,
+        -Math.atan2(elevAhead - elevBehind, sampleDistance * 2)));
       return {
         position: new THREE.Vector3(
           (mercator.x - nextOriginMercator.x) / nextUnits,
@@ -527,6 +592,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
           (nextOriginMercator.y - mercator.y) / nextUnits,
         ),
         heading: part.heading,
+        pitch,
       };
     });
     if (this.modelGroup) this.modelGroup.visible = true;
@@ -540,6 +606,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
       if (!target) return;
       section.position.copy(target.position);
       section.rotation.y = target.heading;
+      section.rotation.x = target.pitch;
     });
     this.currentInitialized = true;
     this.updateConnectors();
@@ -559,6 +626,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
         (first.position.z + second.position.z) / 2,
       );
       connector.rotation.y = Math.atan2(dx, dz);
+      connector.rotation.x = (first.rotation.x + second.rotation.x) * 0.5;
       connector.scale.z = Math.max(0.25, horizontalDistance);
     });
   }
@@ -578,6 +646,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
       if (!target) return;
       section.position.lerp(target.position, amount);
       section.rotation.y = lerpAngle(section.rotation.y, target.heading, amount);
+      section.rotation.x += (target.pitch - section.rotation.x) * amount;
       section.scale.setScalar(visualScale);
     });
     this.updateConnectors();

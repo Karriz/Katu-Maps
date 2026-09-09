@@ -2,11 +2,14 @@ import { createExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-
 import { describe, expect, it } from 'vitest';
 import {
   aerowayWidthExpression,
+  roadWidthExpression,
+  buildingColorPaint,
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
+  pastelBuildingColor,
   updateBridgeFallback,
   removeBridgeFallback,
   refreshMapRenderState,
@@ -15,6 +18,83 @@ import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
+  it('renders tunnel shadows from entrance geometry instead of full tunnel lines', () => {
+    const layers = GLOBAL_MAP_STYLE.layers;
+    expect(layers.some((layer) => ['global-road-tunnels', 'global-railway-tunnels'].includes(layer.id))).toBe(false);
+    for (const id of ['global-road-tunnel-portals', 'global-railway-tunnel-portals']) {
+      const layer = layers.find((item) => item.id === id);
+      expect(layer).toMatchObject({ type: 'line', source: 'tunnel-portals', minzoom: 14 });
+      expect(layer).not.toHaveProperty('source-layer');
+    }
+    for (const id of ['global-overview-roads', 'global-overview-regional-roads', 'global-overview-railways']) {
+      expect(layers.find((layer) => layer.id === id)).toMatchObject({
+        filter: expect.arrayContaining([['!=', ['get', 'brunnel'], 'tunnel']]),
+      });
+    }
+  });
+
+  it('selectively pastellizes vivid OSM building colours without washing out soft colours', () => {
+    const expression = pastelBuildingColor('#fffdf8') as any;
+    const compiled = createExpression(expression, 'building-color-test');
+    if (compiled.result !== 'success') throw new Error('Invalid building color expression');
+    const vivid = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ff0000' } } as any);
+    const vividYellow = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ffff00' } } as any);
+    const darkGray = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#303030' } } as any);
+    const darkRed = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#7f1818' } } as any);
+    const saturatedGreen = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#20a020' } } as any);
+    const soft = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#f3caca' } } as any);
+    const untagged = (id?: number) => compiled.value.evaluate(
+      { zoom: 16 },
+      { id, properties: {} } as any,
+    ).toString();
+    expect(vivid.r).toBeGreaterThan(vivid.g);
+    expect(vivid.g).toBeGreaterThan(0.75);
+    expect(vividYellow.b).toBeGreaterThan(0.75);
+    expect(darkGray.r).toBeGreaterThan(0.7);
+    expect(darkRed.g).toBeGreaterThan(0.65);
+    expect(saturatedGreen.r).toBeGreaterThan(0.7);
+    expect(saturatedGreen.b).toBeGreaterThan(0.7);
+    expect(soft.r).toBeCloseTo(0xf3 / 255, 2);
+    expect(soft.g).toBeCloseTo(0xca / 255, 2);
+    expect(untagged()).toBe('rgba(255,253,248,1)');
+    expect(untagged(12)).toBe('rgba(255,253,248,1)');
+    expect(untagged(22)).toBe('rgba(245,239,230,1)');
+    expect(untagged(32)).toBe('rgba(241,243,244,1)');
+    expect(untagged(22)).toBe(untagged(22));
+    expect(new Set(Array.from({ length: 8 }, (_, id) => untagged(id * 10 + 2))).size).toBe(7);
+    expect(buildingColorPaint('#fffdf8', false)).toBe('#fffdf8');
+  });
+
+  it('caps road and casing pixel widths through close landing zooms', () => {
+    for (const latitude of [0, 61.4981]) {
+      for (const casing of [false, true]) {
+        const compiled = createExpression(roadWidthExpression(latitude, casing), 'flight-road-width');
+        if (compiled.result !== 'success') throw new Error('Invalid road width expression');
+        for (const properties of [{ class: 'motorway' }, { class: 'minor' }, { class: 'service', service: 'driveway' }]) {
+          const evaluate = (zoom: number) => compiled.value.evaluate({ zoom }, { properties } as any) as number;
+          const reference = evaluate(18);
+          for (const zoom of [18.5, 19, 20, 21, 22]) {
+            expect(evaluate(zoom)).toBeCloseTo(reference, 6);
+          }
+        }
+      }
+    }
+  });
+
+  it('also caps airfield and path widths at close landing zooms', () => {
+    const path = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-path-casing') as any;
+    const expressions = [aerowayWidthExpression(61.4981)];
+    if (!path) throw new Error('Missing path layer');
+    expressions.push(path.paint['line-width']);
+    for (const expression of expressions) {
+      const compiled = createExpression(expression, 'flight-surface-width');
+      if (compiled.result !== 'success') throw new Error('Invalid surface width expression');
+      const feature = { properties: { class: 'runway' } } as any;
+      expect(compiled.value.evaluate({ zoom: 22 }, feature)
+        / compiled.value.evaluate({ zoom: 18 }, feature)).toBeCloseTo(1, 6);
+    }
+  });
+
   it('uses metre-scaled paired rails inside the ground railway bed at close zoom', () => {
     const rail = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railways') as any;
     const bed = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railway-bed') as any;
@@ -168,16 +248,36 @@ describe('global map overlay styles', () => {
     expect(waterwayPaint?.['line-color']).toEqual(waterPaint?.['fill-color']);
   });
 
-  it('labels named national parks and nature reserves at regional zooms', () => {
+  it('delays named protected areas until after towns appear', () => {
     const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-major-protected-area-labels');
     const filter = (layer as { filter?: unknown } | undefined)?.filter;
 
-    expect(layer?.minzoom ?? Infinity).toBeLessThanOrEqual(5);
+    expect(layer?.minzoom).toBe(9);
     expect(filter).toEqual([
       'all',
       ['has', 'name'],
       ['in', ['get', 'class'], ['literal', ['national_park', 'nature_reserve']]],
     ]);
+  });
+
+  it('reserves regional water labels for lakes and seas before adding straits and bays', () => {
+    const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-water-labels');
+    const expression = createExpression((layer as { filter: unknown }).filter, 'water-label-filter-test');
+    expect(expression.result).toBe('success');
+    if (expression.result !== 'success') return;
+
+    const visible = (zoom: number, waterClass: string) => expression.value.evaluate(
+      { zoom }, { type: 1, properties: { name: 'Named water', class: waterClass } },
+    );
+    for (const waterClass of ['bay', 'strait']) {
+      expect(visible(6, waterClass)).toBe(false);
+      expect(visible(8, waterClass)).toBe(false);
+      expect(visible(9, waterClass)).toBe(true);
+    }
+    for (const waterClass of ['lake', 'sea', 'ocean']) {
+      expect(visible(6, waterClass)).toBe(true);
+    }
+    expect(visible(9, 'fountain')).toBe(false);
   });
 
   it('draws protected-area labels above lakes', () => {
@@ -295,7 +395,7 @@ describe('global map overlay styles', () => {
     expect(layersById.get('global-boundaries-regional')?.minzoom).toBe(5);
     expect(filterOf('global-boundaries')).toContain('admin_level');
     expect(layersById.get('global-road-labels-regional')?.minzoom).toBe(11);
-    expect(layersById.get('global-town-labels')?.minzoom).toBe(8);
+    expect(layersById.get('global-town-labels')?.minzoom).toBe(6);
     expect(layersById.get('global-locality-labels')?.minzoom).toBe(11);
     expect(filterOf('global-place-labels')).toContain('city');
     expect(filterOf('global-place-labels')).not.toContain('village');

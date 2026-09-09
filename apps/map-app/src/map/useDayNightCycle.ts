@@ -8,6 +8,8 @@ import { screenLockedSunDirection, timeZoneAt } from './DayNightSun';
 import type { TreeModelLayer } from './TreeModelLayer';
 import type { BridgeModelLayer } from './BridgeModelLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
+import type { FacadeModelLayer } from './FacadeModelLayer';
+import type { RoofModelLayer } from './RoofModelLayer';
 import type { ResolvedTheme } from '../theme';
 
 function firstSymbolLayerId(map: Map) {
@@ -19,23 +21,29 @@ export function useDayNightCycle({
   mapLoaded,
   enabled,
   cloudsEnabled,
+  buildingColorsEnabled,
   utcMs,
   flightActive,
   resolvedTheme,
     treeLayerRef,
     bridgeLayerRef,
     transitVehicleLayerRef,
+    facadeLayerRef,
+    roofLayerRef,
 }: {
   mapRef: RefObject<Map | null>;
   mapLoaded: boolean;
   enabled: boolean;
   cloudsEnabled: boolean;
+  buildingColorsEnabled: boolean;
   utcMs: number;
   flightActive: boolean;
   resolvedTheme: ResolvedTheme;
   treeLayerRef: RefObject<TreeModelLayer | null>;
   bridgeLayerRef: RefObject<BridgeModelLayer | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
+  facadeLayerRef: RefObject<FacadeModelLayer | null>;
+  roofLayerRef: RefObject<RoofModelLayer | null>;
 }) {
   const layerRef = useRef<DayNightShadeLayer | null>(null);
   const wasActiveRef = useRef(false);
@@ -60,6 +68,8 @@ export function useDayNightCycle({
       treeLayerRef.current?.setDayNightLighting(null);
       bridgeLayerRef.current?.setDayNightLighting(null);
       transitVehicleLayerRef.current?.setDayNightLighting(null);
+      facadeLayerRef.current?.setDayNightLighting(null);
+      roofLayerRef.current?.setDayNightLighting(null);
       wasActiveRef.current = false;
       applyRef.current = () => {};
       return;
@@ -76,10 +86,15 @@ export function useDayNightCycle({
     }
 
     let frame = 0;
+    let lastAppearanceSignature: string | undefined;
     const apply = () => {
       frame = 0;
       const center = map.getCenter();
       const zoom = map.getZoom();
+      const signature = JSON.stringify([center.lng, center.lat, zoom,
+        enabled ? utcMsRef.current : map.getBearing()]);
+      if (signature === lastAppearanceSignature) return;
+      lastAppearanceSignature = signature;
       if (!enabled) {
         // Decorative terminator locked to the screen, not the real sun.
         layerRef.current?.setAppearance(
@@ -92,11 +107,13 @@ export function useDayNightCycle({
         treeLayerRef.current?.setDayNightLighting(null);
         bridgeLayerRef.current?.setDayNightLighting(null);
         transitVehicleLayerRef.current?.setDayNightLighting(null);
+        facadeLayerRef.current?.setDayNightLighting(null);
+        roofLayerRef.current?.setDayNightLighting(null);
         map.triggerRepaint();
         return;
       }
       const appearance = dayNightAppearance(new Date(utcMsRef.current), center.lat, center.lng, zoom);
-      applyDayNightStyle(map, appearance);
+      applyDayNightStyle(map, appearance, buildingColorsEnabled);
       layerRef.current?.setAppearance(appearance.sunDirection, appearance.shadeOpacity, appearance.lightsIntensity);
       treeLayerRef.current?.setDayNightLighting({
         azimuth: appearance.azimuth,
@@ -116,6 +133,16 @@ export function useDayNightCycle({
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,
       });
+      facadeLayerRef.current?.setDayNightLighting({
+        azimuth: appearance.azimuth,
+        polar: appearance.polar,
+        nightMix: appearance.treeNightMix,
+      });
+      roofLayerRef.current?.setDayNightLighting({
+        azimuth: appearance.azimuth,
+        polar: appearance.polar,
+        nightMix: appearance.treeNightMix,
+      });
       setView({
         latitude: center.lat,
         longitude: center.lng,
@@ -124,11 +151,13 @@ export function useDayNightCycle({
       });
       map.triggerRepaint();
     };
-    applyRef.current = apply;
     const schedule = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(apply);
     };
+    // Slider changes and camera events share one latest-state update. Keep
+    // each palette atomic so bridge textures see only the completed palette.
+    applyRef.current = schedule;
     apply();
     map.on('move', schedule);
     map.on('zoom', schedule);
@@ -141,8 +170,8 @@ export function useDayNightCycle({
       applyRef.current = () => {};
     };
   }, [
-    enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
-    treeLayerRef, bridgeLayerRef, transitVehicleLayerRef,
+    buildingColorsEnabled, enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
+    treeLayerRef, bridgeLayerRef, transitVehicleLayerRef, facadeLayerRef, roofLayerRef,
   ]);
 
   useGlobeCloudCover(mapRef, layerRef, mapLoaded, flightActive, cloudsEnabled);

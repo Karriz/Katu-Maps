@@ -60,14 +60,19 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
+import { installTunnelPortals } from './TunnelPortals';
+import { RoofModelLayer } from './RoofModelLayer';
+import { FacadeModelLayer } from './FacadeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
 import type { TransitVehicleTripSelection } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
+import { RouteLineDeckLayer, type RouteLineFeature } from './RouteLineDeckLayer';
 import { FlightControls } from './flight/FlightControls';
 import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
+import { installFlightSceneScheduler } from './flight/FlightSceneScheduler';
 import { useFlightSimulator } from './flight/useFlightSimulator';
 import { useFlightModePresentation } from './flight/useFlightModePresentation';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
@@ -159,13 +164,12 @@ import {
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
 import {
-  createGroundPattern,
-  groundPatternImageId,
-  groundPatternKinds,
+  patternImageExpression,
   groundPatternLayers,
 } from './GroundPatterns';
+import { WATER_PATTERN_ID } from './WaterPattern';
+import { installMapPatterns } from './MapPatterns';
 const TAMPERE: [number, number] = [23.7609, 61.4981];
-const WATER_PATTERN_ID = 'water-surface-pattern';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
 const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-shadow',
@@ -258,6 +262,20 @@ function mapRouteColor(value?: string) {
   if (!value) return undefined;
   const color = value.trim().replace(/^#/, '');
   return /^(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? `#${color}` : undefined;
+}
+
+/** Replicate the selected-route line-color expression for the 3D deck layer. */
+function routeColorForFeature(mode: string | undefined, routeColor?: string): string {
+  const m = (mode ?? '').toUpperCase();
+  if (m === 'WALK' || m === 'FOOT' || m === 'PEDESTRIAN') return '#64748b';
+  if (m === 'BICYCLE' || m === 'BIKE' || m === 'CYCLING') return '#16834b';
+  if (m === 'CAR' || m === 'DRIVING') return '#2563eb';
+  if (routeColor) return routeColor;
+  if (m === 'TRAM') return '#8b5cf6';
+  if (m === 'BUS') return '#1769e8';
+  if (m === 'SUBWAY') return '#f97316';
+  if (m === 'RAIL' || m === 'REGIONAL_RAIL') return '#16a34a';
+  return '#0ea5e9';
 }
 
 function isValidCoordinate(coordinate: unknown): coordinate is [number, number] {
@@ -641,33 +659,6 @@ function searchResultIconExpression() {
   return ['match', ['get', 'iconId'], ...icons, 'location-shop-icon'] as unknown as ExpressionSpecification;
 }
 
-function createWaterPattern(size: number) {
-  const data = new Uint8ClampedArray(size * size * 4);
-  const shadow = [92, 171, 194];
-  const highlight = [157, 216, 227];
-  const tau = Math.PI * 2;
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const horizontal = (x / size) * tau;
-      const vertical = (y / size) * tau;
-      // Integer-frequency waves meet at every edge, making the generated
-      // image seamless when MapLibre repeats it across water polygons.
-      const broad = Math.sin(horizontal + vertical * 2) * 0.38;
-      const crossing = Math.cos(horizontal * 2 - vertical) * 0.2;
-      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.1;
-      const shade = Math.max(0, Math.min(1, 0.5 + broad + crossing + detail));
-      const offset = (y * size + x) * 4;
-
-      data[offset] = Math.round(shadow[0] + (highlight[0] - shadow[0]) * shade);
-      data[offset + 1] = Math.round(shadow[1] + (highlight[1] - shadow[1]) * shade);
-      data[offset + 2] = Math.round(shadow[2] + (highlight[2] - shadow[2]) * shade);
-      data[offset + 3] = 255;
-    }
-  }
-
-  return { width: size, height: size, data };
-}
 
 function globalWaterPatternLayer(): FillLayerSpecification {
   return {
@@ -677,9 +668,10 @@ function globalWaterPatternLayer(): FillLayerSpecification {
     'source-layer': 'water',
     // Pattern sampling over every ocean polygon is wasted at globe zooms
     // where the opacity is still 0. Keep this for close-range water texture.
-    minzoom: 6,
+    minzoom: 8,
     paint: {
-      'fill-pattern': WATER_PATTERN_ID,
+      'fill-pattern': patternImageExpression(WATER_PATTERN_ID),
+      'fill-antialias': false,
       'fill-opacity': [
         'interpolate', ['linear'], ['zoom'],
         6, 0,
@@ -700,6 +692,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
+  const roofLayerRef = useRef<RoofModelLayer | null>(null);
+  const facadeLayerRef = useRef<FacadeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
   const roadWeatherLayerRef = useRef<RoadWeatherLayer | null>(null);
@@ -707,6 +701,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const chargingStationsLayerRef = useRef<ChargingStationsLayer | null>(null);
   const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
+  const selectedRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
+  const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
   const flightActiveRef = useRef(false);
   const flightWasActiveRef = useRef(false);
@@ -888,7 +884,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       globe: true,
       trees: !mobileDefault2d,
       buildings: !mobileDefault2d,
+      buildingColors: true,
       bridges: !mobileDefault2d,
+      proceduralBuildingDetails: !mobileDefault2d,
       terrain: !mobileDefault2d,
       cycling: false,
       hiking: false,
@@ -961,8 +959,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     dayNightEnabled: layerToggles.dayNight,
     treeLayerRef,
     bridgeLayerRef,
+    roofLayerRef,
+    facadeLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
+    selectedRouteDeckLayerRef,
+    transitStopRouteDeckLayerRef,
     treeRefreshRef,
     terrainSourceRef,
     terrainEnabledRef,
@@ -992,12 +994,15 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     mapLoaded,
     enabled: layerToggles.dayNight,
     cloudsEnabled: layerToggles.clouds,
+    buildingColorsEnabled: layerToggles.buildingColors,
     utcMs: dayNightUtcMs,
     flightActive: flight.active,
     resolvedTheme,
     treeLayerRef,
     bridgeLayerRef,
     transitVehicleLayerRef,
+    facadeLayerRef,
+    roofLayerRef,
   });
   useEffect(() => {
     if (!layerToggles.dayNight || !dayNightFollowNow) return;
@@ -1052,15 +1057,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     if (map.getLayer('tree-models-3d')) {
       map.setLayoutProperty('tree-models-3d', 'visibility', 'none');
     }
-    flightTreeLayer.updateTrees();
-    bridgeLayerRef.current?.updateBridges();
-    const intervalId = window.setInterval(() => {
-      flightTreeLayer.updateTrees();
-      bridgeLayerRef.current?.updateBridges();
-    }, 4000);
-
     return () => {
-      window.clearInterval(intervalId);
       if (mapRef.current !== map) return;
       try {
         if (map.getLayer(flightTreeLayer.id)) map.removeLayer(flightTreeLayer.id);
@@ -1078,6 +1075,26 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (layerToggles.trees) treeRefreshRef.current?.();
     };
   }, [flight.active, flight.stop, layerToggles.trees, mapLoaded]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!flight.active || !mapLoaded || !map) return;
+    const roofLayer = roofLayerRef.current;
+    const facadeLayer = facadeLayerRef.current;
+    roofLayer?.setFlightMode(true);
+    facadeLayer?.setFlightMode(true);
+    const stopRefresh = installFlightSceneScheduler(map, OPENFREEMAP_SOURCE_ID, [
+      () => flightTreeLayerRef.current?.updateTrees(true),
+      () => bridgeLayerRef.current?.updateBridges(),
+      () => roofLayer?.requestFlightRefresh(),
+      () => facadeLayer?.requestFlightRefresh(),
+    ]);
+    return () => {
+      stopRefresh();
+      roofLayer?.setFlightMode(false);
+      facadeLayer?.setFlightMode(false);
+    };
+  }, [flight.active, layerToggles.trees, mapLoaded]);
+
   useEffect(() => {
     if (!flight.active) return;
     flightTreeLayerRef.current?.setTheme(resolvedTheme === 'dark');
@@ -1468,6 +1485,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     if (!result) {
       source?.setData({ type: 'FeatureCollection', features: [] });
       transitionSource?.setData({ type: 'FeatureCollection', features: [] });
+      selectedRouteDeckLayerRef.current?.setFeatures([]);
       return;
     }
     const legFeatures = result.transitLegs?.flatMap((leg) => {
@@ -1490,6 +1508,22 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     source?.setData(legFeatures.length
       ? { type: 'FeatureCollection', features: legFeatures }
       : { type: 'Feature', geometry: result.geometry, properties: { mode: directMode } });
+    // Feed the same geometry to the 3D deck layer so route lines render on
+    // bridge decks instead of sinking under them when terrain is on.
+    const deckFeatures: RouteLineFeature[] = legFeatures.length > 0
+      ? legFeatures.map((f) => ({
+          coordinates: f.geometry.coordinates as Array<[number, number]>,
+          color: routeColorForFeature(f.properties.mode, f.properties.routeColor),
+          widthPixels: 4.5,
+          casingWidthPixels: 8,
+        }))
+      : [{
+          coordinates: result.geometry.coordinates as Array<[number, number]>,
+          color: routeColorForFeature(directMode),
+          widthPixels: 4.5,
+          casingWidthPixels: 8,
+        }];
+    selectedRouteDeckLayerRef.current?.setFeatures(deckFeatures);
     const transitions = legFeatures.slice(1).flatMap((leg) => {
       const coordinates = leg.geometry.coordinates[0];
       return coordinates ? [{
@@ -1985,6 +2019,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // Peak markers share a symbol with their labels; register the icon before
     // the first paint so labeled peaks render as a point + name together.
     ensureMountainPeakIcon(map);
+    const disposeTunnelPortals = installTunnelPortals(map);
     // Use the explicitly documented key bindings below rather than MapLibre's
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();
@@ -1998,8 +2033,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     treeLayerRef.current = treeLayer;
     const bridgeLayer = new BridgeModelLayer();
     bridgeLayerRef.current = bridgeLayer;
+    const roofLayer = new RoofModelLayer();
+    roofLayerRef.current = roofLayer;
+    const facadeLayer = new FacadeModelLayer();
+    facadeLayerRef.current = facadeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
+    transitVehicleLayer.setBridgeDeckSource(bridgeLayer);
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       latestVehiclePoseRef.current = pose;
       // Keep the custom model layer synchronized with the same estimated pose
@@ -2029,6 +2069,21 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     chargingStationsLayerRef.current = chargingStationsLayer;
     const transitRouteOverlay = new TransitRouteOverlay();
     transitRouteOverlayRef.current = transitRouteOverlay;
+    const selectedRouteDeckLayer = new RouteLineDeckLayer('selected-route-deck-3d');
+    selectedRouteDeckLayerRef.current = selectedRouteDeckLayer;
+    selectedRouteDeckLayer.setBridgeDeckSource(bridgeLayer);
+    const transitStopRouteDeckLayer = new RouteLineDeckLayer('transit-selected-route-deck-3d');
+    transitStopRouteDeckLayerRef.current = transitStopRouteDeckLayer;
+    transitStopRouteDeckLayer.setBridgeDeckSource(bridgeLayer);
+    transitStopsLayer.onSelectedRoutes((features) => {
+      transitStopRouteDeckLayer.setFeatures(features.map((f) => ({
+        coordinates: f.geometry.coordinates as Array<[number, number]>,
+        color: f.properties.color,
+        widthPixels: 4.5,
+        casingWidthPixels: 8,
+      })));
+    });
+    let disposeMapPatterns: (() => void) | undefined;
     let treeUpdateTimer: number | undefined;
     let transitStopsTimer: number | undefined;
     let chargingStationsTimer: number | undefined;
@@ -2116,15 +2171,21 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const updateTreeModels = () => {
       treeUpdateTimer = undefined;
+      if (flightActiveRef.current) return;
       if (map.isMoving()) {
         scheduleTreeUpdate();
         return;
       }
       bridgeLayer.updateBridges();
-      const nextSignature = modelUpdateSignature();
+      // Rebuild deck lines after bridges have had a chance to sample so they
+      // lift onto newly-available deck elevations.
+      map.once('idle', () => {
+        selectedRouteDeckLayer.rebuildFromCurrentFeatures();
+        transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
+      });
+      const nextSignature = `${modelUpdateSignature()}:${modelDataRevision}`;
       if (nextSignature === lastModelUpdateSignature) return;
-      treeLayer.updateTrees();
-      lastModelUpdateSignature = nextSignature;
+      treeLayer.updateTrees(() => { lastModelUpdateSignature = nextSignature; });
     };
     const scheduleTreeUpdate = () => {
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
@@ -2160,17 +2221,32 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const invalidateAndScheduleModels = () => {
       bridgeLayer.invalidateTerrain();
+      treeLayer.invalidateTerrain();
+      roofLayer.invalidateSource();
+      facadeLayer.invalidateSource();
       modelDataRevision += 1;
       scheduleTreeUpdate();
     };
     const handleModelSourceData = (event: MapSourceDataEvent) => {
       if (event.sourceId === terrainSourceRef.current && event.sourceDataType === 'content') {
         bridgeLayer.invalidateTerrain();
+        treeLayer.invalidateTerrain();
+        roofLayer.invalidateSource();
+        facadeLayer.invalidateSource();
+        modelDataRevision += 1;
         scheduleTreeUpdate();
+        // Terrain data changed: deck elevations need re-sampling.
+        map.once('idle', () => {
+          selectedRouteDeckLayer.rebuildFromCurrentFeatures();
+          transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
+        });
         return;
       }
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
       bridgeLayer.invalidateSource();
+      treeLayer.cancelTreeJobs();
+      roofLayer.invalidateSource();
+      facadeLayer.invalidateSource();
       modelDataRevision += 1;
       // Tile arrival does not change the camera, so idle may already have
       // passed. Rebuild 3D bridges once the transportation tiles exist.
@@ -2405,23 +2481,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       lastUserInteractionRef.current = Date.now();
     };
     map.once('load', async () => {
-      // MapLibre uses image pixelRatio when determining pattern spacing. A
-      // 512px image at 0.5 therefore repeats every 1024 logical pixels,
-      // providing broad variation at every zoom without a custom shader.
-      map.addImage(WATER_PATTERN_ID, createWaterPattern(512), { pixelRatio: 0.5 });
+      disposeMapPatterns = installMapPatterns(map);
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
-      // Ground textures use a large, quiet repeat so they read as material
-      // variation rather than map noise. Both palettes are registered up
-      // front so theme changes only swap the image used by each layer.
-      for (const kind of groundPatternKinds()) {
-        for (const theme of ['light', 'dark'] as const) {
-          map.addImage(groundPatternImageId(kind, theme), createGroundPattern(256, kind, theme), { pixelRatio: 0.5 });
-        }
-      }
       for (const layer of groundPatternLayers()) map.addLayer(layer, 'global-pedestrian-areas');
       map.addLayer(bridgeLayer, 'global-road-labels');
       map.addLayer(treeLayer, 'global-road-labels');
+      map.addLayer(roofLayer, 'global-road-labels');
+      map.addLayer(facadeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
+      map.addLayer(selectedRouteDeckLayer, 'global-road-labels');
+      map.addLayer(transitStopRouteDeckLayer, 'global-road-labels');
       try {
         await addLocationIcons(map);
       } catch (error) {
@@ -2903,6 +2972,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // camera-only moves must not trigger a fresh stop query on every moveend.
       if (!vehicleFollowEnabledRef.current) scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
+      selectedRouteDeckLayer.rebuildFromCurrentFeatures();
+      transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
       if (chargingStationsEnabledRef.current) scheduleChargingStationsUpdate();
     };
     const removePersistedMapViewFlush = installPersistedMapViewFlush(document, window, persistCamera);
@@ -2915,7 +2986,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       reload: () => window.location.reload(),
     });
     const handleCameraMove = (event?: unknown) => {
-      if (flightActiveRef.current || isTerrainCameraFollowEvent(event)) return;
+      if (flightActiveRef.current) {
+        updateGlobalRoadWidths();
+        return;
+      }
+      if (isTerrainCameraFollowEvent(event)) return;
       const zoom = map.getZoom();
       const pitch = map.getPitch();
       const nextLabelSignature = `${Math.round(zoom * 2) / 2}:${Math.round(pitch / 10) * 10}`;
@@ -2939,13 +3014,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
-    // idle handles the final set of newly loaded tiles. Flight trees have a
-    // dedicated refresh interval, so avoid updating the hidden regular layer.
+    // idle handles the final set of newly loaded tiles. Flight trees and bridges have a
+    // dedicated refresh scheduler, so avoid updating the hidden regular layer.
     const handleIdleTreeUpdate = () => {
-      if (flightActiveRef.current) {
-        bridgeLayer.updateBridges();
-        return;
-      }
+      if (roofLayer.updateRoofs()) map.triggerRepaint();
+      if (facadeLayer.updateFacades()) map.triggerRepaint();
+      if (flightActiveRef.current) return;
       scheduleTreeUpdate();
     };
     map.on('idle', handleIdleTreeUpdate);
@@ -2969,6 +3043,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     mapRef.current = map;
 
     return () => {
+      disposeMapPatterns?.();
+      disposeTunnelPortals();
       terrainCameraFollower.dispose();
       measurementControllerRef.current?.dispose();
       measurementControllerRef.current = null;
@@ -3016,7 +3092,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       chargingStationsLayerRef.current = null;
       roadWeatherLayerRef.current = null;
       roadTrafficLayerRef.current = null;
+      transitVehicleLayerRef.current?.setBridgeDeckSource(null);
       transitVehicleLayerRef.current = null;
+      selectedRouteDeckLayerRef.current?.setBridgeDeckSource(null);
+      selectedRouteDeckLayerRef.current = null;
+      transitStopRouteDeckLayerRef.current?.setBridgeDeckSource(null);
+      transitStopRouteDeckLayerRef.current = null;
     };
   }, []);
 

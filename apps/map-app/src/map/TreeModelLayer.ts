@@ -25,6 +25,7 @@ import { treeBiomeProfile, visibleBiome } from './TreeBiomes';
 const TREE_MIN_ZOOM = 12;
 const TREE_MAX_VIEWPORT_METERS = 4_000;
 const MAX_TREE_COUNT = 5000;
+const TREE_FRAME_BUDGET_MS = 3;
 const MAX_ELEVATION_CACHE_ENTRIES = MAX_TREE_COUNT * 2;
 const FOREST_TREE_SPACING_METERS = 32;
 const PARK_TREE_SPACING_METERS = 35;
@@ -90,6 +91,7 @@ type DisplayedTree = {
   north: number;
   up: number;
   growthStart: number;
+  growthFinished?: boolean;
 };
 
 function featureCoordinates(feature: SourceFeature): number[][] {
@@ -144,12 +146,14 @@ function treeInstance(
   };
 }
 
-function collectTreeInstances(sourceFeatures: SourceFeature[]) {
+function* collectTreeInstances(sourceFeatures: SourceFeature[]): Generator<void, TreeInstance[]> {
   const trees: TreeInstance[] = [];
   const seen = new Set<string>();
 
   for (const feature of sourceFeatures) {
+    yield;
     for (const coordinates of featureCoordinates(feature)) {
+      yield;
       if (coordinates.length < 2 || trees.length >= MAX_TREE_COUNT) continue;
       const [longitude, latitude] = coordinates;
       if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) continue;
@@ -211,21 +215,24 @@ function metricDistanceSquared(first: MetricPoint, second: MetricPoint) {
   return eastWest ** 2 + northSouth ** 2;
 }
 
-function sourceFeatures(
+function* sourceFeatures(
   map: MaplibreMap,
   sourceId: string,
   sourceLayers: string[],
-): SourceFeature[] {
-  const validLayers = [...new Set(sourceLayers.filter(Boolean))];
-  if (!validLayers.length || !map.getSource(sourceId)) return [];
-  return validLayers.flatMap((sourceLayer) => {
+): Generator<void, SourceFeature[]> {
+  const features: SourceFeature[] = [];
+  if (!map.getSource(sourceId)) return features;
+  for (const sourceLayer of new Set(sourceLayers.filter(Boolean))) {
+    yield;
     try {
-      return map.querySourceFeatures(sourceId, { sourceLayer });
+      // Each MapLibre query is synchronous; yield between source layers.
+      const queried = map.querySourceFeatures(sourceId, { sourceLayer });
+      for (const feature of queried) features.push(feature);
     } catch (error) {
       console.warn(`Could not query optional source layer ${sourceLayer}`, error);
-      return [];
     }
-  });
+  }
+  return features;
 }
 
 export function treeViewportSignature(
@@ -318,7 +325,7 @@ export function shouldRenderTreesForViewport(
   return viewportSpanMeters(bounds) <= TREE_MAX_VIEWPORT_METERS;
 }
 
-function visibleTrees(map: MaplibreMap, sources: TreeSourceConfig) {
+function* visibleTrees(map: MaplibreMap, sources: TreeSourceConfig): Generator<void, TreeInstance[]> {
   const zoom = map.getZoom();
   const bounds = map.getBounds();
   if (!shouldRenderTreesForViewport({
@@ -330,36 +337,34 @@ function visibleTrees(map: MaplibreMap, sources: TreeSourceConfig) {
   const budget = MAX_TREE_COUNT;
   const biome = visibleBiome(map, sources.biomeLayer);
   const samplingBounds = visibleMetricBounds(map);
-  const waterFeatures = sourceFeatures(map, sources.sourceId, sources.waterLayers);
-  const waterPolygons = collectMetricPolygons(waterFeatures);
+  const waterFeatures = yield* sourceFeatures(map, sources.sourceId, sources.waterLayers);
+  const waterPolygons = yield* collectMetricPolygons(waterFeatures);
   const mappedTreeFeatures = sources.mappedTreeLayer
-    ? sourceFeatures(map, sources.sourceId, [sources.mappedTreeLayer])
+    ? yield* sourceFeatures(map, sources.sourceId, [sources.mappedTreeLayer])
     : [];
-  const mappedTrees = collectTreeInstances(mappedTreeFeatures)
-    .map((tree) => ({ ...tree, biome }))
-    .filter((tree) => withinTreeBounds(tree, samplingBounds))
-    .filter((tree) => {
-      const point = toMetricPoint([tree.longitude, tree.latitude]);
-      return point !== undefined && !pointInAnyPolygon(point, waterPolygons);
-    })
-    .sort((first, second) => (
-      coordinateSeed(first.longitude, first.latitude)
-      - coordinateSeed(second.longitude, second.latitude)
-    ))
-    .slice(0, budget);
-  const landuseFeatures = sourceFeatures(
+  const mappedCandidates: TreeInstance[] = [];
+  for (const tree of yield* collectTreeInstances(mappedTreeFeatures)) {
+    yield;
+    if (!withinTreeBounds(tree, samplingBounds)) continue;
+    const point = toMetricPoint([tree.longitude, tree.latitude]);
+    if (point && !pointInAnyPolygon(point, waterPolygons)) mappedCandidates.push({ ...tree, biome });
+  }
+  const mappedTrees = (yield* sortTreeCandidates(mappedCandidates, (first, second) => (
+    coordinateSeed(first.longitude, first.latitude) - coordinateSeed(second.longitude, second.latitude)
+  ))).slice(0, budget);
+  const landuseFeatures = yield* sourceFeatures(
     map,
     sources.sourceId,
     sources.vegetationLayers,
   );
-  const proceduralTrees = collectProceduralTrees(
+  const proceduralTrees = (yield* collectProceduralTrees(
     landuseFeatures,
-    waterFeatures,
+    waterPolygons,
     samplingBounds,
     mappedTrees,
     Math.max(0, budget - mappedTrees.length),
     biome,
-  ).filter((tree) => withinTreeBounds(tree, samplingBounds));
+  )).filter((tree) => withinTreeBounds(tree, samplingBounds));
   return [...mappedTrees, ...proceduralTrees].slice(0, budget);
 }
 
@@ -420,12 +425,18 @@ function polygonBounds(rings: MetricPoint[][]): MetricBounds | undefined {
   return bounds;
 }
 
-function collectMetricPolygons(features: SourceFeature[]): MetricPolygon[] {
-  return features.flatMap((feature) => featurePolygons(feature).flatMap((sourcePolygon) => {
-    const rings = metricPolygon(sourcePolygon);
-    const bounds = polygonBounds(rings);
-    return bounds ? [{ rings, bounds }] : [];
-  }));
+function* collectMetricPolygons(features: SourceFeature[]): Generator<void, MetricPolygon[]> {
+  const polygons: MetricPolygon[] = [];
+  for (const feature of features) {
+    yield;
+    for (const sourcePolygon of featurePolygons(feature)) {
+      yield;
+      const rings = metricPolygon(sourcePolygon);
+      const bounds = polygonBounds(rings);
+      if (bounds) polygons.push({ rings, bounds });
+    }
+  }
+  return polygons;
 }
 
 function pointInAnyPolygon(point: MetricPoint, polygons: MetricPolygon[]) {
@@ -514,23 +525,45 @@ function nearMappedTree(point: MetricPoint, index: Map<string, MetricPoint[]>) {
   return false;
 }
 
-function collectProceduralTrees(
+// Stable merge sort keeps dense candidate sets from becoming an unsliced
+// Array.sort task. Equal priorities preserve the existing source order.
+function* sortTreeCandidates<T>(items: T[], compare: (first: T, second: T) => number): Generator<void, T[]> {
+  let source = items;
+  let target = new Array<T>(items.length);
+  for (let width = 1; width < items.length; width *= 2) {
+    for (let start = 0; start < items.length; start += width * 2) {
+      const middle = Math.min(start + width, items.length);
+      const end = Math.min(start + width * 2, items.length);
+      let left = start;
+      let right = middle;
+      for (let index = start; index < end; index += 1) {
+        if (index % 64 === 0) yield;
+        target[index] = left < middle && (right >= end || compare(source[left], source[right]) <= 0)
+          ? source[left++] : source[right++];
+      }
+    }
+    [source, target] = [target, source];
+  }
+  return source;
+}
+
+function* collectProceduralTrees(
   sourceFeatures: SourceFeature[],
-  waterFeatures: SourceFeature[],
+  waterPolygons: MetricPolygon[],
   bounds: MetricBounds,
   mappedTrees: TreeInstance[],
   availableCount: number,
   biome?: string,
-) {
+): Generator<void, TreeInstance[]> {
   if (availableCount <= 0) return [];
 
   const mappedIndex = mappedTreeIndex(mappedTrees);
   // Water polygons are separate source layers from landuse. Keep them as an
   // exclusion mask so a lake nested inside a park or forest stays treeless.
-  const waterPolygons = collectMetricPolygons(waterFeatures);
   const candidates = new Map<string, ProceduralTreeCandidate>();
 
   for (const feature of sourceFeatures) {
+    yield;
     const landClass = String(feature.properties?.class ?? '').toLowerCase();
     const landSubclass = String(feature.properties?.subclass ?? '').toLowerCase();
     const isForest = landClass === 'forest' || landClass === 'wood';
@@ -557,6 +590,7 @@ function collectProceduralTrees(
     );
 
     for (const sourcePolygon of featurePolygons(feature)) {
+      yield;
       const polygon = metricPolygon(sourcePolygon);
       const sourceBounds = polygonBounds(polygon);
       if (!sourceBounds) continue;
@@ -588,6 +622,7 @@ function collectProceduralTrees(
           + ((gridStep - (firstCellX % gridStep)) % gridStep);
 
         for (let cellX = alignedCellX; cellX <= lastCellX; cellX += gridStep) {
+          yield;
           const key = `${kind}:${cellX}:${cellY}`;
           if (candidates.has(key)) continue;
 
@@ -648,8 +683,8 @@ function collectProceduralTrees(
     }
   }
 
-  const sortedCandidates = [...candidates.values()]
-    .sort((first, second) => first.priority - second.priority);
+  const sortedCandidates = yield* sortTreeCandidates([...candidates.values()],
+    (first, second) => first.priority - second.priority);
 
   // Pick one candidate per deterministic world-space bucket before filling
   // the remaining budget. Sorting only by random priority can select a dense
@@ -664,6 +699,7 @@ function collectProceduralTrees(
   const selectedKeys = new Set<string>();
 
   for (const candidate of sortedCandidates) {
+    yield;
     const point = toMetricPoint([candidate.longitude, candidate.latitude]);
     if (!point) continue;
     const bucketKey = `${Math.floor(point[0] / bucketSize)}:${Math.floor(point[1] / bucketSize)}`;
@@ -679,6 +715,11 @@ function collectProceduralTrees(
   return selected.map(({ priority: _priority, ...tree }) => tree);
 }
 
+type TreeMeshes = [THREE.InstancedMesh, THREE.InstancedMesh, THREE.InstancedMesh,
+  THREE.InstancedMesh, THREE.InstancedMesh, THREE.InstancedMesh];
+type TreeWriteOptions = { matrices: boolean; colors: boolean; shadows: boolean; growingOnly?: boolean };
+const ALL_TREE_ATTRIBUTES: TreeWriteOptions = { matrices: true, colors: true, shadows: true };
+
 export class TreeModelLayer implements CustomLayerInterface {
   readonly id = 'tree-models-3d';
   readonly type = 'custom' as const;
@@ -693,7 +734,12 @@ export class TreeModelLayer implements CustomLayerInterface {
   private readonly sceneTransform = new THREE.Matrix4();
   private readonly sceneScale = new THREE.Vector3();
   private readonly color = new THREE.Color();
-  private readonly displayedTrees = new Map<string, DisplayedTree>();
+  private displayedTrees = new Map<string, DisplayedTree>();
+  private treeJob?: Generator<void, void>;
+  private growthJob?: Generator<void, boolean>;
+  private jobViewSignature?: string;
+  private spareMeshes?: TreeMeshes;
+  private lightingRevision = 0;
   private sceneOrigin = new maplibregl.LngLat(23.7609, 61.4981);
   private sceneOriginElevation = 0;
   private readonly elevationCache = new Map<string, number>();
@@ -716,7 +762,43 @@ export class TreeModelLayer implements CustomLayerInterface {
   constructor(private readonly sources: TreeSourceConfig) {}
 
   invalidateTerrain() {
+    this.cancelTreeJobs();
     this.elevationCache.clear();
+  }
+
+  cancelTreeJobs() {
+    this.treeJob = undefined;
+    this.jobViewSignature = undefined;
+  }
+
+  private currentViewSignature() {
+    const map = this.map!;
+    const bounds = map.getBounds();
+    return treeViewportSignature({ west: bounds.getWest(), south: bounds.getSouth(),
+      east: bounds.getEast(), north: bounds.getNorth() }, map.getZoom(), map.getPitch(),
+    this.sources.sourceId, true, Math.floor(map.getZoom() + 1e-6));
+  }
+
+  private meshes(): TreeMeshes | undefined {
+    const meshes = [this.trunkMesh, this.broadleafMesh, this.coniferMesh,
+      this.palmMesh, this.shrubMesh, this.shadowMesh];
+    return meshes.every(Boolean) ? meshes as TreeMeshes : undefined;
+  }
+
+  private *stagingMeshes(): Generator<void, TreeMeshes> {
+    if (!this.spareMeshes) {
+      const spares: THREE.InstancedMesh[] = [];
+      for (const mesh of this.meshes()!) {
+        yield;
+        const spare = new THREE.InstancedMesh(mesh.geometry, mesh.material, MAX_TREE_COUNT);
+        spare.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        spare.frustumCulled = false;
+        spare.count = 0;
+        spares.push(spare);
+      }
+      this.spareMeshes = spares as TreeMeshes;
+    }
+    return this.spareMeshes;
   }
 
   private cachedElevation(key: string) {
@@ -747,13 +829,14 @@ export class TreeModelLayer implements CustomLayerInterface {
   setTheme(dark: boolean) {
     if (this.darkMode === dark && this.nightMix === 0) return;
     this.darkMode = dark;
+    this.lightingRevision += 1;
     if (this.shadowMesh) {
       const material = this.shadowMesh.material as THREE.MeshBasicMaterial;
       const shadowNight = Math.max(this.darkMode ? 0.85 : 0, this.nightMix);
       material.color.set(CARTOON_SHADOW_COLOR).lerp(new THREE.Color(CARTOON_NIGHT_SHADOW_COLOR), shadowNight);
       material.opacity = treeShadowOpacity(this.map?.getZoom() ?? 14) * (1 - shadowNight * 0.7);
     }
-    if (this.map) this.writeTreeMeshes(performance.now());
+    if (this.map) this.writeTreeMeshes(performance.now(), { matrices: false, colors: true, shadows: false });
     this.map?.triggerRepaint();
   }
 
@@ -765,7 +848,13 @@ export class TreeModelLayer implements CustomLayerInterface {
   } | null) {
     const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
     const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
-    this.nightMix = lighting?.nightMix ?? 0;
+    const nextNightMix = lighting?.nightMix ?? 0;
+    const nextEast = lighting?.shadowOffset[0] ?? 0;
+    const nextNorth = lighting?.shadowOffset[1] ?? 0;
+    const colorsChanged = this.nightMix !== nextNightMix;
+    const shadowsChanged = this.shadowOffsetEast !== nextEast || this.shadowOffsetNorth !== nextNorth;
+    if (colorsChanged || shadowsChanged) this.lightingRevision += 1;
+    this.nightMix = nextNightMix;
     this.shadowOffsetEast = lighting?.shadowOffset[0] ?? 0;
     this.shadowOffsetNorth = lighting?.shadowOffset[1] ?? 0;
     const position = sunCartesian(azimuth, polar);
@@ -783,7 +872,9 @@ export class TreeModelLayer implements CustomLayerInterface {
       material.color.set(CARTOON_SHADOW_COLOR).lerp(new THREE.Color(CARTOON_NIGHT_SHADOW_COLOR), shadowNight);
       material.opacity = treeShadowOpacity(this.map?.getZoom() ?? 14) * (1 - shadowNight * 0.7);
     }
-    if (this.displayedTrees.size > 0) this.writeTreeMeshes(performance.now());
+    if (this.displayedTrees.size > 0 && (colorsChanged || shadowsChanged)) {
+      this.writeTreeMeshes(performance.now(), { matrices: false, colors: colorsChanged, shadows: shadowsChanged });
+    }
     this.map?.triggerRepaint();
   }
 
@@ -891,17 +982,29 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
   }
 
-  updateTrees() {
+  updateTrees(onComplete?: () => void) {
     const map = this.map;
-    const trunkMesh = this.trunkMesh;
-    const broadleafMesh = this.broadleafMesh;
-    const coniferMesh = this.coniferMesh;
-    const palmMesh = this.palmMesh;
-    const shrubMesh = this.shrubMesh;
-    const shadowMesh = this.shadowMesh;
-    if (!map || !trunkMesh || !broadleafMesh || !coniferMesh || !palmMesh
-      || !shrubMesh || !shadowMesh) return;
+    if (!map || !this.meshes()) return;
+    const bounds = map.getBounds();
+    if (!shouldRenderTreesForViewport({ west: bounds.getWest(), south: bounds.getSouth(),
+      east: bounds.getEast(), north: bounds.getNorth() }, map.getZoom())) {
+      this.cancelTreeJobs();
+      const hadTrees = this.displayedTrees.size > 0;
+      this.clearDisplayedTrees();
+      onComplete?.();
+      if (hadTrees) map.triggerRepaint();
+      return;
+    }
+    const signature = this.currentViewSignature();
+    if (this.treeJob && this.jobViewSignature === signature) return;
+    this.cancelTreeJobs();
+    this.jobViewSignature = signature;
+    this.treeJob = this.buildTrees(onComplete);
+    map.triggerRepaint();
+  }
 
+  private *buildTrees(onComplete?: () => void): Generator<void, void> {
+    const map = this.map!;
     const bounds = map.getBounds();
     if (!shouldRenderTreesForViewport({
       west: bounds.getWest(),
@@ -910,13 +1013,13 @@ export class TreeModelLayer implements CustomLayerInterface {
       north: bounds.getNorth(),
     }, map.getZoom())) {
       this.clearDisplayedTrees();
-      map.triggerRepaint();
+      onComplete?.();
       return;
     }
 
-    this.sceneOrigin = map.getCenter();
-    this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
-    const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
+    const sceneOrigin = map.getCenter();
+    const sceneOriginElevation = map.queryTerrainElevation(sceneOrigin) ?? 0;
+    const originMercator = maplibregl.MercatorCoordinate.fromLngLat(sceneOrigin);
     const mercatorUnitsPerMeter = originMercator.meterInMercatorCoordinateUnits();
     const zoom = map.getZoom();
     // MapLibre selects a new raster-DEM level at integer camera zooms. A
@@ -924,9 +1027,7 @@ export class TreeModelLayer implements CustomLayerInterface {
     // on steep terrain and make a tree appear to vanish. Keep cached samples
     // separated by terrain LOD; the bounded LRU still caps total memory.
     const terrainZoomBucket = Math.floor(zoom + 1e-6);
-    const shadowMaterial = shadowMesh.material as THREE.MeshBasicMaterial;
-    shadowMaterial.opacity = treeShadowOpacity(zoom);
-    const generatedTrees = visibleTrees(map, this.sources);
+    const generatedTrees = yield* visibleTrees(map, this.sources);
     const budget = MAX_TREE_COUNT;
     const visibleBounds = visibleMetricBounds(map);
     const trees: TreeInstance[] = [];
@@ -937,12 +1038,14 @@ export class TreeModelLayer implements CustomLayerInterface {
     // newly exposed space. This prevents vector-tile LOD changes from
     // replacing a local patch with a different arrangement.
     for (const displayedTree of this.displayedTrees.values()) {
+      yield;
       if (!withinTreeBounds(displayedTree.tree, visibleBounds)) continue;
       trees.push(displayedTree.tree);
       selectedKeys.add(displayedTreeKey(displayedTree.tree));
       if (trees.length >= budget) break;
     }
     for (const tree of generatedTrees) {
+      yield;
       if (trees.length >= budget) break;
       const key = displayedTreeKey(tree);
       if (selectedKeys.has(key)) continue;
@@ -952,16 +1055,17 @@ export class TreeModelLayer implements CustomLayerInterface {
     const nextDisplayedTrees = new Map<string, DisplayedTree>();
 
     for (const tree of trees) {
+      yield;
       const key = displayedTreeKey(tree);
       const location = new maplibregl.LngLat(tree.longitude, tree.latitude);
       const elevationKey = `${terrainZoomBucket}:${tree.longitude.toFixed(5)}:${tree.latitude.toFixed(5)}`;
       let elevation = this.cachedElevation(elevationKey);
       if (elevation === undefined) {
         const sampledElevation = map.queryTerrainElevation(location);
-        elevation = sampledElevation ?? this.sceneOriginElevation;
+        elevation = sampledElevation ?? sceneOriginElevation;
         // Do not cache a fallback value: terrain tiles may still be loading and
         // a later idle update should be able to replace it with real terrain.
-        if (sampledElevation !== undefined) this.cacheElevation(elevationKey, elevation);
+        if (sampledElevation != null) this.cacheElevation(elevationKey, elevation);
       }
 
       const previousTree = this.displayedTrees.get(key);
@@ -973,37 +1077,63 @@ export class TreeModelLayer implements CustomLayerInterface {
         elevation,
         mercatorX: treeMercator.x,
         mercatorY: treeMercator.y,
-        east: 0,
-        north: 0,
-        up: 0,
-        growthStart: previousTree?.growthStart ?? performance.now(),
+        east: (treeMercator.x - originMercator.x) / mercatorUnitsPerMeter,
+        north: (originMercator.y - treeMercator.y) / mercatorUnitsPerMeter,
+        up: elevation - sceneOriginElevation,
+        growthStart: previousTree?.growthStart ?? Infinity,
       });
     }
 
-    this.displayedTrees.clear();
-    for (const [key, displayedTree] of nextDisplayedTrees) {
-      displayedTree.east = (displayedTree.mercatorX - originMercator.x)
-        / mercatorUnitsPerMeter;
-      displayedTree.north = (originMercator.y - displayedTree.mercatorY)
-        / mercatorUnitsPerMeter;
-      displayedTree.up = displayedTree.elevation - this.sceneOriginElevation;
-      this.displayedTrees.set(key, displayedTree);
-    }
+    const staged = yield* this.stagingMeshes();
+    let revision: number;
+    let growing: boolean;
+    do {
+      revision = this.lightingRevision;
+      for (const mesh of staged) mesh.instanceMatrix.clearUpdateRanges();
+      growing = yield* this.prepareTreeMeshes(nextDisplayedTrees, staged, performance.now(), ALL_TREE_ATTRIBUTES);
+    } while (revision !== this.lightingRevision);
 
-    this.writeTreeMeshes(performance.now());
+    // Publish the origin and all instance buffers together. Until this point,
+    // rendering and growth animation continue using the previous generation.
+    const committedAt = performance.now();
+    for (const tree of nextDisplayedTrees.values()) {
+      if (tree.growthStart === Infinity) tree.growthStart = committedAt;
+    }
+    const previous = this.meshes()!;
+    for (const mesh of previous) this.scene.remove(mesh);
+    for (const mesh of staged) this.scene.add(mesh);
+    [this.trunkMesh, this.broadleafMesh, this.coniferMesh,
+      this.palmMesh, this.shrubMesh, this.shadowMesh] = staged;
+    this.shadowMesh.visible = this.shadowsEnabled;
+    (this.shadowMesh.material as THREE.MeshBasicMaterial).opacity = treeShadowOpacity(zoom)
+      * (1 - Math.max(this.darkMode ? 0.85 : 0, this.nightMix) * 0.7);
+    this.spareMeshes = previous;
+    this.sceneOrigin = sceneOrigin;
+    this.sceneOriginElevation = sceneOriginElevation;
+    this.displayedTrees = nextDisplayedTrees;
+    this.growthJob = undefined;
+    this.growthAnimationActive = growing;
+    onComplete?.();
   }
 
-  private writeTreeMeshes(now: number) {
-    const map = this.map;
-    const trunkMesh = this.trunkMesh;
-    const broadleafMesh = this.broadleafMesh;
-    const coniferMesh = this.coniferMesh;
-    const palmMesh = this.palmMesh;
-    const shrubMesh = this.shrubMesh;
-    const shadowMesh = this.shadowMesh;
-    if (!map || !trunkMesh || !broadleafMesh || !coniferMesh || !palmMesh
-      || !shrubMesh || !shadowMesh) return;
+  private writeTreeMeshes(now: number, options = ALL_TREE_ATTRIBUTES) {
+    const meshes = this.meshes();
+    if (!meshes) return;
+    const job = this.prepareTreeMeshes(this.displayedTrees, meshes, now, options);
+    let result = job.next();
+    while (!result.done) result = job.next();
+    // Color/shadow refreshes must not finish an outstanding matrix pass just
+    // because its wall-clock growth duration has elapsed.
+    if (options.matrices) this.growthAnimationActive = result.value;
+    this.map?.triggerRepaint();
+  }
 
+  private *prepareTreeMeshes(
+    trees: Map<string, DisplayedTree>, meshes: TreeMeshes, now: number, options: TreeWriteOptions,
+  ): Generator<void, boolean> {
+    const [trunkMesh, broadleafMesh, coniferMesh, palmMesh, shrubMesh, shadowMesh] = meshes;
+    // Keep pending ranges from earlier writes until Three uploads them. A
+    // lighting update and growth update can happen before the same render.
     let broadleafCount = 0;
     let coniferCount = 0;
     let palmCount = 0;
@@ -1012,22 +1142,34 @@ export class TreeModelLayer implements CustomLayerInterface {
     let shadowCount = 0;
     let hasGrowingTrees = false;
 
-    for (const displayedTree of this.displayedTrees.values()) {
+    for (const displayedTree of trees.values()) {
+      yield;
       const {
         tree,
         east,
         north,
         up,
       } = displayedTree;
+      const treeNow = options.growingOnly ? performance.now() : now;
       const progress = Math.min(
         1,
-        Math.max(0, (now - displayedTree.growthStart) / TREE_GROWTH_DURATION_MS),
+        Math.max(0, (treeNow - displayedTree.growthStart) / TREE_GROWTH_DURATION_MS),
       );
-      const growth = treeGrowth(displayedTree.growthStart, now);
+      const growth = treeGrowth(displayedTree.growthStart, treeNow);
       if (progress < 1) hasGrowingTrees = true;
       const isConifer = tree.vegetationType === 'conifer';
       const isPalm = tree.vegetationType === 'palm';
       const isShrub = tree.vegetationType === 'shrub';
+      if (options.growingOnly && displayedTree.growthFinished) {
+        if (!isShrub) trunkCount += 1;
+        if (isConifer) coniferCount += 1;
+        else if (isPalm) palmCount += 1;
+        else if (isShrub) shrubCount += 1;
+        else broadleafCount += 1;
+        shadowCount += 1;
+        continue;
+      }
+      if (options.matrices) displayedTree.growthFinished = progress >= 1;
       const biomeProfile = treeBiomeProfile(tree.biome);
       const canopyBase = tree.height * (isShrub ? 0.06 : isPalm ? 0.72 : isConifer ? 0.18 : 0.3);
       const trunkHeight = (canopyBase + TRUNK_CANOPY_OVERLAP_METERS) * growth;
@@ -1035,17 +1177,22 @@ export class TreeModelLayer implements CustomLayerInterface {
 
       const night = Math.max(this.darkMode ? 1 : 0, this.nightMix);
       if (!isShrub) {
-        this.transformHelper.position.set(east, up, north);
-        this.transformHelper.rotation.set(0, tree.rotation, 0);
-        this.transformHelper.scale.set(
-          trunkWidth * growth,
-          trunkHeight,
-          trunkWidth * growth,
-        );
-        this.transformHelper.updateMatrix();
-        trunkMesh.setMatrixAt(trunkCount, this.transformHelper.matrix);
-        this.color.setHSL(0.075, 0.38 - night * 0.14, (0.27 - night * 0.2) + tree.colorVariation * (0.06 - night * 0.045));
-        trunkMesh.setColorAt(trunkCount, this.color);
+        if (options.matrices) {
+          this.transformHelper.position.set(east, up, north);
+          this.transformHelper.rotation.set(0, tree.rotation, 0);
+          this.transformHelper.scale.set(
+            trunkWidth * growth,
+            trunkHeight,
+            trunkWidth * growth,
+          );
+          this.transformHelper.updateMatrix();
+          trunkMesh.setMatrixAt(trunkCount, this.transformHelper.matrix);
+          trunkMesh.instanceMatrix.addUpdateRange(trunkCount * 16, 16);
+        }
+        if (options.colors) {
+          this.color.setHSL(0.075, 0.38 - night * 0.14, (0.27 - night * 0.2) + tree.colorVariation * (0.06 - night * 0.045));
+          trunkMesh.setColorAt(trunkCount, this.color);
+        }
         trunkCount += 1;
       }
 
@@ -1057,56 +1204,81 @@ export class TreeModelLayer implements CustomLayerInterface {
         * tree.widthScale
         * biomeProfile.crownWidthScale;
 
-      // Stretch away from the sun while keeping the trunk inside the shadow.
-      const shadowRadius = canopyRadius * 1.3 * growth;
-      const offsetLength = Math.hypot(this.shadowOffsetEast, this.shadowOffsetNorth);
-      const shadowLength = Math.min(offsetLength, shadowRadius * 1.5);
-      const offsetScale = offsetLength > 0 ? shadowLength / offsetLength : 0;
-      this.transformHelper.position.set(
-        east + this.shadowOffsetEast * offsetScale * 0.5,
-        up + 0.06,
-        north + this.shadowOffsetNorth * offsetScale * 0.5,
-      );
-      this.transformHelper.rotation.set(0, Math.atan2(-this.shadowOffsetNorth, this.shadowOffsetEast), 0);
-      this.transformHelper.scale.set(shadowRadius + shadowLength * 0.5, 1, shadowRadius);
-      this.transformHelper.updateMatrix();
-      shadowMesh.setMatrixAt(shadowCount, this.transformHelper.matrix);
+      if (options.shadows) {
+        // Stretch away from the sun while keeping the trunk inside the shadow.
+        const shadowRadius = canopyRadius * 1.3 * growth;
+        const offsetLength = Math.hypot(this.shadowOffsetEast, this.shadowOffsetNorth);
+        const shadowLength = Math.min(offsetLength, shadowRadius * 1.5);
+        const offsetScale = offsetLength > 0 ? shadowLength / offsetLength : 0;
+        this.transformHelper.position.set(
+          east + this.shadowOffsetEast * offsetScale * 0.5,
+          up + 0.06,
+          north + this.shadowOffsetNorth * offsetScale * 0.5,
+        );
+        this.transformHelper.rotation.set(0, Math.atan2(-this.shadowOffsetNorth, this.shadowOffsetEast), 0);
+        this.transformHelper.scale.set(shadowRadius + shadowLength * 0.5, 1, shadowRadius);
+        this.transformHelper.updateMatrix();
+        shadowMesh.setMatrixAt(shadowCount, this.transformHelper.matrix);
+        shadowMesh.instanceMatrix.addUpdateRange(shadowCount * 16, 16);
+      }
       shadowCount += 1;
 
-      this.transformHelper.position.set(east, up + canopyBase * growth + canopyHeight / 2, north);
-      this.transformHelper.rotation.set(0, tree.rotation, 0);
-      const crownWidth = canopyRadius * (0.9 + tree.colorVariation * 0.2);
-      const crownHeight = isConifer
-        ? canopyHeight * (0.92 + tree.colorVariation * 0.16)
-          * biomeProfile.crownHeightScale
-        : canopyHeight * (0.86 + tree.colorVariation * 0.22)
-          * biomeProfile.crownHeightScale;
-      this.transformHelper.scale.set(
-        crownWidth * growth,
-        crownHeight,
-        canopyRadius * (1.06 - tree.colorVariation * 0.12) * growth,
-      );
-      this.transformHelper.updateMatrix();
+      if (options.matrices) {
+        this.transformHelper.position.set(east, up + canopyBase * growth + canopyHeight / 2, north);
+        this.transformHelper.rotation.set(0, tree.rotation, 0);
+        const crownWidth = canopyRadius * (0.9 + tree.colorVariation * 0.2);
+        const crownHeight = isConifer
+          ? canopyHeight * (0.92 + tree.colorVariation * 0.16)
+            * biomeProfile.crownHeightScale
+          : canopyHeight * (0.86 + tree.colorVariation * 0.22)
+            * biomeProfile.crownHeightScale;
+        this.transformHelper.scale.set(
+          crownWidth * growth,
+          crownHeight,
+          canopyRadius * (1.06 - tree.colorVariation * 0.12) * growth,
+        );
+        this.transformHelper.updateMatrix();
+      }
 
       if (isConifer) {
-        coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
-        this.color.setHSL(biomeProfile.foliageHue, biomeProfile.foliageSaturation - night * 0.22, (biomeProfile.foliageLightness - 0.05 - night * 0.195) + tree.colorVariation * (0.08 - night * 0.06));
-        coniferMesh.setColorAt(coniferCount, this.color);
+        if (options.matrices) {
+          coniferMesh.setMatrixAt(coniferCount, this.transformHelper.matrix);
+          coniferMesh.instanceMatrix.addUpdateRange(coniferCount * 16, 16);
+        }
+        if (options.colors) {
+          this.color.setHSL(biomeProfile.foliageHue, biomeProfile.foliageSaturation - night * 0.22, (biomeProfile.foliageLightness - 0.05 - night * 0.195) + tree.colorVariation * (0.08 - night * 0.06));
+          coniferMesh.setColorAt(coniferCount, this.color);
+        }
         coniferCount += 1;
       } else if (isPalm) {
-        palmMesh.setMatrixAt(palmCount, this.transformHelper.matrix);
-        this.color.setHSL(biomeProfile.foliageHue + 0.01, biomeProfile.foliageSaturation - night * 0.2, (biomeProfile.foliageLightness - night * 0.25) + tree.colorVariation * (0.08 - night * 0.06));
-        palmMesh.setColorAt(palmCount, this.color);
+        if (options.matrices) {
+          palmMesh.setMatrixAt(palmCount, this.transformHelper.matrix);
+          palmMesh.instanceMatrix.addUpdateRange(palmCount * 16, 16);
+        }
+        if (options.colors) {
+          this.color.setHSL(biomeProfile.foliageHue + 0.01, biomeProfile.foliageSaturation - night * 0.2, (biomeProfile.foliageLightness - night * 0.25) + tree.colorVariation * (0.08 - night * 0.06));
+          palmMesh.setColorAt(palmCount, this.color);
+        }
         palmCount += 1;
       } else if (isShrub) {
-        shrubMesh.setMatrixAt(shrubCount, this.transformHelper.matrix);
-        this.color.setHSL(biomeProfile.foliageHue - 0.04 + tree.colorVariation * 0.04, biomeProfile.foliageSaturation - 0.06 - night * 0.18, (biomeProfile.foliageLightness - 0.02 - night * 0.26) + tree.colorVariation * (0.1 - night * 0.08));
-        shrubMesh.setColorAt(shrubCount, this.color);
+        if (options.matrices) {
+          shrubMesh.setMatrixAt(shrubCount, this.transformHelper.matrix);
+          shrubMesh.instanceMatrix.addUpdateRange(shrubCount * 16, 16);
+        }
+        if (options.colors) {
+          this.color.setHSL(biomeProfile.foliageHue - 0.04 + tree.colorVariation * 0.04, biomeProfile.foliageSaturation - 0.06 - night * 0.18, (biomeProfile.foliageLightness - 0.02 - night * 0.26) + tree.colorVariation * (0.1 - night * 0.08));
+          shrubMesh.setColorAt(shrubCount, this.color);
+        }
         shrubCount += 1;
       } else {
-        broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
-        this.color.setHSL(biomeProfile.foliageHue - 0.02 + tree.colorVariation * 0.04, biomeProfile.foliageSaturation - night * 0.21, (biomeProfile.foliageLightness - night * 0.27) + tree.colorVariation * (0.1 - night * 0.08));
-        broadleafMesh.setColorAt(broadleafCount, this.color);
+        if (options.matrices) {
+          broadleafMesh.setMatrixAt(broadleafCount, this.transformHelper.matrix);
+          broadleafMesh.instanceMatrix.addUpdateRange(broadleafCount * 16, 16);
+        }
+        if (options.colors) {
+          this.color.setHSL(biomeProfile.foliageHue - 0.02 + tree.colorVariation * 0.04, biomeProfile.foliageSaturation - night * 0.21, (biomeProfile.foliageLightness - night * 0.27) + tree.colorVariation * (0.1 - night * 0.08));
+          broadleafMesh.setColorAt(broadleafCount, this.color);
+        }
         broadleafCount += 1;
       }
     }
@@ -1117,23 +1289,17 @@ export class TreeModelLayer implements CustomLayerInterface {
     palmMesh.count = palmCount;
     shrubMesh.count = shrubCount;
     shadowMesh.count = shadowCount;
-    trunkMesh.instanceMatrix.needsUpdate = true;
-    broadleafMesh.instanceMatrix.needsUpdate = true;
-    coniferMesh.instanceMatrix.needsUpdate = true;
-    palmMesh.instanceMatrix.needsUpdate = true;
-    shrubMesh.instanceMatrix.needsUpdate = true;
-    shadowMesh.instanceMatrix.needsUpdate = true;
-    if (trunkMesh.instanceColor) trunkMesh.instanceColor.needsUpdate = true;
-    if (broadleafMesh.instanceColor) broadleafMesh.instanceColor.needsUpdate = true;
-    if (coniferMesh.instanceColor) coniferMesh.instanceColor.needsUpdate = true;
-    if (palmMesh.instanceColor) palmMesh.instanceColor.needsUpdate = true;
-    if (shrubMesh.instanceColor) shrubMesh.instanceColor.needsUpdate = true;
-    this.growthAnimationActive = hasGrowingTrees;
-    map.triggerRepaint();
+    for (const mesh of meshes) {
+      if (mesh.instanceMatrix.updateRanges.length) mesh.instanceMatrix.needsUpdate = true;
+      if (options.colors && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    return hasGrowingTrees;
   }
 
   private clearDisplayedTrees() {
+    if (this.displayedTrees.size === 0 && !this.growthAnimationActive) return;
     this.displayedTrees.clear();
+    this.growthJob = undefined;
     this.growthAnimationActive = false;
     for (const mesh of [
       this.shadowMesh,
@@ -1162,10 +1328,43 @@ export class TreeModelLayer implements CustomLayerInterface {
       north: bounds.getNorth(),
     }, map.getZoom());
     if (!viewportAllowed) {
+      this.cancelTreeJobs();
       this.clearDisplayedTrees();
-      map.triggerRepaint();
       return;
     }
+
+    if (this.treeJob && this.jobViewSignature !== this.currentViewSignature()) this.cancelTreeJobs();
+    // Builds and animation share one budget. Alternate their small steps so
+    // neither continuous arrivals nor growing trees can starve the other.
+    const deadline = performance.now() + TREE_FRAME_BUDGET_MS;
+    let growthTurn = true;
+    let completedGrowthPass = false;
+    while (performance.now() < deadline) {
+      if (this.growthAnimationActive && !this.growthJob && !completedGrowthPass) {
+        const meshes = this.meshes();
+        if (meshes) this.growthJob = this.prepareTreeMeshes(this.displayedTrees, meshes, performance.now(), {
+          matrices: true, colors: false, shadows: true, growingOnly: true,
+        });
+      }
+      if (!this.treeJob && !this.growthJob) break;
+      if (this.growthJob && (growthTurn || !this.treeJob)) {
+        const result = this.growthJob.next();
+        if (result.done) {
+          this.growthJob = undefined;
+          this.growthAnimationActive = result.value;
+          completedGrowthPass = true;
+        }
+      } else if (this.treeJob?.next().done) {
+        this.cancelTreeJobs();
+      }
+      growthTurn = !growthTurn;
+    }
+    // Growth can publish partial matrix ranges: unlike a new viewport, every
+    // instance retains its identity and coordinate origin throughout a pass.
+    for (const mesh of this.meshes() ?? []) {
+      if (mesh.instanceMatrix.updateRanges.length) mesh.instanceMatrix.needsUpdate = true;
+    }
+    if (this.treeJob || this.growthJob || this.growthAnimationActive) map.triggerRepaint();
 
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
       this.sceneOrigin,
@@ -1180,15 +1379,15 @@ export class TreeModelLayer implements CustomLayerInterface {
     this.camera.projectionMatrix.copy(this.projectionMatrix);
     this.camera.projectionMatrixInverse.copy(this.projectionMatrix).invert();
 
-    if (this.growthAnimationActive) {
-      this.writeTreeMeshes(performance.now());
-    }
-
     renderer.resetState();
     renderer.render(this.scene, this.camera);
   }
 
   onRemove() {
+    this.cancelTreeJobs();
+    this.growthJob = undefined;
+    for (const mesh of this.spareMeshes ?? []) mesh.dispose();
+    this.spareMeshes = undefined;
     for (const mesh of [
       this.shadowMesh,
       this.trunkMesh,
@@ -1197,6 +1396,7 @@ export class TreeModelLayer implements CustomLayerInterface {
       this.palmMesh,
       this.shrubMesh,
     ]) {
+      mesh?.dispose();
       mesh?.geometry.dispose();
       const materials = Array.isArray(mesh?.material) ? mesh.material : [mesh?.material];
       materials.forEach((material) => material?.dispose());

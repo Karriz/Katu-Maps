@@ -2621,6 +2621,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private sceneOriginElevation = 0;
   private readonly elevationCache = new Map<string, number>();
   private sampledBridges: SampledBridge[] = [];
+  private readonly bridgeLngLatBoundsCache = new WeakMap<SampledBridge, { minLng: number; minLat: number; maxLng: number; maxLat: number }>();
   private drapedVisible = true;
   private drapedStyleRefreshId = 0;
   private drapedHandoff?: { frames: number; fadeStarted?: number };
@@ -2656,6 +2657,119 @@ export class BridgeModelLayer implements CustomLayerInterface {
 
   getPerformanceStats() {
     return { ...this.performanceStats, cachedBridges: this.bridgeResources.size, cachedGeometryVertices: this.geometryVertices, cachedSections: this.cachedSections };
+  }
+
+  /**
+   * Absolute deck elevation (metres, same datum as queryTerrainElevation) at a
+   * lng/lat, interpolated from the sampled bridge surface mesh. Returns null
+   * when no sampled bridge deck covers the point, so callers can fall back to
+   * terrain. Used to lift 3D transit vehicles onto bridges instead of terrain.
+   */
+  hasBridges(): boolean {
+    return this.sampledBridges.length > 0;
+  }
+
+  deckElevationAt(lng: number, lat: number): number | null {
+    if (this.sampledBridges.length === 0) return null;    const pad = 0.0006; // ~65 m slack around the deck mesh bounds
+    const cosLat = Math.cos(lat * DEGREES_TO_RADIANS);
+    const metresPerDegLat = (Math.PI / 180) * EARTH_RADIUS_METERS;
+    const maxRadiusMetres = 16; // deck mesh samples are 10 m apart; allow a little slack
+    let nearest: Array<{ deck: number; d: number }> = [];
+    for (const bridge of this.sampledBridges) {
+      const b = this.lngLatBounds(bridge);
+      if (lng < b.minLng - pad || lng > b.maxLng + pad || lat < b.minLat - pad || lat > b.maxLat + pad) continue;
+      for (const p of bridge.surface) {
+        const dLat = (lat - p.latitude) * metresPerDegLat;
+        const dLng = (lng - p.longitude) * cosLat * metresPerDegLat;
+        const d = Math.hypot(dLat, dLng);
+        if (d > maxRadiusMetres) continue;
+        nearest.push({ deck: p.deck, d });
+      }
+    }
+    if (nearest.length === 0) return null;
+    nearest.sort((a, b) => a.d - b.d);
+    const k = Math.min(3, nearest.length);
+    let wSum = 0;
+    let vSum = 0;
+    for (let i = 0; i < k; i++) {
+      const w = 1 / (nearest[i].d * nearest[i].d + 0.01);
+      wSum += w;
+      vSum += w * nearest[i].deck;
+    }
+    return vSum / wSum;
+  }
+
+  private lngLatBounds(bridge: SampledBridge) {
+    let bounds = this.bridgeLngLatBoundsCache.get(bridge);
+    if (bounds) return bounds;
+    let minLng = Infinity;
+    let minLat = Infinity;
+    let maxLng = -Infinity;
+    let maxLat = -Infinity;
+    for (const p of bridge.surface) {
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+    }
+    bounds = { minLng, minLat, maxLng, maxLat };
+    this.bridgeLngLatBoundsCache.set(bridge, bounds);
+    return bounds;
+  }
+
+  private readonly bridgeSpanCache = new WeakMap<SampledBridge, { heading: number; start: [number, number]; end: [number, number] }>();
+
+  /**
+   * Returns the span geometry of the nearest bridge covering a point:
+   * heading and start/end endpoints. Returns null when no bridge covers it.
+   */
+  bridgeSpanAt(lng: number, lat: number): { heading: number; start: [number, number]; end: [number, number] } | null {
+    if (this.sampledBridges.length === 0) return null;
+    const pad = 0.0006;
+    const cosLat = Math.cos(lat * DEGREES_TO_RADIANS);
+    const metresPerDegLat = (Math.PI / 180) * EARTH_RADIUS_METERS;
+    let best: { span: { heading: number; start: [number, number]; end: [number, number] }; d: number } | null = null;
+    for (const bridge of this.sampledBridges) {
+      const b = this.lngLatBounds(bridge);
+      if (lng < b.minLng - pad || lng > b.maxLng + pad || lat < b.minLat - pad || lat > b.maxLat + pad) continue;
+      const span = this.bridgeSpan(bridge);
+      for (const p of bridge.surface) {
+        const dLat = (lat - p.latitude) * metresPerDegLat;
+        const dLng = (lng - p.longitude) * cosLat * metresPerDegLat;
+        const d = Math.hypot(dLat, dLng);
+        if (!best || d < best.d) best = { span, d };
+      }
+    }
+    return best?.span ?? null;
+  }
+
+  /** Compute span heading and endpoints from the farthest pair of surface points (cached). */
+  private bridgeSpan(bridge: SampledBridge): { heading: number; start: [number, number]; end: [number, number] } {
+    let cached = this.bridgeSpanCache.get(bridge);
+    if (cached) return cached;
+    let maxDist = 0;
+    let pi = 0;
+    let pj = 0;
+    const pts = bridge.surface;
+    const step = Math.max(1, Math.floor(pts.length / 50));
+    for (let i = 0; i < pts.length; i += step) {
+      for (let j = i + step; j < pts.length; j += step) {
+        const de = pts[j].east - pts[i].east;
+        const dn = pts[j].north - pts[i].north;
+        const dist = de * de + dn * dn;
+        if (dist > maxDist) { maxDist = dist; pi = i; pj = j; }
+      }
+    }
+    const a = pts[pi];
+    const b = pts[pj];
+    const heading = Math.atan2(b.east - a.east, b.north - a.north);
+    const span = {
+      heading,
+      start: [a.longitude, a.latitude] as [number, number],
+      end: [b.longitude, b.latitude] as [number, number],
+    };
+    this.bridgeSpanCache.set(bridge, span);
+    return span;
   }
 
   constructor(private readonly sourceId = OPENFREEMAP_SOURCE_ID) {}

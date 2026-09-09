@@ -13,7 +13,7 @@ import {
   sunCartesian,
 } from '../CartoonLighting';
 import type { DayNightAppearance } from '../DayNightAppearance';
-import { FLIGHT_SKID_CONTACT_OFFSET_METERS, type FlightState } from './FlightDynamics';
+import { FLIGHT_AIRCRAFT_SCALE, FLIGHT_SKID_CONTACT_OFFSET_METERS, type FlightState } from './FlightDynamics';
 
 const CONTACT_SHADOW_FADE_HEIGHT_METERS = 140;
 const CONTACT_SHADOW_BASE_OPACITY = 0.22;
@@ -69,10 +69,23 @@ function createContactShadow(texture: THREE.DataTexture) {
   });
   const shadow = new THREE.Mesh(geometry, material);
   // Rough aircraft footprint: wide wings, longer fuselage.
-  shadow.scale.set(7.2, 1, 5.0);
+  shadow.scale.set(7.2 * FLIGHT_AIRCRAFT_SCALE, 1, 5.0 * FLIGHT_AIRCRAFT_SCALE);
   shadow.frustumCulled = false;
   shadow.renderOrder = -1;
   return shadow;
+}
+
+/** Tapered tips with a gentle upward dihedral, using the same low-poly mesh. */
+function createWingGeometry(span: number, thickness: number, chord: number) {
+  const geometry = new THREE.BoxGeometry(span, thickness, chord, 2, 1, 1);
+  const positions = geometry.getAttribute('position');
+  for (let index = 0; index < positions.count; index += 1) {
+    const tip = Math.abs(positions.getX(index)) / (span / 2);
+    positions.setY(index, positions.getY(index) + tip * span * 0.025);
+    positions.setZ(index, positions.getZ(index) * (1 - tip * 0.4) - tip * chord * 0.12);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function createAircraft(dark: boolean) {
@@ -106,11 +119,11 @@ function createAircraft(dark: boolean) {
   nose.position.z = 5.5;
   aircraft.add(nose);
 
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(13.5, 0.24, 2.5), bodyMaterial);
+  const wing = new THREE.Mesh(createWingGeometry(13.5, 0.24, 2.5), bodyMaterial);
   wing.position.set(0, -0.05, 0.25);
   aircraft.add(wing);
 
-  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.18, 1.25), accentMaterial);
+  const tailWing = new THREE.Mesh(createWingGeometry(5.2, 0.18, 1.25), accentMaterial);
   tailWing.position.set(0, 0.2, -3.65);
   aircraft.add(tailWing);
 
@@ -128,13 +141,13 @@ function createAircraft(dark: boolean) {
     new THREE.SphereGeometry(dark ? 0.18 : 0.1, 8, 6),
     new THREE.MeshBasicMaterial({ color: dark ? 0xff3b3b : 0xb91c1c }),
   );
-  leftNav.position.set(-6.7, 0.1, 0.45);
+  leftNav.position.set(-6.7, 0.38, 0.25);
   aircraft.add(leftNav);
   const rightNav = new THREE.Mesh(
     new THREE.SphereGeometry(dark ? 0.18 : 0.1, 8, 6),
     new THREE.MeshBasicMaterial({ color: dark ? 0x4ade80 : 0x15803d }),
   );
-  rightNav.position.set(6.7, 0.1, 0.45);
+  rightNav.position.set(6.7, 0.38, 0.25);
   aircraft.add(rightNav);
   const tailNav = new THREE.Mesh(
     new THREE.SphereGeometry(dark ? 0.14 : 0.08, 8, 6),
@@ -162,9 +175,9 @@ function createAircraft(dark: boolean) {
   propeller.position.z = 6.85;
   aircraft.add(propeller);
 
-  // Landing skids — bottom face sits at -FLIGHT_SKID_CONTACT_OFFSET_METERS.
+  // Build in model units; the group scale brings the skids to the contact height.
   const skidThickness = 0.14;
-  const skidBottom = -FLIGHT_SKID_CONTACT_OFFSET_METERS;
+  const skidBottom = -FLIGHT_SKID_CONTACT_OFFSET_METERS / FLIGHT_AIRCRAFT_SCALE;
   const skidCenterY = skidBottom + skidThickness / 2;
   const skidTrack = 1.15;
   for (const side of [-1, 1] as const) {
@@ -192,6 +205,7 @@ function createAircraft(dark: boolean) {
   aircraft.traverse((child) => {
     if (child instanceof THREE.Mesh) child.frustumCulled = false;
   });
+  aircraft.scale.setScalar(FLIGHT_AIRCRAFT_SCALE);
   aircraft.rotation.order = 'YXZ';
   return { aircraft, propeller };
 }
@@ -351,7 +365,7 @@ export class FlightModelLayer implements CustomLayerInterface {
     // the disc does not z-fight or clip into the terrain mesh.
     shadow.position.set(0, -(pose.altitude - terrainElevation) + 0.2, 0);
     shadow.rotation.set(0, pose.heading, 0);
-    const soften = 1 + heightAboveContact * 0.014;
+    const soften = FLIGHT_AIRCRAFT_SCALE * (1 + heightAboveContact * 0.014);
     shadow.scale.set(7.2 * soften, 1, 5.0 * soften);
     const material = shadow.material;
     if (material instanceof THREE.MeshBasicMaterial) {
