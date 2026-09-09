@@ -2,11 +2,13 @@ import { createExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-
 import { describe, expect, it } from 'vitest';
 import {
   aerowayWidthExpression,
+  buildingColorPaint,
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
+  pastelBuildingColor,
   updateBridgeFallback,
   removeBridgeFallback,
   refreshMapRenderState,
@@ -15,6 +17,29 @@ import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
+  it('selectively pastellizes vivid OSM building colours without washing out soft colours', () => {
+    const expression = pastelBuildingColor('#fffdf8') as any;
+    const compiled = createExpression(expression, 'building-color-test');
+    if (compiled.result !== 'success') throw new Error('Invalid building color expression');
+    const vivid = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ff0000' } } as any);
+    const vividYellow = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ffff00' } } as any);
+    const darkGray = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#303030' } } as any);
+    const darkRed = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#7f1818' } } as any);
+    const saturatedGreen = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#20a020' } } as any);
+    const soft = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#f3caca' } } as any);
+    expect(vivid.r).toBeGreaterThan(vivid.g);
+    expect(vivid.g).toBeGreaterThan(0.75);
+    expect(vividYellow.b).toBeGreaterThan(0.75);
+    expect(darkGray.r).toBeGreaterThan(0.7);
+    expect(darkRed.g).toBeGreaterThan(0.65);
+    expect(saturatedGreen.r).toBeGreaterThan(0.7);
+    expect(saturatedGreen.b).toBeGreaterThan(0.7);
+    expect(soft.r).toBeCloseTo(0xf3 / 255, 2);
+    expect(soft.g).toBeCloseTo(0xca / 255, 2);
+    expect(compiled.value.evaluate({ zoom: 16 }, { properties: {} } as any).toString()).toBe('rgba(255,253,248,1)');
+    expect(buildingColorPaint('#fffdf8', false)).toBe('#fffdf8');
+  });
+
   it('uses metre-scaled paired rails inside the ground railway bed at close zoom', () => {
     const rail = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railways') as any;
     const bed = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-railway-bed') as any;
