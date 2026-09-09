@@ -559,7 +559,7 @@ export function pastelBuildingColor(baseColor: string): ExpressionSpecification 
         ['let', 'chroma', ['/', ['-', brightest, darkest], 255],
           ['let', 'lightness', ['/', ['+', brightest, darkest], 510],
             ['interpolate', ['linear'], ['max',
-              ['interpolate', ['linear'], ['var', 'chroma'], 0.18, 0, 0.45, 0.34, 1, 0.72],
+              ['interpolate', ['linear'], ['var', 'chroma'], 0.18, 0, 0.45, 0.42, 1, 0.82],
               ['interpolate', ['linear'], ['var', 'lightness'], 0, 0.48, 0.3, 0.12, 0.55, 0],
             ],
             0, ['var', 'tag'],

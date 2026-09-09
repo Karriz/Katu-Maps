@@ -25,8 +25,8 @@ describe('global map overlay styles', () => {
     const vividYellow = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#ffff00' } } as any);
     const soft = compiled.value.evaluate({ zoom: 16 }, { properties: { colour: '#f3caca' } } as any);
     expect(vivid.r).toBeGreaterThan(vivid.g);
-    expect(vivid.g).toBeGreaterThan(0.65);
-    expect(vividYellow.b).toBeGreaterThan(0.65);
+    expect(vivid.g).toBeGreaterThan(0.75);
+    expect(vividYellow.b).toBeGreaterThan(0.75);
     expect(soft.r).toBeCloseTo(0xf3 / 255, 2);
     expect(soft.g).toBeCloseTo(0xca / 255, 2);
     expect(compiled.value.evaluate({ zoom: 16 }, { properties: {} } as any).toString()).toBe('rgba(255,253,248,1)');
