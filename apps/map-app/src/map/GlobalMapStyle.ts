@@ -543,17 +543,31 @@ const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
 const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
 
 /**
- * Retain a restrained hint of an OSM building colour while pulling unusual,
- * highly saturated tags into the map's base palette. OpenMapTiles exposes the
- * OSM `building:colour` value as `colour` on building features.
+ * Retain already-soft OSM building colours while progressively pulling dark
+ * or highly saturated tags into the map palette. OpenMapTiles exposes the OSM
+ * `building:colour` value as `colour` on building features.
  */
 export function pastelBuildingColor(baseColor: string): ExpressionSpecification {
+  const channel = (index: number): ExpressionSpecification => ['at', index, ['var', 'rgba']] as ExpressionSpecification;
+  const darkest = ['min', channel(0), channel(1), channel(2)] as ExpressionSpecification;
+  const brightest = ['max', channel(0), channel(1), channel(2)] as ExpressionSpecification;
   return [
     'case',
     ['has', 'colour'],
-    ['interpolate', ['linear'], 0.76,
-      0, ['to-color', ['get', 'colour'], baseColor],
-      1, baseColor,
+    ['let', 'tag', ['to-color', ['get', 'colour'], baseColor],
+      ['let', 'rgba', ['to-rgba', ['var', 'tag']],
+        ['let', 'chroma', ['/', ['-', brightest, darkest], 255],
+          ['let', 'lightness', ['/', ['+', brightest, darkest], 510],
+            ['interpolate', ['linear'], ['max',
+              ['interpolate', ['linear'], ['var', 'chroma'], 0.18, 0, 0.45, 0.34, 1, 0.72],
+              ['interpolate', ['linear'], ['var', 'lightness'], 0, 0.48, 0.3, 0.12, 0.55, 0],
+            ],
+            0, ['var', 'tag'],
+            1, baseColor,
+            ],
+          ],
+        ],
+      ],
     ],
     baseColor,
   ] as ExpressionSpecification;

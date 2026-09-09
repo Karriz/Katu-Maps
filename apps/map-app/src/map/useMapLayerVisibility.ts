@@ -50,6 +50,20 @@ type LayerVisibilityMap = {
   setLayoutProperty: (layerId: string, property: 'visibility', value: 'visible' | 'none') => unknown;
 };
 
+function applyBuildingColors(map: Map, enabled: boolean, theme: 'light' | 'dark', footprintLayerIds: string[]) {
+  const buildingColor = theme === 'dark' ? '#293f53' : '#fffdf8';
+  const buildingBand = theme === 'dark' ? '#625f52' : '#dedad1';
+  footprintLayerIds.forEach((id) => {
+    if (map.getLayer(id)) map.setPaintProperty(id, 'fill-color', buildingColorPaint(buildingColor, enabled));
+  });
+  if (map.getLayer('global-building-ground-storeys')) {
+    map.setPaintProperty('global-building-ground-storeys', 'fill-extrusion-color', buildingColorPaint(buildingBand, enabled));
+  }
+  if (map.getLayer('global-buildings')) {
+    map.setPaintProperty('global-buildings', 'fill-extrusion-color', buildingColorPaint(buildingColor, enabled));
+  }
+}
+
 export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[], visible: boolean) {
   layerIds.forEach((layerId) => {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
@@ -91,13 +105,6 @@ export function useMapLayerVisibility({
     setVisibility([buildingTransitionFootprintLayerId], layerToggles.buildings);
     setVisibility([building2dLayerId], !layerToggles.buildings);
     setVisibility(buildingShadowLayerIds, layerToggles.buildings);
-    const buildingColor = resolvedTheme === 'dark' ? '#293f53' : '#fffdf8';
-    const buildingBand = resolvedTheme === 'dark' ? '#625f52' : '#dedad1';
-    [buildingTransitionFootprintLayerId, building2dLayerId].forEach((id) => {
-      if (map.getLayer(id)) map.setPaintProperty(id, 'fill-color', buildingColorPaint(buildingColor, layerToggles.buildingColors));
-    });
-    if (map.getLayer('global-building-ground-storeys')) map.setPaintProperty('global-building-ground-storeys', 'fill-extrusion-color', buildingColorPaint(buildingBand, layerToggles.buildingColors));
-    if (map.getLayer('global-buildings')) map.setPaintProperty('global-buildings', 'fill-extrusion-color', buildingColorPaint(buildingColor, layerToggles.buildingColors));
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees);
     setVisibility(cyclingLayerIds, layerToggles.cycling);
     setVisibility(hikingLayerIds, layerToggles.hiking);
@@ -112,7 +119,15 @@ export function useMapLayerVisibility({
     if (!layerToggles.chargingStations) onChargingStationsDisabled();
     if (!layerToggles.roadWeather) onRoadWeatherDisabled();
     if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
-  }, [mapLoaded, layerToggles, resolvedTheme, building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId, cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled, onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled, terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef, waterEffectLayerIds, bridgeLayerRef]);
+  }, [mapLoaded, layerToggles.globe, layerToggles.terrain, layerToggles.buildings, layerToggles.bridges,
+    layerToggles.trees, layerToggles.cycling, layerToggles.hiking, layerToggles.transit,
+    layerToggles.transitLines, layerToggles.transitModels, layerToggles.trafficCameras,
+    layerToggles.chargingStations, layerToggles.roadWeather, layerToggles.roadTraffic,
+    building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId,
+    cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled,
+    onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled,
+    terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef,
+    waterEffectLayerIds, bridgeLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -123,13 +138,16 @@ export function useMapLayerVisibility({
     applyGroundPatternTheme(map, resolvedTheme);
     if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
-    const buildingColor = resolvedTheme === 'dark' ? '#293f53' : '#fffdf8';
-    const buildingBand = resolvedTheme === 'dark' ? '#625f52' : '#dedad1';
-    [buildingTransitionFootprintLayerId, building2dLayerId].forEach((id) => {
-      if (map.getLayer(id)) map.setPaintProperty(id, 'fill-color', buildingColorPaint(buildingColor, layerToggles.buildingColors));
-    });
-    if (map.getLayer('global-building-ground-storeys')) map.setPaintProperty('global-building-ground-storeys', 'fill-extrusion-color', buildingColorPaint(buildingBand, layerToggles.buildingColors));
-    if (map.getLayer('global-buildings')) map.setPaintProperty('global-buildings', 'fill-extrusion-color', buildingColorPaint(buildingColor, layerToggles.buildingColors));
     map.triggerRepaint();
-  }, [building2dLayerId, buildingTransitionFootprintLayerId, dayNightEnabled, flightActive, flightActiveRef, layerToggles.buildingColors, mapLoaded, mapRef, resolvedTheme, bridgeLayerRef, transitVehicleLayerRef, treeLayerRef]);
+  }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme,
+    bridgeLayerRef, transitVehicleLayerRef, treeLayerRef]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || flightActive || flightActiveRef.current || dayNightEnabled) return;
+    applyBuildingColors(map, layerToggles.buildingColors, resolvedTheme,
+      [buildingTransitionFootprintLayerId, building2dLayerId]);
+    map.triggerRepaint();
+  }, [building2dLayerId, buildingTransitionFootprintLayerId, dayNightEnabled, flightActive,
+    flightActiveRef, layerToggles.buildingColors, mapLoaded, mapRef, resolvedTheme]);
 }
