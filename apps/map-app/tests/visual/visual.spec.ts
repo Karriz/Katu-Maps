@@ -934,7 +934,7 @@ const scenarios: Scenario[] = [
       await expect(panel.getByRole('switch', { name: /Day & night/i })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /^Clouds/ })).toBeVisible();
       await expect(panel.getByRole('switch', { name: /^Weather/ })).toBeVisible();
-      await expect(panel.getByRole('switch')).toHaveCount(13);
+      await expect(panel.getByRole('switch')).toHaveCount(14);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
