@@ -46,18 +46,21 @@ const ROAD_FILTER: ExpressionSpecification = [
 
 const OVERVIEW_ROAD_FILTER: ExpressionSpecification = [
   'all',
+  ['!=', ['get', 'brunnel'], 'tunnel'],
   ['==', ['geometry-type'], 'LineString'],
   ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
 ] as ExpressionSpecification;
 
 const OVERVIEW_REGIONAL_ROAD_FILTER: ExpressionSpecification = [
   'all',
+  ['!=', ['get', 'brunnel'], 'tunnel'],
   ['==', ['geometry-type'], 'LineString'],
   ['in', ['get', 'class'], ['literal', ['primary', 'secondary', 'tertiary']]],
 ] as ExpressionSpecification;
 
 const OVERVIEW_RAIL_FILTER: ExpressionSpecification = [
   'all',
+  ['!=', ['get', 'brunnel'], 'tunnel'],
   ['==', ['geometry-type'], 'LineString'],
   ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
 ] as ExpressionSpecification;
@@ -134,6 +137,7 @@ const HIKING_PATH_FILTER: ExpressionSpecification = [
 
 const LOCAL_TRANSIT_RAIL_FILTER: ExpressionSpecification = [
   'all',
+  ['!=', ['get', 'brunnel'], 'tunnel'],
   ['==', ['geometry-type'], 'LineString'],
   [
     'any',
@@ -453,14 +457,13 @@ export function removeBridgeFallback(map: MapLibreMap) {
 }
 
 export const GLOBAL_ROAD_CASING_LAYER_IDS = [
-  'global-road-tunnel-casing',
+  'global-road-tunnel-portals',
   'global-road-casing',
   'global-road-bridge-shadow',
   'global-road-bridge-casing',
 ];
 
 export const GLOBAL_ROAD_LAYER_IDS = [
-  'global-road-tunnels',
   'global-roads',
   'global-road-bridges',
 ];
@@ -566,12 +569,24 @@ export function pastelBuildingColor(baseColor: string): ExpressionSpecification 
         ['let', 'rgba', ['to-rgba', ['var', 'tag']],
         ['let', 'chroma', ['/', ['-', brightest, darkest], 255],
           ['let', 'lightness', ['/', ['+', brightest, darkest], 510],
-            ['interpolate', ['linear'], ['max',
-              ['interpolate', ['linear'], ['var', 'chroma'], 0.18, 0, 0.3, 0.5, 0.45, 0.72, 1, 0.9],
-              ['interpolate', ['linear'], ['var', 'lightness'], 0, 0.96, 0.4, 0.85, 0.7, 0.2, 0.82, 0],
-            ],
-            0, ['var', 'tag'],
-            1, baseColor,
+            ['let', 'baseRgba', ['to-rgba', baseColor],
+              ['let', 'baseLightness', ['/', ['+',
+                ['max', ['at', 0, ['var', 'baseRgba']], ['at', 1, ['var', 'baseRgba']], ['at', 2, ['var', 'baseRgba']]],
+                ['min', ['at', 0, ['var', 'baseRgba']], ['at', 1, ['var', 'baseRgba']], ['at', 2, ['var', 'baseRgba']]],
+              ], 510],
+                ['interpolate', ['linear'], ['max',
+                  ['interpolate', ['linear'], ['var', 'chroma'], 0.18, 0, 0.3, 0.5, 0.45, 0.72, 1, 0.9],
+                  ['interpolate', ['linear'], ['var', 'lightness'], 0, 0.96, 0.4, 0.85, 0.7, 0.2, 0.82, 0],
+                  // Pull OSM colours toward the base by at least a fraction of
+                  // the base darkness. In light mode the base is near-white so
+                  // this is negligible; in dark mode / night it darkens even
+                  // light OSM tags so white buildings do not glow at night.
+                  ['*', ['-', 1, ['var', 'baseLightness']], 1],
+                ],
+                0, ['var', 'tag'],
+                1, baseColor,
+                ],
+              ],
             ],
           ],
         ],
@@ -697,8 +712,8 @@ export function roadWidthExpression(
     12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    // Damp the closest view slightly so wide motorways do not dominate a
-    // highly pitched scene while retaining approximately physical scaling.
+    // Keep the close-zoom cap: extending pixel widths exponentially through
+    // flight zooms makes nearby roads overwhelm the view during landing.
     18, ['*', widthMetres, pixelsPerMetre(18, latitude) * 0.82],
   ] as ExpressionSpecification;
 }
@@ -847,6 +862,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
   },
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
   sources: {
+    'tunnel-portals': { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     'globe-biomes': {
       type: 'geojson',
       data: `${import.meta.env.BASE_URL}maps/globe-biomes.geojson`,
@@ -1039,7 +1055,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'fill',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
-      minzoom: 5,
+      minzoom: 9,
       filter: [
         '!',
         ['in', ['get', 'class'], ['literal', [
@@ -1312,42 +1328,21 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
     },
     {
-      id: 'global-road-tunnel-casing',
+      id: 'global-road-tunnel-portals',
       type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'transportation',
-      minzoom: 10.5,
-      filter: ['all', ROAD_FILTER, ['==', ['get', 'brunnel'], 'tunnel']],
+      source: 'tunnel-portals',
+      minzoom: 14,
+      filter: ['==', ['get', 'kind'], 'road'],
       layout: {
         'line-cap': 'round',
         'line-join': 'round',
         'line-sort-key': ROAD_SORT_KEY,
       },
       paint: {
-        // Rounded casing under the butt-ended road exposes a short dark cap at
-        // either endpoint, reading as a simple portal without point data.
-        'line-color': '#46514d',
+        'line-color': '#26302e',
+        'line-blur': 1.5,
         'line-width': roadWidthExpression(61.4981, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.62],
-      },
-    },
-    {
-      id: 'global-road-tunnels',
-      type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'transportation',
-      minzoom: 10.5,
-      filter: ['all', ROAD_FILTER, ['==', ['get', 'brunnel'], 'tunnel']],
-      layout: {
-        'line-cap': 'butt',
-        'line-join': 'round',
-        'line-sort-key': ROAD_SORT_KEY,
-      },
-      paint: {
-        'line-color': ROAD_COLOR,
-        'line-width': roadWidthExpression(61.4981),
-        'line-dasharray': [2.2, 1.6],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.56],
       },
     },
     {
@@ -1761,42 +1756,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     {
       id: 'global-railway-tunnel-portals',
       type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'transportation',
-      minzoom: 9,
-      filter: [
-        'all',
-        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
-        ['==', ['get', 'brunnel'], 'tunnel'],
-      ],
+      source: 'tunnel-portals',
+      minzoom: 14,
+      filter: ['==', ['get', 'kind'], 'rail'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#46514d',
+        'line-color': '#26302e',
+        'line-blur': 1.5,
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 18, 5],
         'line-opacity': 0.62,
-      },
-    },
-    {
-      id: 'global-railway-tunnels',
-      type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'transportation',
-      minzoom: 9,
-      filter: [
-        'all',
-        ['in', ['get', 'class'], ['literal', ['rail', 'transit']]],
-        ['==', ['get', 'brunnel'], 'tunnel'],
-      ],
-      layout: { 'line-cap': 'butt', 'line-join': 'round' },
-      paint: {
-        'line-color': [
-          'match', ['get', 'class'],
-          'transit', '#909a9d',
-          '#909a9d',
-        ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 18, 2.2],
-        'line-dasharray': [2, 2],
-        'line-opacity': 0.5,
       },
     },
     {
@@ -2673,7 +2641,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'park',
-      minzoom: 5,
+      minzoom: 9,
       filter: [
         'all',
         ['has', 'name'],
@@ -2703,7 +2671,11 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['has', 'name'],
         // OpenFreeMap can expose named fountains in water_name. Only label
         // water bodies that belong to the actual lake/sea hierarchy here.
-        ['in', ['get', 'class'], ['literal', ['lake', 'bay', 'strait', 'sea', 'ocean']]],
+        // Bays and straits should not crowd settlements in regional views.
+        ['step', ['zoom'],
+          ['in', ['get', 'class'], ['literal', ['lake', 'sea', 'ocean']]],
+          9, ['in', ['get', 'class'], ['literal', ['lake', 'bay', 'strait', 'sea', 'ocean']]],
+        ],
       ],
       layout: {
         'text-field': LOCALIZED_NAME,
@@ -2819,12 +2791,12 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       type: 'symbol',
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'place',
-      minzoom: 8,
+      minzoom: 6,
       filter: ['==', ['get', 'class'], 'town'],
       layout: {
         'symbol-sort-key': ['coalesce', ['get', 'rank'], 20],
         'text-field': LOCALIZED_NAME,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 13, 14, 16],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 6, 11, 8, 13, 14, 16],
         'text-font': ['Noto Sans Regular'],
         'text-padding': 12,
       },
@@ -3071,8 +3043,8 @@ export function applyMapTheme(
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
-  ['global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
-  ['global-road-tunnels', 'global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
+  ['global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
+  ['global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);

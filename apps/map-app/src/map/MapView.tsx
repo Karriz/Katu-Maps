@@ -60,7 +60,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
+import { installTunnelPortals } from './TunnelPortals';
 import { RoofModelLayer } from './RoofModelLayer';
+import { FacadeModelLayer } from './FacadeModelLayer';
 import { MapControls, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
@@ -69,6 +71,7 @@ import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
 import { FlightControls } from './flight/FlightControls';
 import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
+import { installFlightSceneScheduler } from './flight/FlightSceneScheduler';
 import { useFlightSimulator } from './flight/useFlightSimulator';
 import { useFlightModePresentation } from './flight/useFlightModePresentation';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
@@ -675,6 +678,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
   const roofLayerRef = useRef<RoofModelLayer | null>(null);
+  const facadeLayerRef = useRef<FacadeModelLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
   const roadWeatherLayerRef = useRef<RoadWeatherLayer | null>(null);
@@ -865,7 +869,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       buildings: !mobileDefault2d,
       buildingColors: true,
       bridges: !mobileDefault2d,
-      proceduralRoofs: !mobileDefault2d,
+      proceduralBuildingDetails: !mobileDefault2d,
       terrain: !mobileDefault2d,
       cycling: false,
       hiking: false,
@@ -939,6 +943,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     treeLayerRef,
     bridgeLayerRef,
     roofLayerRef,
+    facadeLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
     treeRefreshRef,
@@ -977,6 +982,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     treeLayerRef,
     bridgeLayerRef,
     transitVehicleLayerRef,
+    facadeLayerRef,
+    roofLayerRef,
   });
   useEffect(() => {
     if (!layerToggles.dayNight || !dayNightFollowNow) return;
@@ -1031,15 +1038,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     if (map.getLayer('tree-models-3d')) {
       map.setLayoutProperty('tree-models-3d', 'visibility', 'none');
     }
-    flightTreeLayer.updateTrees();
-    bridgeLayerRef.current?.updateBridges();
-    const intervalId = window.setInterval(() => {
-      flightTreeLayer.updateTrees();
-      bridgeLayerRef.current?.updateBridges();
-    }, 4000);
-
     return () => {
-      window.clearInterval(intervalId);
       if (mapRef.current !== map) return;
       try {
         if (map.getLayer(flightTreeLayer.id)) map.removeLayer(flightTreeLayer.id);
@@ -1057,6 +1056,26 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       if (layerToggles.trees) treeRefreshRef.current?.();
     };
   }, [flight.active, flight.stop, layerToggles.trees, mapLoaded]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!flight.active || !mapLoaded || !map) return;
+    const roofLayer = roofLayerRef.current;
+    const facadeLayer = facadeLayerRef.current;
+    roofLayer?.setFlightMode(true);
+    facadeLayer?.setFlightMode(true);
+    const stopRefresh = installFlightSceneScheduler(map, OPENFREEMAP_SOURCE_ID, [
+      () => flightTreeLayerRef.current?.updateTrees(true),
+      () => bridgeLayerRef.current?.updateBridges(),
+      () => roofLayer?.requestFlightRefresh(),
+      () => facadeLayer?.requestFlightRefresh(),
+    ]);
+    return () => {
+      stopRefresh();
+      roofLayer?.setFlightMode(false);
+      facadeLayer?.setFlightMode(false);
+    };
+  }, [flight.active, layerToggles.trees, mapLoaded]);
+
   useEffect(() => {
     if (!flight.active) return;
     flightTreeLayerRef.current?.setTheme(resolvedTheme === 'dark');
@@ -1964,6 +1983,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // Peak markers share a symbol with their labels; register the icon before
     // the first paint so labeled peaks render as a point + name together.
     ensureMountainPeakIcon(map);
+    const disposeTunnelPortals = installTunnelPortals(map);
     // Use the explicitly documented key bindings below rather than MapLibre's
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();
@@ -1979,6 +1999,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     bridgeLayerRef.current = bridgeLayer;
     const roofLayer = new RoofModelLayer();
     roofLayerRef.current = roofLayer;
+    const facadeLayer = new FacadeModelLayer();
+    facadeLayerRef.current = facadeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
     const transitStopsLayer = new TransitStopsLayer((pose) => {
@@ -2098,6 +2120,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const updateTreeModels = () => {
       treeUpdateTimer = undefined;
+      if (flightActiveRef.current) return;
       if (map.isMoving()) {
         scheduleTreeUpdate();
         return;
@@ -2143,6 +2166,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       bridgeLayer.invalidateTerrain();
       treeLayer.invalidateTerrain();
       roofLayer.invalidateSource();
+      facadeLayer.invalidateSource();
       modelDataRevision += 1;
       scheduleTreeUpdate();
     };
@@ -2151,6 +2175,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         bridgeLayer.invalidateTerrain();
         treeLayer.invalidateTerrain();
         roofLayer.invalidateSource();
+        facadeLayer.invalidateSource();
         modelDataRevision += 1;
         scheduleTreeUpdate();
         return;
@@ -2159,6 +2184,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       bridgeLayer.invalidateSource();
       treeLayer.cancelTreeJobs();
       roofLayer.invalidateSource();
+      facadeLayer.invalidateSource();
       modelDataRevision += 1;
       // Tile arrival does not change the camera, so idle may already have
       // passed. Rebuild 3D bridges once the transportation tiles exist.
@@ -2399,6 +2425,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.addLayer(bridgeLayer, 'global-road-labels');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(roofLayer, 'global-road-labels');
+      map.addLayer(facadeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
       try {
         await addLocationIcons(map);
@@ -2893,7 +2920,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       reload: () => window.location.reload(),
     });
     const handleCameraMove = (event?: unknown) => {
-      if (flightActiveRef.current || isTerrainCameraFollowEvent(event)) return;
+      if (flightActiveRef.current) {
+        updateGlobalRoadWidths();
+        return;
+      }
+      if (isTerrainCameraFollowEvent(event)) return;
       const zoom = map.getZoom();
       const pitch = map.getPitch();
       const nextLabelSignature = `${Math.round(zoom * 2) / 2}:${Math.round(pitch / 10) * 10}`;
@@ -2917,14 +2948,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
     // a pan/zoom is still filling the viewport. moveend handles interaction;
-    // idle handles the final set of newly loaded tiles. Flight trees have a
-    // dedicated refresh interval, so avoid updating the hidden regular layer.
+    // idle handles the final set of newly loaded tiles. Flight trees and bridges have a
+    // dedicated refresh scheduler, so avoid updating the hidden regular layer.
     const handleIdleTreeUpdate = () => {
       if (roofLayer.updateRoofs()) map.triggerRepaint();
-      if (flightActiveRef.current) {
-        bridgeLayer.updateBridges();
-        return;
-      }
+      if (facadeLayer.updateFacades()) map.triggerRepaint();
+      if (flightActiveRef.current) return;
       scheduleTreeUpdate();
     };
     map.on('idle', handleIdleTreeUpdate);
@@ -2949,6 +2978,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
 
     return () => {
       disposeMapPatterns?.();
+      disposeTunnelPortals();
       terrainCameraFollower.dispose();
       measurementControllerRef.current?.dispose();
       measurementControllerRef.current = null;

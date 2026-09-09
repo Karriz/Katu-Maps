@@ -1,22 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LngLat } from 'maplibre-gl';
-import { RoofModelLayer } from './RoofModelLayer';
+import { FacadeModelLayer } from './FacadeModelLayer';
 
-type PolygonRoofGeometry = { type: 'Polygon'; coordinates: Array<Array<[number, number]>> };
+type PolygonGeometry = { type: 'Polygon'; coordinates: Array<Array<[number, number]>> };
 
-type RoofFeature = {
+type FacadeFeature = {
   id: number;
   properties: { render_height: number; render_min_height: number };
-  geometry: PolygonRoofGeometry
+  geometry: PolygonGeometry
     | { type: 'MultiPolygon'; coordinates: Array<Array<Array<[number, number]>>> };
 };
 
 function rectangle(
   id: number, west = 23.7598, south = 61.4999, width = 0.0004, height = 0.0002,
-): RoofFeature & { geometry: PolygonRoofGeometry } {
+  renderHeight = 9,
+): FacadeFeature & { geometry: PolygonGeometry } {
   return {
     id,
-    properties: { render_height: 5, render_min_height: 0 },
+    properties: { render_height: renderHeight, render_min_height: 0 },
     geometry: {
       type: 'Polygon',
       coordinates: [[
@@ -27,8 +28,8 @@ function rectangle(
   };
 }
 
-function fixture(features: RoofFeature[]) {
-  const layer = new RoofModelLayer('buildings');
+function fixture(features: FacadeFeature[], renderHeight = 9) {
+  const layer = new FacadeModelLayer('buildings');
   let loaded = false;
   const map = {
     getZoom: () => 15,
@@ -49,23 +50,23 @@ function fixture(features: RoofFeature[]) {
     layer,
     map,
     setLoaded(value: boolean) { loaded = value; },
-    sampledCount: () => (layer as any).sampledRoofCount as number,
+    sampledCount: () => (layer as any).sampledFacadeCount as number,
   };
 }
 
-describe('RoofModelLayer source refresh', () => {
+describe('FacadeModelLayer source refresh', () => {
   it('waits for all visible source tiles before committing the view sample', () => {
     const { layer, map, setLoaded, sampledCount } = fixture([rectangle(10)]);
 
-    expect(layer.updateRoofs()).toBe(false);
+    expect(layer.updateFacades()).toBe(false);
     expect(map.querySourceFeatures).not.toHaveBeenCalled();
     expect((layer as any).lastViewSignature).toBe('');
 
     setLoaded(true);
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(1);
     expect((layer as any).lastViewSignature).not.toBe('');
-    expect(layer.updateRoofs()).toBe(false);
+    expect(layer.updateFacades()).toBe(false);
     expect(map.querySourceFeatures).toHaveBeenCalledOnce();
   });
 
@@ -73,12 +74,12 @@ describe('RoofModelLayer source refresh', () => {
     const features = [rectangle(10)];
     const { layer, map, setLoaded, sampledCount } = fixture(features);
     setLoaded(true);
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(1);
 
     features.push(rectangle(20, 23.7604));
     layer.invalidateSource();
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(2);
     expect(map.querySourceFeatures).toHaveBeenCalledTimes(2);
   });
@@ -88,71 +89,42 @@ describe('RoofModelLayer source refresh', () => {
     const { layer, setLoaded, sampledCount } = fixture([tinyFragment, rectangle(10)]);
     setLoaded(true);
 
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(1);
   });
 
-  it('keeps one complete roof when tiles repeat a slightly clipped house', () => {
+  it('keeps one facade set when tiles repeat a slightly clipped building', () => {
     const clipped = rectangle(20, 23.75981, 61.4999, 0.00036, 0.0002);
     const complete = rectangle(10, 23.7598, 61.4999, 0.0004, 0.0002);
     const { layer, setLoaded, sampledCount } = fixture([clipped, complete]);
     setLoaded(true);
 
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(1);
   });
 
-  it('does not add a crossing roof to a ground-level part inside a building outline', () => {
-    const outline = rectangle(10, 23.7598, 61.4999, 0.0005, 0.00025);
-    const overlappingPart = rectangle(20, 23.7601, 61.49996, 0.00016, 0.0001);
-    const { layer, setLoaded, sampledCount } = fixture([overlappingPart, outline]);
-    setLoaded(true);
-
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
-    expect(sampledCount()).toBe(1);
-  });
-
-  it('creates independent roofs for ordinary houses grouped into a MultiPolygon', () => {
+  it('creates independent facades for houses grouped into a MultiPolygon', () => {
     const houses = Array.from({ length: 12 }, (_, index) => (
       rectangle(100, 23.756 + index * 0.001, 61.4999).geometry.coordinates
     ));
-    const grouped: RoofFeature = {
+    const grouped: FacadeFeature = {
       id: 100,
-      properties: { render_height: 5, render_min_height: 0 },
+      properties: { render_height: 9, render_min_height: 0 },
       geometry: { type: 'MultiPolygon', coordinates: houses },
     };
     const { layer, setLoaded, sampledCount } = fixture([grouped]);
     setLoaded(true);
 
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
-    // The climate rule intentionally leaves roughly 25% flat; the grouped
-    // source feature must still produce roofs across its individual houses.
-    expect(sampledCount()).toBeGreaterThanOrEqual(7);
-    expect(sampledCount()).toBeLessThanOrEqual(12);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
+    expect(sampledCount()).toBe(12);
   });
 
-  it('does not draw a flat roof slab over a building with a courtyard hole', () => {
-    // A large building outline (~1000 m²) with an inner ring (courtyard).
-    // The outer ring is a simple convex rectangle that would normally qualify
-    // for a flat roof, but the hole must prevent the slab from covering the
-    // open courtyard.
-    const w = 23.7598, s = 61.4999;
-    const outer: Array<[number, number]> = [
-      [w, s], [w + 0.001, s], [w + 0.001, s + 0.001], [w, s + 0.001], [w, s],
-    ];
-    const inner: Array<[number, number]> = [
-      [w + 0.0003, s + 0.0003], [w + 0.0007, s + 0.0003],
-      [w + 0.0007, s + 0.0007], [w + 0.0003, s + 0.0007], [w + 0.0003, s + 0.0003],
-    ];
-    const withCourtyard: RoofFeature = {
-      id: 50,
-      properties: { render_height: 12, render_min_height: 0 },
-      geometry: { type: 'Polygon', coordinates: [outer, inner] },
-    };
-    const { layer, setLoaded, sampledCount } = fixture([withCourtyard]);
+  it('skips buildings that are too short for facades', () => {
+    const short = rectangle(10, 23.7598, 61.4999, 0.0004, 0.0002, 2);
+    const { layer, setLoaded, sampledCount } = fixture([short]);
     setLoaded(true);
 
-    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(0);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateRoofGeometry, isEligibleFootprint } from './RoofGeometry';
+import { generateFlatRoofGeometry, generateRoofGeometry, isEligibleFlatRoofFootprint, isEligibleFootprint } from './RoofGeometry';
 
 function projectedTriangleArea(positions: Float32Array, indices: Uint16Array | Uint32Array) {
   let area = 0;
@@ -135,6 +135,86 @@ describe('RoofGeometry', () => {
     it('rejects a footprint that is too narrow', () => {
       // 2.5 m × 8 m = 20 m², shorter side below minimum width.
       expect(isEligibleFootprint([[0, 0], [8, 0], [8, 2.5], [0, 2.5], [0, 0]])).toBe(false);
+    });
+  });
+
+  describe('flat roof', () => {
+    it('accepts a larger building outline and rejects a small house', () => {
+      expect(isEligibleFlatRoofFootprint([[-15, -15], [15, -15], [15, 15], [-15, 15], [-15, -15]])).toBe(true);
+      // 8 m × 8 m = 64 m² — below the larger-building threshold.
+      expect(isEligibleFlatRoofFootprint([[-4, -4], [4, -4], [4, 4], [-4, 4], [-4, -4]])).toBe(false);
+    });
+
+    it('rejects concave outlines that the inset cannot safely shrink', () => {
+      expect(isEligibleFlatRoofFootprint([
+        [0, 0], [30, 0], [30, 10], [10, 10], [10, 20], [0, 20], [0, 0],
+      ])).toBe(false);
+    });
+
+    it('rejects a narrow slab wider than the minimum width allows', () => {
+      // 40 m × 4 m = 160 m², but the shorter side is below the 5 m minimum.
+      expect(isEligibleFlatRoofFootprint([[-20, -2], [20, -2], [20, 2], [-20, 2], [-20, -2]])).toBe(false);
+    });
+
+    it('produces an inset slab smaller than the footprint with an upward normal', () => {
+      // 30 m × 30 m square (900 m²), centroided at the origin.
+      const ring: Array<[number, number]> = [
+        [-15, -15], [15, -15], [15, 15], [-15, 15], [-15, -15],
+      ];
+      const roof = generateFlatRoofGeometry({
+        ring,
+        wallHeight: 12,
+        type: 'flat',
+        pitchDegrees: 0,
+        featureId: 7,
+      });
+
+      expect(roof).not.toBeNull();
+      // The slab is inset 0.6 m on every side: 28.8 m × 28.8 m ≈ 829 m².
+      expect(projectedTriangleArea(roof!.positions, roof!.indices)).toBeCloseTo(829.44, 1);
+      // The whole slab lies flat at wall top (y = 0 in roof-local space).
+      for (let i = 1; i < roof!.positions.length; i += 3) {
+        expect(roof!.positions[i]).toBe(0);
+      }
+      // Every face normal points straight up.
+      for (let i = 1; i < roof!.normals.length; i += 3) {
+        expect(roof!.normals[i]).toBeCloseTo(1, 6);
+        expect(roof!.normals[i - 1]).toBeCloseTo(0, 6);
+        expect(roof!.normals[i + 1]).toBeCloseTo(0, 6);
+      }
+      // No vertex reaches the original wall edge.
+      for (let i = 0; i < roof!.positions.length; i += 3) {
+        expect(Math.abs(roof!.positions[i])).toBeLessThan(15);
+        expect(Math.abs(roof!.positions[i + 2])).toBeLessThan(15);
+      }
+    });
+
+    it('keeps the inset centred on a non-square rectangle', () => {
+      // 40 m × 25 m = 1000 m², centroided.
+      const ring: Array<[number, number]> = [
+        [-20, -12.5], [20, -12.5], [20, 12.5], [-20, 12.5], [-20, -12.5],
+      ];
+      const roof = generateFlatRoofGeometry({
+        ring,
+        wallHeight: 10,
+        type: 'flat',
+        pitchDegrees: 0,
+        featureId: 3,
+      });
+
+      expect(roof).not.toBeNull();
+      // Inset 0.6 m: 38.8 m × 23.8 m ≈ 923 m².
+      expect(projectedTriangleArea(roof!.positions, roof!.indices)).toBeCloseTo(923.44, 1);
+      // The slab stays centred on the origin.
+      let cx = 0;
+      let cz = 0;
+      const count = roof!.positions.length / 3;
+      for (let i = 0; i < roof!.positions.length; i += 3) {
+        cx += roof!.positions[i];
+        cz += roof!.positions[i + 2];
+      }
+      expect(cx / count).toBeCloseTo(0, 6);
+      expect(cz / count).toBeCloseTo(0, 6);
     });
   });
 });

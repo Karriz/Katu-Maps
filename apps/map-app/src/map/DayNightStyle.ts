@@ -70,11 +70,11 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
     setPaint(map, id, 'fill-color', colors.land);
   });
   [
-    'global-road-tunnel-casing', 'global-road-casing', 'global-road-bridge-casing',
+    'global-road-casing', 'global-road-bridge-casing',
     'global-overview-road-casing', 'global-overview-regional-road-casing',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.roadCasing));
   [
-    'global-road-tunnels', 'global-roads', 'global-road-bridges',
+    'global-roads', 'global-road-bridges',
     'global-overview-roads', 'global-overview-regional-roads',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.road));
   [

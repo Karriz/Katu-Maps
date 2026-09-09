@@ -14,12 +14,13 @@ import {
   CARTOON_SUN_POLAR_DEGREES,
 } from '../CartoonLighting';
 import { treeBiomeProfile, visibleBiome } from '../TreeBiomes';
+import { FLIGHT_CRUISE_SPEED_METERS_PER_SECOND } from './FlightDynamics';
 
 
 const TREE_MIN_ZOOM = 12;
 const TREE_MAX_VIEWPORT_METERS = 4_000;
-// Flight keeps trees within a fixed radius of the aircraft instead of using
-// the viewport-span cutoff above (see metricBoundsAroundPoint for why).
+// Flight uses a bounded region biased ahead of the aircraft instead of the
+// viewport-span cutoff above (see metricBoundsAroundPoint for why).
 const FLIGHT_TREE_RADIUS_METERS = 2_500;
 // New procedural trees may only spawn outside this radius so they do not pop
 // in under the nose. Trees restored from the retention cache are exempt.
@@ -310,6 +311,22 @@ function metricBoundsAroundPoint(center: MetricPoint, radiusMeters: number): Met
   };
 }
 
+/** Keep side/rear coverage, but prepare another eight seconds of ground ahead. */
+function flightTreeBounds(center: MetricPoint, heading: number): MetricBounds {
+  const lookAhead = Math.min(800, FLIGHT_CRUISE_SPEED_METERS_PER_SECOND * 8);
+  return metricBoundsAroundPoint([
+    center[0] + Math.sin(heading) * lookAhead / longitudeScaleAtMetricY(center[1]),
+    center[1] + Math.cos(heading) * lookAhead,
+  ], FLIGHT_TREE_RADIUS_METERS);
+}
+
+/** Lower scores prepare the forward corridor first; side/rear candidates still qualify. */
+export function flightTreePriority(east: number, north: number, heading: number) {
+  const along = east * Math.sin(heading) + north * Math.cos(heading);
+  const across = east * Math.cos(heading) - north * Math.sin(heading);
+  return (along - 1800) ** 2 + across ** 2 * 2;
+}
+
 function displayedTreeKey(tree: TreeInstance) {
   // Identity is geographic, not visual. A vector-tile refresh can classify
   // the same procedural point as broadleaf/conifer (or shrub) when overlapping
@@ -354,7 +371,7 @@ export function shouldRenderTreesForViewport(
   return viewportSpanMeters(bounds) <= maxViewportMeters;
 }
 
-function visibleTrees(
+function* visibleTrees(
   map: MaplibreMap,
   sources: TreeSourceConfig,
   maxViewportMeters = TREE_MAX_VIEWPORT_METERS,
@@ -374,7 +391,9 @@ function visibleTrees(
   const biome = visibleBiome(map, sources.biomeLayer);
   const samplingBounds = boundsOverride ?? visibleMetricBounds(map);
   const waterFeatures = sourceFeatures(map, sources.sourceId, sources.waterLayers);
+  yield;
   const waterPolygons = collectMetricPolygons(waterFeatures, samplingBounds);
+  yield;
   const waterIndex = createSpatialPolygonIndex(waterPolygons, 400, samplingBounds);
   const mappedTreeFeatures = sources.mappedTreeLayer
     ? sourceFeatures(map, sources.sourceId, [sources.mappedTreeLayer])
@@ -396,14 +415,15 @@ function visibleTrees(
     sources.sourceId,
     sources.vegetationLayers,
   );
-  const proceduralTrees = collectProceduralTrees(
+  yield;
+  const proceduralTrees = (yield* collectProceduralTrees(
     landuseFeatures,
     waterIndex,
     samplingBounds,
     mappedTrees,
     Math.max(0, budget - mappedTrees.length),
     biome,
-  ).filter((tree) => withinTreeBounds(tree, samplingBounds));
+  )).filter((tree) => withinTreeBounds(tree, samplingBounds));
   return [...mappedTrees, ...proceduralTrees].slice(0, budget);
 }
 
@@ -689,7 +709,7 @@ function nearMappedTree(point: MetricPoint, index: Map<string, MetricPoint[]>) {
   return false;
 }
 
-function collectProceduralTrees(
+function* collectProceduralTrees(
   sourceFeatures: SourceFeature[],
   waterIndex: SpatialPolygonIndex,
   bounds: MetricBounds,
@@ -703,7 +723,9 @@ function collectProceduralTrees(
   const candidates = new Map<string, ProceduralTreeCandidate>();
   const clipLngLat = metricBoundsToLngLat(bounds);
 
+  let visitedCells = 0;
   for (const feature of sourceFeatures) {
+    yield;
     const landClass = String(feature.properties?.class ?? '').toLowerCase();
     const landSubclass = String(feature.properties?.subclass ?? '').toLowerCase();
     const isForest = landClass === 'forest' || landClass === 'wood';
@@ -771,6 +793,7 @@ function collectProceduralTrees(
         const alignedCellX = Math.ceil(firstCellX / gridStep) * gridStep;
 
         for (let cellX = alignedCellX; cellX <= lastCellX; cellX += gridStep) {
+          if (visitedCells++ % 64 === 0) yield;
           const key = `${kind}:${cellX}:${cellY}`;
           if (candidates.has(key)) continue;
 
@@ -892,6 +915,8 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   private lastOriginMercatorX?: number;
   private lastOriginMercatorY?: number;
   private lastGrowthMeshWrite = 0;
+  private candidateJob?: Generator<void, TreeInstance[]>;
+  private completedCandidates?: TreeInstance[];
   private trunkMesh?: THREE.InstancedMesh;
   private broadleafMesh?: THREE.InstancedMesh;
   private coniferMesh?: THREE.InstancedMesh;
@@ -907,6 +932,8 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   constructor(private readonly sources: TreeSourceConfig) {}
 
   invalidateTerrain() {
+    this.candidateJob = undefined;
+    this.completedCandidates = undefined;
     this.elevationCache.clear();
     this.retainedTrees.clear();
     this.clearPendingFlightTrees();
@@ -948,23 +975,42 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     }
     if (this.pendingFlightTrees.length >= FLIGHT_PENDING_TREE_LIMIT) return false;
 
-    const metric = toMetricPoint([tree.longitude, tree.latitude]);
-    const distSq = metric ? metricDistanceSquared(metric, currentMetric) : 0;
-    let insertAt = this.pendingFlightTrees.length;
-    if (metric) {
-      insertAt = 0;
-      // Farthest first so admission grows the horizon before the inner far-ring.
-      while (insertAt < this.pendingFlightTrees.length) {
-        const previous = this.pendingFlightTrees[insertAt];
-        const previousMetric = toMetricPoint([previous.longitude, previous.latitude]);
-        if (!previousMetric) break;
-        if (metricDistanceSquared(previousMetric, currentMetric) < distSq) break;
-        insertAt += 1;
-      }
+    const score = this.treePriority(tree, currentMetric);
+    let insertAt = 0;
+    while (insertAt < this.pendingFlightTrees.length
+      && this.treePriority(this.pendingFlightTrees[insertAt], currentMetric) <= score) {
+      insertAt += 1;
     }
     this.pendingFlightTreeKeys.add(key);
     this.pendingFlightTrees.splice(insertAt, 0, tree);
     return true;
+  }
+
+  private treePriority(tree: TreeInstance, center: MetricPoint) {
+    const point = toMetricPoint([tree.longitude, tree.latitude]);
+    if (!point) return Infinity;
+    return flightTreePriority(
+      (point[0] - center[0]) * longitudeScaleAtMetricY(center[1]),
+      point[1] - center[1],
+      (this.map?.getBearing() ?? 0) * DEGREES_TO_RADIANS,
+    );
+  }
+
+  private advanceCandidateJob() {
+    if (!this.candidateJob) return;
+    const deadline = performance.now() + 3;
+    // A step cap also bounds work under a deterministic/frozen test clock.
+    for (let step = 0; step < 128; step += 1) {
+      const result = this.candidateJob.next();
+      if (result.done) {
+        this.candidateJob = undefined;
+        this.completedCandidates = result.value;
+        this.updateTrees(true);
+        break;
+      }
+      if (performance.now() >= deadline) break;
+    }
+    if (this.candidateJob) this.map?.triggerRepaint();
   }
 
   private prunePendingFlightTrees(visibleBounds: MetricBounds, selectedKeys: Set<string>) {
@@ -1032,7 +1078,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     const currentCenter = map.getCenter();
     const currentMetric = toMetricPoint([currentCenter.lng, currentCenter.lat]);
     const visibleBounds = currentMetric
-      ? metricBoundsAroundPoint(currentMetric, FLIGHT_TREE_RADIUS_METERS)
+      ? flightTreeBounds(currentMetric, (map.getBearing() ?? 0) * DEGREES_TO_RADIANS)
       : visibleMetricBounds(map);
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
     const mercatorUnitsPerMeter = originMercator.meterInMercatorCoordinateUnits();
@@ -1215,7 +1261,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
   }
 
-  updateTrees() {
+  updateTrees(refreshRequested = false) {
     const map = this.map;
     const trunkMesh = this.trunkMesh;
     const broadleafMesh = this.broadleafMesh;
@@ -1231,7 +1277,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
       // High-altitude flight loads low-zoom tiles whose water/landuse rings
       // span countries. Building a spatial index over those freezes the tab;
       // trees are not meaningful at that scale anyway.
-      if (this.displayedTrees.size > 0 || this.retainedTrees.size > 0) {
+      if (this.displayedTrees.size > 0 || this.retainedTrees.size > 0 || this.candidateJob) {
         this.clearDisplayedTrees();
         map.triggerRepaint();
       }
@@ -1258,9 +1304,9 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
       ? performance.now() - this.lastCandidateCheckTime
       : Infinity;
 
-    // Prevent back-to-back calls from both the flight interval and a map
-    // event firing within the same frame.
-    if (flightMode && msSinceLastUpdate < FLIGHT_UPDATE_MIN_INTERVAL_MS) {
+    // Direct callers retain the legacy throttle; the flight scheduler already
+    // coalesces movement and source arrivals before requesting a refresh.
+    if (flightMode && !refreshRequested && msSinceLastUpdate < FLIGHT_UPDATE_MIN_INTERVAL_MS) {
       return;
     }
 
@@ -1268,7 +1314,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     // the update is "recent". After FLIGHT_STALE_REFRESH_MS any call goes
     // through unconditionally so the interval can flush stale tile data
     // (e.g. water bodies that finished loading since the last update).
-    if (flightMode && currentMetric && this.lastCandidateCheckMetric
+    if (flightMode && !refreshRequested && currentMetric && this.lastCandidateCheckMetric
         && msSinceLastUpdate < FLIGHT_STALE_REFRESH_MS) {
       const distSq = metricDistanceSquared(currentMetric, this.lastCandidateCheckMetric);
       if (distSq < FLIGHT_UPDATE_MOVE_METERS ** 2) {
@@ -1305,7 +1351,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     this.lastCandidateCheckTime = performance.now();
 
     const flightBounds = flightMode && currentMetric
-      ? metricBoundsAroundPoint(currentMetric, FLIGHT_TREE_RADIUS_METERS)
+      ? flightTreeBounds(currentMetric, (map.getBearing() ?? 0) * DEGREES_TO_RADIANS)
       : undefined;
     const budget = MAX_TREE_COUNT;
     const visibleBounds = flightBounds ?? visibleMetricBounds(map);
@@ -1342,14 +1388,32 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     // main hitch. Skip it while hovering with healthy coverage; always run on
     // movement so the frontier ahead of the aircraft stays populated.
     const needsGeneration = !flightMode
+      || refreshRequested
       || isInitialFlightLoad
       || movementTriggered
       || trees.length < budget * 0.85;
-    const generatedTrees = needsGeneration
-      ? (flightBounds
-        ? visibleTrees(map, this.sources, undefined, flightBounds)
-        : visibleTrees(map, this.sources))
-      : [];
+    let generatedTrees = this.completedCandidates ?? [];
+    const hasCompletedCandidates = this.completedCandidates !== undefined;
+    this.completedCandidates = undefined;
+    if (needsGeneration && !hasCompletedCandidates && !this.candidateJob) {
+      const job = visibleTrees(map, this.sources, undefined, flightBounds);
+      if (flightMode) {
+        this.candidateJob = job;
+        map.triggerRepaint();
+      } else {
+        let result = job.next();
+        while (!result.done) result = job.next();
+        generatedTrees = result.value;
+      }
+    }
+    // A scan may finish after the aircraft has moved. Cull against today's
+    // bounds and rank before the admission cap, rather than by source order.
+    if (flightMode && currentMetric) {
+      generatedTrees = generatedTrees.filter((tree) => withinTreeBounds(tree, visibleBounds));
+      const scores = new Map(generatedTrees.map((tree) => [tree, this.treePriority(tree, currentMetric)]));
+      generatedTrees.sort((a, b) => scores.get(a)! - scores.get(b)!);
+      this.pendingFlightTrees.sort((a, b) => this.treePriority(a, currentMetric) - this.treePriority(b, currentMetric));
+    }
 
     let newTreesQueuedThisUpdate = 0;
     for (const tree of generatedTrees) {
@@ -1592,6 +1656,8 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   }
 
   private clearDisplayedTrees() {
+    this.candidateJob = undefined;
+    this.completedCandidates = undefined;
     this.displayedTrees.clear();
     this.retainedTrees.clear();
     this.clearPendingFlightTrees();
@@ -1638,6 +1704,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
       return;
     }
 
+    this.advanceCandidateJob();
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
       this.sceneOrigin,
       this.sceneOriginElevation,
@@ -1669,6 +1736,8 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   }
 
   onRemove() {
+    this.candidateJob = undefined;
+    this.completedCandidates = undefined;
     for (const mesh of [
       this.shadowMesh,
       this.trunkMesh,

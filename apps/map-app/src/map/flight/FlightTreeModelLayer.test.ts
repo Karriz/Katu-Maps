@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   FlightTreeModelLayer,
+  flightTreePriority,
   shouldRenderTreesForViewport,
   treeViewportSignature,
 } from './FlightTreeModelLayer';
@@ -182,4 +183,84 @@ describe('TreeModelLayer', () => {
     expect(map.querySourceFeatures).not.toHaveBeenCalled();
     expect(map.triggerRepaint).toHaveBeenCalled();
   });
+});
+
+
+describe('flight tree preparation', () => {
+  it('prioritizes the corridor ahead and follows turns', () => {
+    expect(flightTreePriority(0, 1800, 0)).toBeLessThan(flightTreePriority(0, -1800, 0));
+    expect(flightTreePriority(0, 1800, 0)).toBeLessThan(flightTreePriority(1800, 0, 0));
+    expect(flightTreePriority(1800, 0, Math.PI / 2))
+      .toBeLessThan(flightTreePriority(0, 1800, Math.PI / 2));
+  });
+
+  it('yields long scans and only commits completed candidate sets', () => {
+    const layer = new FlightTreeModelLayer({ sourceId: 'vector', waterLayers: [], vegetationLayers: [] });
+    const internal = layer as any;
+    const repaint = vi.fn();
+    internal.map = { triggerRepaint: repaint };
+    const update = vi.spyOn(layer, 'updateTrees').mockImplementation(() => {});
+    let steps = 0;
+    internal.candidateJob = (function* () {
+      for (let i = 0; i < 300; i++) { steps++; yield; }
+      return [];
+    })();
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    internal.advanceCandidateJob();
+    expect(steps).toBe(128);
+    expect(update).not.toHaveBeenCalled();
+    expect(repaint).toHaveBeenCalled();
+    internal.advanceCandidateJob();
+    internal.advanceCandidateJob();
+    expect(update).toHaveBeenCalledExactlyOnceWith(true);
+    expect(internal.completedCandidates).toEqual([]);
+    expect(internal.candidateJob).toBeUndefined();
+    clock.mockRestore();
+  });
+
+  it('discards in-progress candidates when terrain is invalidated', () => {
+    const layer = new FlightTreeModelLayer({ sourceId: 'vector', waterLayers: [], vegetationLayers: [] });
+    const internal = layer as any;
+    internal.candidateJob = (function* () { yield; return []; })();
+    internal.completedCandidates = [];
+    layer.invalidateTerrain();
+    expect(internal.candidateJob).toBeUndefined();
+    expect(internal.completedCandidates).toBeUndefined();
+  });
+});
+
+
+it('coalesces real vegetation scans and keeps established trees stable across refreshes', () => {
+  const layer = new FlightTreeModelLayer({ sourceId: 'vector', waterLayers: [], vegetationLayers: ['landcover'] });
+  layer.setExtendedViewportRange(true);
+  const internal = layer as any;
+  const query = vi.fn(() => [{
+    type: 'Feature', properties: { class: 'forest' },
+    geometry: { type: 'Polygon', coordinates: [[[-0.005, -0.005], [0.005, -0.005],
+      [0.005, 0.005], [-0.005, 0.005], [-0.005, -0.005]]] },
+  }]);
+  internal.map = {
+    getZoom: () => 15, getBearing: () => 0, getCenter: () => ({ lng: 0, lat: 0 }),
+    getSource: () => ({}), querySourceFeatures: query,
+    queryTerrainElevation: () => 10, triggerRepaint: vi.fn(),
+  };
+  for (const name of ['trunkMesh', 'broadleafMesh', 'coniferMesh', 'palmMesh', 'shrubMesh', 'shadowMesh']) {
+    internal[name] = { count: 0, material: {}, instanceMatrix: { needsUpdate: false } };
+  }
+  internal.writeTreeMeshes = vi.fn();
+  layer.updateTrees(true);
+  const job = internal.candidateJob;
+  expect(job).toBeDefined();
+  expect(query).not.toHaveBeenCalled();
+  layer.updateTrees(true);
+  expect(internal.candidateJob).toBe(job);
+  for (let frame = 0; frame < 1000 && internal.candidateJob; frame++) internal.advanceCandidateJob();
+  expect(internal.candidateJob).toBeUndefined();
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(internal.displayedTrees.size).toBeGreaterThan(0);
+  expect(internal.displayedTrees.size).toBeLessThanOrEqual(8000);
+  const established = new Map(internal.displayedTrees);
+  layer.updateTrees(true);
+  for (let frame = 0; frame < 1000 && internal.candidateJob; frame++) internal.advanceCandidateJob();
+  for (const [key, tree] of established) expect(internal.displayedTrees.get(key)).toBe(tree);
 });

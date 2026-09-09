@@ -93,6 +93,42 @@ export function isEligibleFootprint(
   return true;
 }
 
+// --- Flat roof (parapet rim) eligibility -----------------------------------
+
+/**
+ * Larger buildings that do not receive a pitched/hipped roof get a flat roof
+ * slab inset from the wall edge. The inset leaves a rim of the building's
+ * fill-extrusion top showing around a lighter roof surface, reading as a low
+ * parapet. Only the larger building outline is eligible — small footprints
+ * and building parts are excluded so the detail stays on the dominant shape.
+ */
+const MIN_FLAT_ROOF_AREA_SQ_M = 600;
+const MAX_FLAT_ROOF_AREA_SQ_M = 6000;
+const MAX_FLAT_ROOF_RING_VERTICES = 32;
+const MIN_FLAT_ROOF_WIDTH_M = 5;
+
+export function isEligibleFlatRoofFootprint(
+  ring: Array<[number, number]>,
+): boolean {
+  if (ring.length < 4 || ring.length > MAX_FLAT_ROOF_RING_VERTICES + 1) return false;
+
+  const verts = stripClosingVertex(ring);
+  if (verts.length < 3 || verts.length > MAX_FLAT_ROOF_RING_VERTICES) return false;
+
+  const area = Math.abs(signedArea(verts));
+  if (area <= MIN_FLAT_ROOF_AREA_SQ_M || area > MAX_FLAT_ROOF_AREA_SQ_M) return false;
+
+  // Insetting relies on a convex outline; concave shapes fall back to the
+  // plain extrusion top.
+  if (countConcaveVertices(verts) > 0) return false;
+
+  const bb = boundingBox(verts);
+  const shorter = Math.min(bb.maxX - bb.minX, bb.maxZ - bb.minZ);
+  if (shorter < MIN_FLAT_ROOF_WIDTH_M) return false;
+
+  return true;
+}
+
 // --- Geometry generation ----------------------------------------------------
 
 export function generateRoofGeometry(
@@ -108,6 +144,55 @@ export function generateRoofGeometry(
     default:
       return null;
   }
+}
+
+/** Inset distance from the wall edge that leaves the parapet rim. */
+const FLAT_ROOF_INSET_M = 0.6;
+
+/**
+ * Flat roof: a single inset polygon capped at the wall top. The slab is
+ * smaller than the footprint so the building's extrusion top forms a rim
+ * around a lighter roof surface. Only convex outlines are supported (see
+ * `isEligibleFlatRoofFootprint`); the slab sits at wall top (y = 0 in
+ * roof-local space) and the caller offsets it to the building height.
+ */
+export function generateFlatRoofGeometry(
+  candidate: RoofCandidate,
+): RoofMeshData | null {
+  const verts = stripClosingVertex(candidate.ring);
+  if (verts.length < 3) return null;
+
+  const centroid = polygonCentroid(verts);
+  const local = verts.map(([x, z]) => [x - centroid[0], z - centroid[1]] as [number, number]);
+  const inset = insetConvexPolygon(local, FLAT_ROOF_INSET_M);
+  if (!inset || inset.length < 3) return null;
+  if (Math.abs(signedArea(inset)) < 1) return null;
+
+  const positions: number[] = [];
+  for (const [x, z] of inset) positions.push(x, 0, z);
+
+  // Fan-triangulate the convex inset polygon, choosing the winding so the
+  // face normal points up (+y) in the roof-local frame. A positive signed
+  // area (CCW in x-z) would yield a downward normal with the default fan, so
+  // its winding is reversed.
+  const ccw = signedArea(inset) > 0;
+  const indices: number[] = [];
+  for (let i = 1; i < inset.length - 1; i++) {
+    if (ccw) indices.push(0, i + 1, i);
+    else indices.push(0, i, i + 1);
+  }
+
+  const normals = computeFlatNormals(positions, indices);
+
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    indices: indices.length > 65535
+      ? new Uint32Array(indices)
+      : new Uint16Array(indices),
+    offset: [centroid[0], centroid[1]],
+    roofHeight: 0,
+  };
 }
 
 /**
@@ -447,6 +532,74 @@ function stripClosingVertex(ring: Array<[number, number]>): Array<[number, numbe
     return ring.slice(0, -1);
   }
   return ring;
+}
+
+/**
+ * Inset a convex polygon by moving every edge inward by `distance` and
+ * intersecting adjacent offset edges. Returns null if the polygon is too
+ * small or the inset collapses it. Winding is preserved.
+ */
+function insetConvexPolygon(
+  ring: Array<[number, number]>,
+  distance: number,
+): Array<[number, number]> | null {
+  const n = ring.length;
+  if (n < 3) return null;
+  const centroid = polygonCentroid(ring);
+
+  // Inward normal for each edge, oriented toward the centroid.
+  const normals: Array<[number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const [ax, az] = ring[i];
+    const [bx, bz] = ring[(i + 1) % n];
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-9) return null;
+    let nx = dz / len;
+    let nz = -dx / len;
+    const mx = (ax + bx) / 2;
+    const mz = (az + bz) / 2;
+    if (nx * (centroid[0] - mx) + nz * (centroid[1] - mz) < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+    normals.push([nx, nz]);
+  }
+
+  const result: Array<[number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const prev = (i - 1 + n) % n;
+    const [pa1x, pa1z] = ring[prev];
+    const [pa2x, pa2z] = ring[(prev + 1) % n];
+    const [pb1x, pb1z] = ring[i];
+    const [pb2x, pb2z] = ring[(i + 1) % n];
+    const [nax, naz] = normals[prev];
+    const [nbx, nbz] = normals[i];
+    const a1: [number, number] = [pa1x + nax * distance, pa1z + naz * distance];
+    const a2: [number, number] = [pa2x + nax * distance, pa2z + naz * distance];
+    const b1: [number, number] = [pb1x + nbx * distance, pb1z + nbz * distance];
+    const b2: [number, number] = [pb2x + nbx * distance, pb2z + nbz * distance];
+    const vertex = lineIntersection(a1, a2, b1, b2);
+    if (!vertex) return null;
+    result.push(vertex);
+  }
+  return result;
+}
+
+/** Intersection of two infinite lines, each defined by two points. */
+function lineIntersection(
+  p1: [number, number], p2: [number, number],
+  p3: [number, number], p4: [number, number],
+): [number, number] | null {
+  const x1 = p1[0], y1 = p1[1];
+  const x2 = p2[0], y2 = p2[1];
+  const x3 = p3[0], y3 = p3[1];
+  const x4 = p4[0], y4 = p4[1];
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
 }
 
 /**
