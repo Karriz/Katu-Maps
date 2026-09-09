@@ -15,7 +15,7 @@ import {
   BASE_BUILDING_COLOR,
   BASE_BUILDING_ALT_COLOR,
   BASE_BUILDING_BAND_COLOR,
-  buildingColorExpression,
+  buildingColorExpressionWithOsm,
 } from './BuildingColor';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
@@ -1964,7 +1964,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 12,
       maxzoom: 13.75,
       paint: {
-        'fill-color': buildingColorExpression(),
+        'fill-color': buildingColorExpressionWithOsm(),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0.78,
@@ -1986,7 +1986,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // are disabled. It gains a little definition at close zooms without
         // trying to imitate extrusion lighting.
         // Use per-building colors from controlled palette, varying by feature properties
-        'fill-color': buildingColorExpression(),
+        'fill-color': buildingColorExpressionWithOsm(),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           12, 0,
@@ -2105,7 +2105,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: GLOBAL_BUILDING_3D_FILTER,
       paint: {
         // Use per-building colors from controlled palette, varying by feature properties
-        'fill-extrusion-color': buildingColorExpression(),
+        'fill-extrusion-color': buildingColorExpressionWithOsm(),
         'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,
         // Multi-storey buildings begin above the darker ground floor. Short
         // buildings remain a single extrusion from their normal base.
