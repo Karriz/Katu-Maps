@@ -6,6 +6,7 @@ import type { RoofModelLayer } from './RoofModelLayer';
 import type { FacadeModelLayer } from './FacadeModelLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
+import type { RouteLineDeckLayer } from './RouteLineDeckLayer';
 import type { MapLayerState } from './MapControls';
 import { applyMapTheme, buildingColorPaint } from './GlobalMapStyle';
 import { syncTerrain3d } from './MapTerrain';
@@ -22,6 +23,8 @@ type LayerRefs = {
   facadeLayerRef: RefObject<FacadeModelLayer | null>;
   transitRouteOverlayRef: RefObject<TransitRouteOverlay | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
+  selectedRouteDeckLayerRef: RefObject<RouteLineDeckLayer | null>;
+  transitStopRouteDeckLayerRef: RefObject<RouteLineDeckLayer | null>;
   treeRefreshRef: RefObject<(() => void) | null>;
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
@@ -76,7 +79,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, bridgeLayerRef, roofLayerRef, facadeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, treeRefreshRef,
+  treeLayerRef, bridgeLayerRef, roofLayerRef, facadeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
@@ -102,7 +105,7 @@ export function useMapLayerVisibility({
     roofLayerRef.current?.setEnabled(proceduralBuildingEnabled);
     facadeLayerRef.current?.setEnabled(proceduralBuildingEnabled);
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
-      .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'), layerToggles.transit);
+      .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d' && layerId !== 'transit-selected-route-deck-3d'), layerToggles.transit);
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
     setVisibility([...TRAFFIC_CAMERA_LAYER_IDS], layerToggles.trafficCameras);
     setVisibility([...CHARGING_STATION_LAYER_IDS], layerToggles.chargingStations);
@@ -117,6 +120,11 @@ export function useMapLayerVisibility({
     setVisibility(hikingLayerIds, layerToggles.hiking);
     transitRouteOverlayRef.current?.setVisibility(layerToggles.transitLines);
     if (layerToggles.transitLines) void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
+    // 3D deck layers draw bridge-crossing segments on top of bridge decks.
+    // Native 2D lines stay visible everywhere else (no hiding needed).
+    const deckActive = layerToggles.terrain && layerToggles.bridges;
+    selectedRouteDeckLayerRef.current?.setVisible(deckActive);
+    transitStopRouteDeckLayerRef.current?.setVisible(deckActive && layerToggles.transit);
     setVisibility(waterEffectLayerIds, true);
     map.setProjection({ type: layerToggles.globe ? 'globe' : 'mercator' });
     map.triggerRepaint();
@@ -135,7 +143,7 @@ export function useMapLayerVisibility({
     cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled,
     onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled,
     terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef,
-    waterEffectLayerIds, bridgeLayerRef, roofLayerRef, facadeLayerRef]);
+    waterEffectLayerIds, bridgeLayerRef, roofLayerRef, facadeLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -69,6 +69,7 @@ import { TransitStopsLayer } from './TransitStopsLayer';
 import type { TransitVehicleTripSelection } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
+import { RouteLineDeckLayer, type RouteLineFeature } from './RouteLineDeckLayer';
 import { FlightControls } from './flight/FlightControls';
 import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
 import { installFlightSceneScheduler } from './flight/FlightSceneScheduler';
@@ -261,6 +262,20 @@ function mapRouteColor(value?: string) {
   if (!value) return undefined;
   const color = value.trim().replace(/^#/, '');
   return /^(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? `#${color}` : undefined;
+}
+
+/** Replicate the selected-route line-color expression for the 3D deck layer. */
+function routeColorForFeature(mode: string | undefined, routeColor?: string): string {
+  const m = (mode ?? '').toUpperCase();
+  if (m === 'WALK' || m === 'FOOT' || m === 'PEDESTRIAN') return '#64748b';
+  if (m === 'BICYCLE' || m === 'BIKE' || m === 'CYCLING') return '#16834b';
+  if (m === 'CAR' || m === 'DRIVING') return '#2563eb';
+  if (routeColor) return routeColor;
+  if (m === 'TRAM') return '#8b5cf6';
+  if (m === 'BUS') return '#1769e8';
+  if (m === 'SUBWAY') return '#f97316';
+  if (m === 'RAIL' || m === 'REGIONAL_RAIL') return '#16a34a';
+  return '#0ea5e9';
 }
 
 function isValidCoordinate(coordinate: unknown): coordinate is [number, number] {
@@ -686,6 +701,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const chargingStationsLayerRef = useRef<ChargingStationsLayer | null>(null);
   const transitVehicleLayerRef = useRef<TransitVehicleModelLayer | null>(null);
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
+  const selectedRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
+  const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
   const flightActiveRef = useRef(false);
   const flightWasActiveRef = useRef(false);
@@ -946,6 +963,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     facadeLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
+    selectedRouteDeckLayerRef,
+    transitStopRouteDeckLayerRef,
     treeRefreshRef,
     terrainSourceRef,
     terrainEnabledRef,
@@ -1466,6 +1485,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     if (!result) {
       source?.setData({ type: 'FeatureCollection', features: [] });
       transitionSource?.setData({ type: 'FeatureCollection', features: [] });
+      selectedRouteDeckLayerRef.current?.setFeatures([]);
       return;
     }
     const legFeatures = result.transitLegs?.flatMap((leg) => {
@@ -1488,6 +1508,22 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     source?.setData(legFeatures.length
       ? { type: 'FeatureCollection', features: legFeatures }
       : { type: 'Feature', geometry: result.geometry, properties: { mode: directMode } });
+    // Feed the same geometry to the 3D deck layer so route lines render on
+    // bridge decks instead of sinking under them when terrain is on.
+    const deckFeatures: RouteLineFeature[] = legFeatures.length > 0
+      ? legFeatures.map((f) => ({
+          coordinates: f.geometry.coordinates as Array<[number, number]>,
+          color: routeColorForFeature(f.properties.mode, f.properties.routeColor),
+          widthPixels: 4.5,
+          casingWidthPixels: 8,
+        }))
+      : [{
+          coordinates: result.geometry.coordinates as Array<[number, number]>,
+          color: routeColorForFeature(directMode),
+          widthPixels: 4.5,
+          casingWidthPixels: 8,
+        }];
+    selectedRouteDeckLayerRef.current?.setFeatures(deckFeatures);
     const transitions = legFeatures.slice(1).flatMap((leg) => {
       const coordinates = leg.geometry.coordinates[0];
       return coordinates ? [{
@@ -2003,6 +2039,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     facadeLayerRef.current = facadeLayer;
     const transitVehicleLayer = new TransitVehicleModelLayer();
     transitVehicleLayerRef.current = transitVehicleLayer;
+    transitVehicleLayer.setBridgeDeckSource(bridgeLayer);
     const transitStopsLayer = new TransitStopsLayer((pose) => {
       latestVehiclePoseRef.current = pose;
       // Keep the custom model layer synchronized with the same estimated pose
@@ -2032,6 +2069,20 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     chargingStationsLayerRef.current = chargingStationsLayer;
     const transitRouteOverlay = new TransitRouteOverlay();
     transitRouteOverlayRef.current = transitRouteOverlay;
+    const selectedRouteDeckLayer = new RouteLineDeckLayer('selected-route-deck-3d');
+    selectedRouteDeckLayerRef.current = selectedRouteDeckLayer;
+    selectedRouteDeckLayer.setBridgeDeckSource(bridgeLayer);
+    const transitStopRouteDeckLayer = new RouteLineDeckLayer('transit-selected-route-deck-3d');
+    transitStopRouteDeckLayerRef.current = transitStopRouteDeckLayer;
+    transitStopRouteDeckLayer.setBridgeDeckSource(bridgeLayer);
+    transitStopsLayer.onSelectedRoutes((features) => {
+      transitStopRouteDeckLayer.setFeatures(features.map((f) => ({
+        coordinates: f.geometry.coordinates as Array<[number, number]>,
+        color: f.properties.color,
+        widthPixels: 4.5,
+        casingWidthPixels: 8,
+      })));
+    });
     let disposeMapPatterns: (() => void) | undefined;
     let treeUpdateTimer: number | undefined;
     let transitStopsTimer: number | undefined;
@@ -2126,6 +2177,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         return;
       }
       bridgeLayer.updateBridges();
+      // Rebuild deck lines after bridges have had a chance to sample so they
+      // lift onto newly-available deck elevations.
+      map.once('idle', () => {
+        selectedRouteDeckLayer.rebuildFromCurrentFeatures();
+        transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
+      });
       const nextSignature = `${modelUpdateSignature()}:${modelDataRevision}`;
       if (nextSignature === lastModelUpdateSignature) return;
       treeLayer.updateTrees(() => { lastModelUpdateSignature = nextSignature; });
@@ -2178,6 +2235,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         facadeLayer.invalidateSource();
         modelDataRevision += 1;
         scheduleTreeUpdate();
+        // Terrain data changed: deck elevations need re-sampling.
+        map.once('idle', () => {
+          selectedRouteDeckLayer.rebuildFromCurrentFeatures();
+          transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
+        });
         return;
       }
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
@@ -2427,6 +2489,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       map.addLayer(roofLayer, 'global-road-labels');
       map.addLayer(facadeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
+      map.addLayer(selectedRouteDeckLayer, 'global-road-labels');
+      map.addLayer(transitStopRouteDeckLayer, 'global-road-labels');
       try {
         await addLocationIcons(map);
       } catch (error) {
@@ -2908,6 +2972,8 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       // camera-only moves must not trigger a fresh stop query on every moveend.
       if (!vehicleFollowEnabledRef.current) scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
+      selectedRouteDeckLayer.rebuildFromCurrentFeatures();
+      transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
       if (chargingStationsEnabledRef.current) scheduleChargingStationsUpdate();
     };
     const removePersistedMapViewFlush = installPersistedMapViewFlush(document, window, persistCamera);
@@ -3026,7 +3092,12 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       chargingStationsLayerRef.current = null;
       roadWeatherLayerRef.current = null;
       roadTrafficLayerRef.current = null;
+      transitVehicleLayerRef.current?.setBridgeDeckSource(null);
       transitVehicleLayerRef.current = null;
+      selectedRouteDeckLayerRef.current?.setBridgeDeckSource(null);
+      selectedRouteDeckLayerRef.current = null;
+      transitStopRouteDeckLayerRef.current?.setBridgeDeckSource(null);
+      transitStopRouteDeckLayerRef.current = null;
     };
   }, []);
 
