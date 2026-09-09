@@ -50,6 +50,8 @@ import {
   planOriginFromLngLat,
   planToLngLat,
   pointInFilledPolygon,
+  nearestPlanSegment,
+  smallestHeadingDelta,
   polygonAreaMetres,
   shouldMeshClusterLines,
   shouldRenderBridgesForView,
@@ -547,6 +549,38 @@ describe('plan bounds', () => {
     const bounds = planBounds(points, 5);
     expect(bounds.minEast).toBeLessThan(0);
     expect(bounds.maxEast).toBeGreaterThan(points[1].east);
+  });
+});
+
+describe('smallestHeadingDelta', () => {
+  it('treats opposite headings as aligned', () => {
+    expect(smallestHeadingDelta(0, Math.PI)).toBeCloseTo(0);
+    expect(smallestHeadingDelta(-Math.PI / 2, Math.PI / 2)).toBeCloseTo(0);
+  });
+
+  it('reports a right angle as π/2', () => {
+    expect(smallestHeadingDelta(0, Math.PI / 2)).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe('nearestPlanSegment', () => {
+  it('returns distance and tangent heading of the closest segment', () => {
+    const hit = nearestPlanSegment({ east: 2, north: 10 }, [
+      { east: 0, north: 0 },
+      { east: 0, north: 20 },
+    ]);
+    expect(hit?.distance).toBeCloseTo(2);
+    expect(hit?.heading).toBeCloseTo(0);
+  });
+
+  it('follows a bent centerline instead of the overall chord', () => {
+    const hit = nearestPlanSegment({ east: 12, north: 21 }, [
+      { east: 0, north: 0 },
+      { east: 0, north: 20 },
+      { east: 20, north: 20 },
+    ]);
+    expect(hit?.distance).toBeCloseTo(1);
+    expect(hit?.heading).toBeCloseTo(Math.PI / 2);
   });
 });
 

@@ -18,15 +18,14 @@ import type { TransitVehiclePose } from './TransitStopsLayer';
 
 /** Provides bridge deck elevations so vehicles can drive on 3D bridges. */
 export type BridgeDeckSource = {
-  deckElevationAt(lng: number, lat: number): number | null;
   /** True if any bridges have been sampled and are available for lookup. */
   hasBridges(): boolean;
   /**
-   * Returns the span geometry of the nearest bridge covering a point:
-   * heading (radians, atan2(east, north)), and the start/end endpoints
-   * in lng/lat. Returns null when no bridge covers the point.
+   * Deck elevation when the traveller is on a sampled bridge roadway at this
+   * heading, or null when they are beside or under the deck. Heading is
+   * atan2(east, north), with opposite directions treated as equal.
    */
-  bridgeSpanAt(lng: number, lat: number): { heading: number; start: [number, number]; end: [number, number] } | null;
+  deckPlacementAt(lng: number, lat: number, heading: number): number | null;
 };
 
 const MODEL_MIN_ZOOM = 12;
@@ -36,9 +35,6 @@ const DEGREES_TO_RADIANS = Math.PI / 180;
 // Clamp pitch so DEM noise or sampling near deck edges cannot tip vehicles
 // unrealistically. Road and railway gradients rarely exceed 10 degrees.
 const MAX_PITCH_RADIANS = 0.22;
-// Only lift a vehicle onto a bridge deck when its heading is within this many
-// radians of the bridge span direction (both directions allowed).
-const MAX_BRIDGE_HEADING_DIFF_RADIANS = Math.PI / 3; // 60°
 
 type VehicleDimensions = {
   length: number;
@@ -526,21 +522,8 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   }
 
   private sampleElevation(map: MaplibreMap, lng: number, lat: number, heading: number): number {
-    const deckElev = this.bridgeDeckSource?.deckElevationAt(lng, lat) ?? null;
-    if (deckElev !== null) {
-      const span = this.bridgeDeckSource?.bridgeSpanAt(lng, lat) ?? null;
-      if (span !== null) {
-        let diff = Math.abs(heading - span.heading);
-        if (diff > Math.PI) diff = 2 * Math.PI - diff;
-        if (diff > Math.PI / 2) diff = Math.PI - diff;
-        // Only use deck elevation when the vehicle is traveling along the
-        // bridge, not passing under it on a perpendicular road.
-        if (diff <= MAX_BRIDGE_HEADING_DIFF_RADIANS) return deckElev;
-      } else {
-        return deckElev;
-      }
-    }
-    return map.queryTerrainElevation(new maplibregl.LngLat(lng, lat))
+    return this.bridgeDeckSource?.deckPlacementAt(lng, lat, heading)
+      ?? map.queryTerrainElevation(new maplibregl.LngLat(lng, lat))
       ?? this.originElevation;
   }
 

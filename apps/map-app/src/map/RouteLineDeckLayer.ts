@@ -10,15 +10,12 @@ import type { BridgeDeckSource } from './TransitVehicleModelLayer';
 const MIN_ZOOM = 13;
 // Lift the ribbon above the bridge deck mesh surface.
 const DECK_LIFT_METERS = 1.5;
-// Only lift the route when its heading is within this many radians of the
-// bridge's span direction. This prevents lifting routes that pass *under*
-// the bridge on a perpendicular road.
-const MAX_HEADING_DIFF_RADIANS = Math.PI / 3; // 60°
 // If consecutive ribbon vertices differ in elevation by more than this, the
 // transition from terrain to deck is too abrupt (e.g. a sudden step onto the
 // bridge). Discard vertices that would cause such a jump so the native 2D line
 // handles the approach instead.
 const MAX_VERTEX_ELEVATION_JUMP = 2;
+const EARTH_RADIUS_METERS = 6_378_137;
 
 export type RouteLineFeature = {
   coordinates: Array<[number, number]>;
@@ -31,9 +28,8 @@ export type RouteLineFeature = {
 
 /**
  * Custom 3D layer that draws transit/route lines at the elevation of the
- * surface they travel on. When a segment crosses a sampled 3D bridge deck,
- * the line is lifted to the deck height instead of sinking to terrain ground.
- * Lines off bridges sample terrain elevation like MapLibre's native drape.
+ * surface they travel on. Segments that follow a sampled bridge roadway are
+ * lifted to deck height; crossings that only pass under the deck stay draped.
  */
 export class RouteLineDeckLayer implements CustomLayerInterface {
   readonly id: string;
@@ -120,31 +116,22 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
   }
 
   /**
-   * Returns the deck elevation at a point if a bridge covers it, or null.
-   * The caller is responsible for verifying the route aligns with the bridge
-   * before calling this for on-bridge segments.
+   * Deck elevation when this sample is travelling on a sampled bridge roadway.
+   * Heading is the local route tangent so a long winding line can still lift
+   * on a short bridge, and a parallel street under the same deck stays down.
    */
-  private sampleDeckElevation(lng: number, lat: number): number | null {
-    return this.bridgeDeckSource?.deckElevationAt(lng, lat) ?? null;
+  private sampleDeckElevation(lng: number, lat: number, heading: number): number | null {
+    return this.bridgeDeckSource?.deckPlacementAt(lng, lat, heading) ?? null;
   }
 
-  /**
-   * Check whether the route's overall direction aligns with the bridge span.
-   * Returns true if the route enters near one bridge end and exits near the
-   * other, meaning it travels *along* the bridge rather than under it.
-   */
-  private routeAlignsWithBridge(coords: Array<[number, number]>, span: { heading: number; start: [number, number]; end: [number, number] }): boolean {
-    const metresPerDegLat = (Math.PI / 180) * 6_378_137;
-    const midLat = (coords[0][1] + coords[coords.length - 1][1]) / 2;
+  private segmentHeading(from: [number, number], to: [number, number]): number {
+    const midLat = (from[1] + to[1]) / 2;
     const cosLat = Math.cos(midLat * Math.PI / 180);
-    // Route heading from first to last coordinate.
-    const routeEast = (coords[coords.length - 1][0] - coords[0][0]) * cosLat * metresPerDegLat;
-    const routeNorth = (coords[coords.length - 1][1] - coords[0][1]) * metresPerDegLat;
-    const routeHeading = Math.atan2(routeEast, routeNorth);
-    let diff = Math.abs(routeHeading - span.heading);
-    if (diff > Math.PI) diff = 2 * Math.PI - diff;
-    if (diff > Math.PI / 2) diff = Math.PI - diff;
-    return diff <= MAX_HEADING_DIFF_RADIANS;
+    const metresPerDegLat = (Math.PI / 180) * EARTH_RADIUS_METERS;
+    return Math.atan2(
+      (to[0] - from[0]) * cosLat * metresPerDegLat,
+      (to[1] - from[1]) * metresPerDegLat,
+    );
   }
 
   private rebuild() {
@@ -171,9 +158,9 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
   }
 
   /**
-   * Build ribbon geometry only for the portions of the line that cross a
-   * sampled 3D bridge deck AND align with the bridge's span direction.
-   * Routes passing under the bridge on a perpendicular road are not lifted.
+   * Build ribbon geometry only for the portions of the line that travel along
+   * a sampled bridge roadway. Perpendicular and parallel under-crossings stay
+   * on the native 2D drape.
    */
   private buildBridgeSegments(feature: RouteLineFeature) {
     const map = this.map;
@@ -181,16 +168,6 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
     const coords = feature.coordinates;
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.origin);
     const units = originMercator.meterInMercatorCoordinateUnits();
-
-    // Find a bridge span covering any point on the route. If the route's
-    // overall direction doesn't align with the bridge span, skip it entirely
-    // — the route passes under the bridge, not over it.
-    let span: { heading: number; start: [number, number]; end: [number, number] } | null = null;
-    for (const [lng, lat] of coords) {
-      span = this.bridgeDeckSource?.bridgeSpanAt(lng, lat) ?? null;
-      if (span) break;
-    }
-    if (span && !this.routeAlignsWithBridge(coords, span)) return;
 
     type Vert = { x: number; y: number; z: number };
     let strip: Vert[] = [];
@@ -222,9 +199,17 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
       strip = [];
     };
 
+    const headingAt = (index: number) => {
+      const prev = coords[Math.max(0, index - 1)];
+      const next = coords[Math.min(coords.length - 1, index + 1)];
+      if (prev[0] === next[0] && prev[1] === next[1]) return 0;
+      return this.segmentHeading(prev, next);
+    };
+
     for (let i = 0; i < coords.length; i++) {
       const [lng, lat] = coords[i];
-      const deckElev = this.sampleDeckElevation(lng, lat);
+      const heading = headingAt(i);
+      const deckElev = this.sampleDeckElevation(lng, lat, heading);
 
       if (i > 0) {
         // Densify long segments to catch bridge crossings between coordinates.
@@ -237,11 +222,12 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
         );
         if (dist > 12) {
           const steps = Math.ceil(dist / 10);
+          const segmentHeading = this.segmentHeading(coords[i - 1], coords[i]);
           for (let s = 1; s < steps; s++) {
             const t = s / steps;
             const midLng = prevLng + (lng - prevLng) * t;
             const midLat = prevLat + (lat - prevLat) * t;
-            const midDeck = this.sampleDeckElevation(midLng, midLat);
+            const midDeck = this.sampleDeckElevation(midLng, midLat, segmentHeading);
             if (midDeck !== null) {
               strip.push(localPoint(midLng, midLat, midDeck));
             } else {
