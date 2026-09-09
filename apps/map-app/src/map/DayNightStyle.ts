@@ -11,6 +11,7 @@ import type { DayNightAppearance, DayNightPalette } from './DayNightAppearance';
 import { localStyleMix, nightFactor } from './DayNightAppearance';
 import { Color } from 'three';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT } from './RailwayAppearance';
+import { buildingColorExpression } from './BuildingColor';
 
 const DAYLIGHT_SKY: SkySpecification = {
   'sky-color': '#7ec8ea',
@@ -73,11 +74,11 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number) 
   setPaint(map, 'global-railway-bed', 'line-color', `#${new Color(RAIL_BED_DAY).lerp(new Color(RAIL_BED_NIGHT), night).getHexString()}`);
   setPaint(map, 'global-railway-sleepers', 'line-color', `#${new Color(RAIL_SLEEPER_DAY).lerp(new Color(RAIL_SLEEPER_NIGHT), night).getHexString()}`);
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
-    setPaint(map, id, 'fill-color', colors.building);
+    setPaint(map, id, 'fill-color', buildingColorExpression(colors.building));
     setPaint(map, id, 'fill-outline-color', colors.boundary);
   });
-  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
-  setPaint(map, 'global-buildings', 'fill-extrusion-color', colors.building);
+  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', buildingColorExpression(colors.buildingBand));
+  setPaint(map, 'global-buildings', 'fill-extrusion-color', buildingColorExpression(colors.building));
   const verticalGradient = false;
   setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-vertical-gradient', verticalGradient);
   setPaint(map, 'global-buildings', 'fill-extrusion-vertical-gradient', verticalGradient);
