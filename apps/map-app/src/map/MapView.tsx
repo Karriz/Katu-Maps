@@ -158,6 +158,7 @@ import {
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
+import { pastelizeHex, getDeterministicBuildingColor, BASE_BUILDING_COLOR } from './BuildingColor';
 import {
   createGroundPattern,
   groundPatternImageId,
@@ -2404,6 +2405,51 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       cancelLongPressTimer();
       lastUserInteractionRef.current = Date.now();
     };
+    
+    // Color property names to check on building features
+    const COLOR_PROPERTIES = ['color', 'colour', 'building:colour', 'render_color'] as const;
+    
+    // Update feature state with pastelized colors for all visible building features
+    const updateBuildingPastelColors = useCallback(() => {
+      try {
+        const zoom = map.getZoom();
+        // Don't process at low zoom levels where buildings aren't visible
+        if (zoom < 12) return;
+        
+        // Query all building features from the vector source
+        const features = map.querySourceFeatures(OPENFREEMAP_SOURCE_ID, {
+          sourceLayer: 'building',
+        });
+        
+        for (const feature of features) {
+          let pastelColor = BASE_BUILDING_COLOR;
+          
+          // Check for OSM color properties
+          for (const propName of COLOR_PROPERTIES) {
+            const value = feature.properties?.[propName];
+            if (value && typeof value === 'string') {
+              pastelColor = pastelizeHex(value);
+              break;
+            }
+          }
+          
+          // If no OSM color, use deterministic color based on feature ID
+          if (pastelColor === BASE_BUILDING_COLOR && feature.id !== undefined) {
+            pastelColor = getDeterministicBuildingColor(feature.id);
+          }
+          
+          // Set feature state with the pastelized color
+          map.setFeatureState({
+            source: OPENFREEMAP_SOURCE_ID,
+            sourceLayer: 'building',
+            id: feature.id,
+          }, { pastel_color: pastelColor });
+        }
+      } catch (error) {
+        console.warn('Failed to update building pastel colors:', error);
+      }
+    }, [map]);
+    
     map.once('load', async () => {
       // MapLibre uses image pixelRatio when determining pattern spacing. A
       // 512px image at 0.5 therefore repeats every 1024 logical pixels,
@@ -2847,6 +2893,18 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
       initialLoadComplete = true;
+      
+      // Set up building color pastelization
+      // Set feature state for all currently visible building features
+      updateBuildingPastelColors();
+      
+      // Update building colors when map moves or zooms
+      map.on('moveend', updateBuildingPastelColors);
+      map.on('zoomend', updateBuildingPastelColors);
+      
+      
+      // Update building colors when map moves or zooms
+      
       setMapLoaded(true);
       if (deepLink) {
         initialDeepLinkRef.current = null;

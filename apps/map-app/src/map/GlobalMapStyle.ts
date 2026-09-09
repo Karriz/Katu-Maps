@@ -11,6 +11,11 @@ import {
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
+import {
+  BASE_BUILDING_COLOR,
+  BASE_BUILDING_ALT_COLOR,
+  BASE_BUILDING_BAND_COLOR,
+} from './BuildingColor';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
@@ -539,8 +544,10 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
   ...GLOBAL_BUILDING_3D_LAYER_IDS,
 ];
 
-const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
-const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
+// Use base building colors from BuildingColor module
+// These can be overridden by per-building colors from tile properties
+const GLOBAL_BUILDING_COLOR = BASE_BUILDING_COLOR;
+const GLOBAL_BUILDING_GROUND_COLOR = BASE_BUILDING_BAND_COLOR;
 
 const WATER_COLOR: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
@@ -1956,7 +1963,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 12,
       maxzoom: 13.75,
       paint: {
-        'fill-color': GLOBAL_BUILDING_COLOR,
+        'fill-color': ['get', 'pastel_color'] as ExpressionSpecification,
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           13, 0.78,
@@ -1977,7 +1984,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // This is the persistent flat representation used when 3D buildings
         // are disabled. It gains a little definition at close zooms without
         // trying to imitate extrusion lighting.
-        'fill-color': '#fffef9',
+        // Use per-building colors from controlled palette, varying by feature properties
+        'fill-color': ['get', 'pastel_color'] as ExpressionSpecification,
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           12, 0,
@@ -2070,7 +2078,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
       ],
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_GROUND_COLOR,
+        // Ground floor uses a slightly darker base color for depth perception
+        // Uses same palette-based coloring as other building layers
+        'fill-extrusion-color': BASE_BUILDING_BAND_COLOR,
         // Keep the real height present while the layer fades in. The opacity
         // transition below handles the low-zoom handoff from footprints;
         // animating height here makes pitched, distant buildings look flat.
@@ -2093,7 +2103,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       minzoom: 13,
       filter: GLOBAL_BUILDING_3D_FILTER,
       paint: {
-        'fill-extrusion-color': GLOBAL_BUILDING_COLOR,
+        // Use per-building colors from controlled palette, varying by feature properties
+        'fill-extrusion-color': ['get', 'pastel_color'] as ExpressionSpecification,
         'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,
         // Multi-storey buildings begin above the darker ground floor. Short
         // buildings remain a single extrusion from their normal base.
