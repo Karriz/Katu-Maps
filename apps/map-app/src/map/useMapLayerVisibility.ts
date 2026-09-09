@@ -96,7 +96,7 @@ export function useMapLayerVisibility({
       map.setLayoutProperty('terrain-hillshade', 'visibility', layerToggles.terrain && terrainSourceRef.current === 'terrain' ? 'visible' : 'none');
     }
     bridgeLayerRef.current?.setEnabled(layerToggles.bridges);
-    roofLayerRef.current?.setEnabled(layerToggles.proceduralRoofs);
+    roofLayerRef.current?.setEnabled(layerToggles.proceduralRoofs && layerToggles.buildings);
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
       .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d'), layerToggles.transit);
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);

@@ -31,11 +31,25 @@ const ROOF_Z_OFFSET = 0.02;
 const ROOF_DEDUPLICATION_CELL_METERS = 8;
 const ROOF_DUPLICATE_CENTER_DISTANCE_METERS = 4;
 const ROOF_DUPLICATE_MIN_AREA_RATIO = 0.6;
+const ROOF_FRAME_BUDGET_MS = 4;
 
-const ROOF_COLOR_LIGHT = new THREE.Color('#b8704a');
-const ROOF_COLOR_LIGHT_ALT = new THREE.Color('#9a8478');
-const ROOF_COLOR_DARK = new THREE.Color('#3d3528');
-const ROOF_COLOR_DARK_ALT = new THREE.Color('#2e3340');
+/**
+ * Calm, low-saturation roof palette for light mode. All colours sit in a
+ * narrow lightness band so they read as a family rather than a rainbow.
+ * Clay red is the accent; the rest are warm neutrals that sit comfortably
+ * against the pastel building walls.
+ */
+const ROOF_PALETTE_LIGHT = [
+  new THREE.Color('#c48878'), // soft clay red
+  new THREE.Color('#b4b0a8'), // light warm gray
+  new THREE.Color('#bea99a'), // light brown
+  new THREE.Color('#aca8a0'), // faded taupe
+];
+/**
+ * Dark-mode multiplier applied to the light palette via material.color.
+ * Cools and darkens the vertex colours without re-baking them.
+ */
+const ROOF_DARK_MULTIPLIER = new THREE.Color('#4a4a52');
 
 const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
 
@@ -76,6 +90,7 @@ export class RoofModelLayer implements CustomLayerInterface {
   private darkMode = false;
   private latitude = 61.4981;
   private lastViewSignature = '';
+  private roofJob?: { generator: Generator<void, boolean, void>; signature: string };
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
 
@@ -92,6 +107,7 @@ export class RoofModelLayer implements CustomLayerInterface {
     if (this.userEnabled === enabled) return;
     this.userEnabled = enabled;
     if (!enabled) {
+      this.roofJob = undefined;
       this.sampledRoofs = [];
       this.rebuildMesh();
       this.map?.triggerRepaint();
@@ -104,14 +120,15 @@ export class RoofModelLayer implements CustomLayerInterface {
   /** Mark the current sample stale without rebuilding once per arriving tile. */
   invalidateSource() {
     this.lastViewSignature = '';
+    this.roofJob = undefined;
   }
 
   private applyRoofColors() {
     if (!this.roofMaterial) return;
     if (this.darkMode) {
-      this.roofMaterial.color.set(ROOF_COLOR_DARK);
+      this.roofMaterial.color.copy(ROOF_DARK_MULTIPLIER);
     } else {
-      this.roofMaterial.color.set(ROOF_COLOR_LIGHT);
+      this.roofMaterial.color.set(0xffffff);
     }
   }
 
@@ -133,9 +150,10 @@ export class RoofModelLayer implements CustomLayerInterface {
     this.scene.add(this.sunlight);
 
     this.roofMaterial = new THREE.MeshLambertMaterial({
-      color: this.darkMode ? ROOF_COLOR_DARK : ROOF_COLOR_LIGHT,
+      vertexColors: true,
       flatShading: true,
     });
+    this.applyRoofColors();
     this.roofMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.roofMaterial);
     this.roofMesh.frustumCulled = false;
     this.scene.add(this.roofMesh);
@@ -161,17 +179,10 @@ export class RoofModelLayer implements CustomLayerInterface {
     if (!map || !renderer) return;
     if (!this.userEnabled) return;
 
-    const zoom = map.getZoom();
-    if (zoom < ROOF_MIN_ZOOM) {
-      if (this.sampledRoofs.length > 0) {
-        this.sampledRoofs = [];
-        this.rebuildMesh();
-      }
-    } else {
-      this.updateRoofs();
-    }
-
-    // Recenter if drifted too far.
+    // Recenter if drifted too far. This must happen before updateRoofs so the
+    // new job uses the correct scene origin, and roofs from the previous
+    // coordinate frame are cleared before they can be rendered against the
+    // wrong origin (which would place them at incorrect positions/angles).
     const center = map.getCenter();
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
     const centerMercator = maplibregl.MercatorCoordinate.fromLngLat(center);
@@ -184,6 +195,20 @@ export class RoofModelLayer implements CustomLayerInterface {
       this.sceneOrigin = center;
       this.sceneOriginElevation = map.queryTerrainElevation(center) ?? 0;
       this.lastViewSignature = '';
+      this.roofJob = undefined;
+      this.sampledRoofs = [];
+      this.rebuildMesh();
+    }
+
+    const zoom = map.getZoom();
+    if (zoom < ROOF_MIN_ZOOM) {
+      this.roofJob = undefined;
+      if (this.sampledRoofs.length > 0) {
+        this.sampledRoofs = [];
+        this.rebuildMesh();
+      }
+    } else {
+      this.updateRoofs();
     }
 
     const origin = maplibregl.MercatorCoordinate.fromLngLat(
@@ -220,22 +245,41 @@ export class RoofModelLayer implements CustomLayerInterface {
     const map = this.map;
     if (!map || !this.userEnabled || map.getZoom() < ROOF_MIN_ZOOM) return false;
     const signature = this.viewSignature(map);
-    if (signature === this.lastViewSignature) return false;
+    if (signature === this.lastViewSignature) {
+      this.roofJob = undefined;
+      return false;
+    }
     // querySourceFeatures only sees currently loaded tiles. Preserve the old
     // roof mesh and leave this signature pending until the visible source has
     // finished loading, otherwise the first partial sample becomes permanent.
     if (!map.getSource(this.sourceId) || !map.isSourceLoaded(this.sourceId)) return false;
-    this.latitude = map.getCenter().lat;
-    if (!this.sampleRoofs(map)) return false;
-    this.rebuildMesh();
-    this.lastViewSignature = signature;
-    return true;
+
+    // Cancel any stale job from a previous view.
+    if (this.roofJob && this.roofJob.signature !== signature) {
+      this.roofJob = undefined;
+    }
+    if (!this.roofJob) {
+      this.latitude = map.getCenter().lat;
+      this.roofJob = { generator: this.sampleRoofsJob(map), signature };
+    }
+
+    // Advance the sampling generator under a frame budget so roof generation
+    // never blocks a render frame. Small viewports finish in one call.
+    const deadline = performance.now() + ROOF_FRAME_BUDGET_MS;
+    while (performance.now() < deadline) {
+      const result = this.roofJob.generator.next();
+      if (result.done) {
+        this.roofJob = undefined;
+        if (result.value) this.lastViewSignature = signature;
+        return result.value;
+      }
+    }
+    map.triggerRepaint();
+    return false;
   }
 
-  private sampleRoofs(map: MaplibreMap): boolean {
-    if (!map.getSource(this.sourceId)) {
-      return false;
-    }
+  private *sampleRoofsJob(map: MaplibreMap): Generator<void, boolean, void> {
+    if (!map.getSource(this.sourceId)) return false;
 
     let features: ReturnType<MaplibreMap['querySourceFeatures']> = [];
     try {
@@ -249,6 +293,7 @@ export class RoofModelLayer implements CustomLayerInterface {
     const climate = roofClimateForLatitude(this.latitude);
     if (climate.type === 'flat' || climate.pitchedFraction === 0) {
       this.sampledRoofs = [];
+      this.rebuildMesh();
       return true;
     }
 
@@ -268,6 +313,7 @@ export class RoofModelLayer implements CustomLayerInterface {
     const south = bounds.getSouth();
     const north = bounds.getNorth();
 
+    let featureIndex = 0;
     for (const feature of features) {
       const sourceId = feature.id ?? feature.properties?.osm_id;
       if (sourceId === NASINNEULA_BUILDING_OUTLINE_ID) continue;
@@ -314,6 +360,7 @@ export class RoofModelLayer implements CustomLayerInterface {
           wallHeight,
         });
       }
+      if (++featureIndex % 16 === 0) yield;
     }
 
     // Buffered vector tiles repeat buildings near their edges under different
@@ -322,6 +369,7 @@ export class RoofModelLayer implements CustomLayerInterface {
     footprintCandidates.sort((first, second) => second.area - first.area);
     const acceptedByCell = new Map<string, RoofFootprint[]>();
     const roofs: SampledRoof[] = [];
+    let candidateIndex = 0;
     for (const footprint of footprintCandidates) {
       if (roofs.length >= ROOF_MAX_BUILDINGS) break;
       if (hasNearbyDuplicate(footprint, acceptedByCell)) continue;
@@ -347,13 +395,17 @@ export class RoofModelLayer implements CustomLayerInterface {
 
       const geometry = roofMeshDataToBufferGeometry(roofData);
       geometry.translate(roofData.offset[0], wallTopUp, roofData.offset[1]);
+      const palette = ROOF_PALETTE_LIGHT[Math.abs(numericId) % ROOF_PALETTE_LIGHT.length];
       const color = this.darkMode
-        ? (numericId % 2 === 0 ? ROOF_COLOR_DARK : ROOF_COLOR_DARK_ALT)
-        : (numericId % 2 === 0 ? ROOF_COLOR_LIGHT : ROOF_COLOR_LIGHT_ALT);
+        ? palette.clone().multiply(ROOF_DARK_MULTIPLIER)
+        : palette.clone();
+      bakeVertexColors(geometry, color);
       roofs.push({ geometry, color });
+      if (++candidateIndex % 16 === 0) yield;
     }
 
     this.sampledRoofs = roofs;
+    this.rebuildMesh();
     return true;
   }
 
@@ -532,6 +584,17 @@ function hashString(s: string): number {
   return hash;
 }
 
+function bakeVertexColors(geometry: THREE.BufferGeometry, color: THREE.Color) {
+  const posAttr = geometry.getAttribute('position');
+  const colors = new Float32Array(posAttr.count * 3);
+  for (let i = 0; i < posAttr.count; i++) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
 function mergeGeometries(geometries: THREE.BufferGeometry[]): THREE.BufferGeometry {
   let totalPositions = 0;
   let totalIndices = 0;
@@ -543,6 +606,7 @@ function mergeGeometries(geometries: THREE.BufferGeometry[]): THREE.BufferGeomet
 
   const positions = new Float32Array(totalPositions);
   const normals = new Float32Array(totalPositions);
+  const colors = new Float32Array(totalPositions);
   const useUint32 = totalIndices > 65535;
   const indices = useUint32 ? new Uint32Array(totalIndices) : new Uint16Array(totalIndices);
 
@@ -552,10 +616,14 @@ function mergeGeometries(geometries: THREE.BufferGeometry[]): THREE.BufferGeomet
   for (const g of geometries) {
     const posAttr = g.getAttribute('position') as THREE.BufferAttribute;
     const normAttr = g.getAttribute('normal') as THREE.BufferAttribute;
+    const colorAttr = g.getAttribute('color') as THREE.BufferAttribute | undefined;
     const idxAttr = g.getIndex() as THREE.BufferAttribute;
 
     positions.set(posAttr.array as Float32Array, posOffset);
     normals.set(normAttr.array as Float32Array, posOffset);
+    if (colorAttr) {
+      colors.set(colorAttr.array as Float32Array, posOffset);
+    }
 
     const idxArray = idxAttr.array as Uint16Array | Uint32Array;
     for (let i = 0; i < idxArray.length; i++) {
@@ -570,6 +638,7 @@ function mergeGeometries(geometries: THREE.BufferGeometry[]): THREE.BufferGeomet
   const merged = new THREE.BufferGeometry();
   merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   merged.setIndex(new THREE.BufferAttribute(indices, 1));
   return merged;
 }

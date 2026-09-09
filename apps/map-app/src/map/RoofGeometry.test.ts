@@ -49,6 +49,41 @@ describe('RoofGeometry', () => {
     expect(ridgeX).toBeGreaterThan(ridgeZ);
   });
 
+  it('aligns a hipped roof to a 45-degree rotated footprint', () => {
+    // A 20×8 rectangle rotated 45° — the OBB angle is non-zero, so the
+    // hipped roof must rotate its vertices back from OBB to local space.
+    const cos45 = Math.SQRT1_2;
+    const sin45 = Math.SQRT1_2;
+    const w = 10, d = 4;
+    const ring: Array<[number, number]> = [
+      [-w * cos45 - d * sin45, -w * sin45 + d * cos45],
+      [w * cos45 - d * sin45, w * sin45 + d * cos45],
+      [w * cos45 + d * sin45, w * sin45 - d * cos45],
+      [-w * cos45 + d * sin45, -w * sin45 - d * cos45],
+      [-w * cos45 - d * sin45, -w * sin45 + d * cos45],
+    ];
+    const roof = generateRoofGeometry({
+      ring,
+      wallHeight: 5,
+      type: 'hipped',
+      pitchDegrees: 30,
+      featureId: 3,
+    });
+
+    expect(roof).not.toBeNull();
+    // Eave corner 0 (index 0) and corner 1 (index 1) should be 20 m apart
+    // (the long edge), and corner 0 and corner 3 (index 3) should be 8 m
+    // apart (the short edge). If the rotation back was missing, the
+    // distances would be wrong because the OBB angle is ~45°.
+    const p0x = roof!.positions[0], p0z = roof!.positions[2];
+    const p1x = roof!.positions[3], p1z = roof!.positions[5];
+    const p3x = roof!.positions[9], p3z = roof!.positions[11];
+    const longEdge = Math.hypot(p1x - p0x, p1z - p0z);
+    const shortEdge = Math.hypot(p3x - p0x, p3z - p0z);
+    expect(longEdge).toBeCloseTo(20, 1);
+    expect(shortEdge).toBeCloseTo(8, 1);
+  });
+
   describe('isEligibleFootprint', () => {
     it('accepts a simple rectangle', () => {
       expect(isEligibleFootprint([[0, 0], [10, 0], [10, 6], [0, 6], [0, 0]])).toBe(true);
@@ -68,7 +103,7 @@ describe('RoofGeometry', () => {
     });
 
     it('rejects a convex pentagon that is not rectangular', () => {
-      // Regular pentagon with ~10 m radius, area ~240 m², but OBB fill < 0.85.
+      // Regular pentagon with ~10 m radius, area ~240 m², but OBB fill < 0.93.
       const pts: Array<[number, number]> = [];
       for (let i = 0; i < 5; i++) {
         const a = (i * 2 * Math.PI) / 5;
@@ -76,6 +111,15 @@ describe('RoofGeometry', () => {
       }
       pts.push([pts[0][0], pts[0][1]]);
       expect(isEligibleFootprint(pts)).toBe(false);
+    });
+
+    it('rejects a trapezoid whose roof would overhang the walls', () => {
+      // 12 m wide at one end, 9 m wide at the other, 6 m tall.
+      // Area = 63 m², OBB area = 72 m², ratio = 0.875 — passes 0.85 but
+      // fails 0.93, so the gable eaves would not extend past the narrow wall.
+      expect(isEligibleFootprint([
+        [0, 0], [12, 0], [10.5, 6], [1.5, 6], [0, 0],
+      ])).toBe(false);
     });
 
     it('rejects a very long and thin rectangle', () => {

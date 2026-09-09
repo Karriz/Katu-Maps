@@ -50,10 +50,11 @@ const MIN_FOOTPRINT_WIDTH_M = 3;
 const MAX_CONCAVE_VERTICES = 0;
 /**
  * Minimum ratio of polygon area to oriented bounding box area. A perfect
- * rectangle fills its OBB completely; pentagons, octagons, and other convex
- * but non-rectangular shapes fall below this threshold.
+ * rectangle fills its OBB completely. At 0.93, trapezoids, chamfered corners,
+ * and other near-rectangular shapes whose roof would overhang the walls are
+ * rejected, while tile coordinate quantization is tolerated.
  */
-const MIN_RECTANGULARITY_RATIO = 0.85;
+const MIN_RECTANGULARITY_RATIO = 0.93;
 
 export function isEligibleFootprint(
   ring: Array<[number, number]>,
@@ -249,18 +250,30 @@ function generateHippedRoof(candidate: RoofCandidate): RoofMeshData | null {
   const positions: number[] = [];
   const indices: number[] = [];
 
-  // Add eave corners (y = 0).
+  // Add eave corners (y = 0), rotated back from OBB to local frame.
   const eaveIndices: number[] = [];
   for (const [u, v] of corners) {
-    positions.push(u, 0, v);
+    const x = u * cosA - v * sinA;
+    const z = u * sinA + v * cosA;
+    positions.push(x, 0, z);
     eaveIndices.push(eaveIndices.length);
   }
 
-  // Add ridge endpoints.
+  // Add ridge endpoints, rotated back from OBB to local frame.
   const ridgeFrontIdx = positions.length / 3;
-  positions.push(...ridgeFront);
+  {
+    const [u, y, v] = ridgeFront;
+    const x = u * cosA - v * sinA;
+    const z = u * sinA + v * cosA;
+    positions.push(x, y, z);
+  }
   const ridgeBackIdx = positions.length / 3;
-  positions.push(...ridgeBack);
+  {
+    const [u, y, v] = ridgeBack;
+    const x = u * cosA - v * sinA;
+    const z = u * sinA + v * cosA;
+    positions.push(x, y, z);
+  }
 
   // The two long slopes share the whole ridge. Each short end is one hip
   // triangle. Keeping these four regions disjoint prevents diagonal faces
