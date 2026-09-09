@@ -11,6 +11,7 @@ import {
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
+import { buildingColorExpression } from './BuildingColor';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
@@ -539,8 +540,8 @@ export const GLOBAL_BUILDING_LAYER_IDS = [
   ...GLOBAL_BUILDING_3D_LAYER_IDS,
 ];
 
-const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
-const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
+const GLOBAL_BUILDING_COLOR = buildingColorExpression(MAP_COLORS.building);
+const GLOBAL_BUILDING_GROUND_COLOR = buildingColorExpression(MAP_COLORS.buildingBand);
 
 const WATER_COLOR: ExpressionSpecification = [
   'interpolate', ['linear'], ['zoom'],
@@ -1977,7 +1978,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // This is the persistent flat representation used when 3D buildings
         // are disabled. It gains a little definition at close zooms without
         // trying to imitate extrusion lighting.
-        'fill-color': '#fffef9',
+        'fill-color': GLOBAL_BUILDING_COLOR,
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
           12, 0,
@@ -3019,9 +3020,9 @@ export function applyMapTheme(
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);
   set('global-railway-sleepers', 'line-color', RAIL_SLEEPER_NIGHT);
-  ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', colors.building); set(id, 'fill-outline-color', colors.boundary); });
-  set('global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
-  set('global-buildings', 'fill-extrusion-color', colors.building);
+  ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', buildingColorExpression(colors.building)); set(id, 'fill-outline-color', colors.boundary); });
+  set('global-building-ground-storeys', 'fill-extrusion-color', buildingColorExpression(colors.buildingBand));
+  set('global-buildings', 'fill-extrusion-color', buildingColorExpression(colors.building));
   set('global-building-ground-storeys', 'fill-extrusion-vertical-gradient', false);
   set('global-buildings', 'fill-extrusion-vertical-gradient', false);
   ['global-building-shadow', 'global-building-contact-shadow'].forEach((id) => set(id, 'line-color', colors.shadow));
