@@ -1987,6 +1987,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         // Keep the default view focused on an area a few hundred metres across;
         // closer views make screen-space MapLibre roads dominate the scene.
         maxZoom: 18,
+        // Request a multisampled WebGL context so MapLibre layers, terrain, and
+        // Three.js custom layers (which reuse this context) all get MSAA.
+        canvasContextAttributes: { antialias: true },
         attributionControl: {
           compact: true,
           customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo</a> · <a href="https://clouds.matteason.co.uk/" target="_blank" rel="noreferrer">Cloud maps by Matt Eason / EUMETSAT</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
