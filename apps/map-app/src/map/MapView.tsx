@@ -61,7 +61,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
 import { installTunnelPortals } from './TunnelPortals';
-import { installRoadPolygonLayer } from './RoadPolygonLayer';
 import { RoofModelLayer } from './RoofModelLayer';
 import { FacadeModelLayer } from './FacadeModelLayer';
 import { MapControls, defaultMapLayerState, is3dModeEnabled, toggle3dModeLayers, type MapLayerState } from './MapControls';
@@ -1993,7 +1992,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // the first paint so labeled peaks render as a point + name together.
     ensureMountainPeakIcon(map);
     const disposeTunnelPortals = installTunnelPortals(map);
-    const disposeRoadPolygons = installRoadPolygonLayer(map);
     // Use the explicitly documented key bindings below rather than MapLibre's
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();
@@ -3004,7 +3002,6 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     return () => {
       disposeMapPatterns?.();
       disposeTunnelPortals();
-      disposeRoadPolygons();
       terrainCameraFollower.dispose();
       measurementControllerRef.current?.dispose();
       measurementControllerRef.current = null;
