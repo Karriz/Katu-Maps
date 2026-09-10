@@ -2,12 +2,14 @@
  *
  * Broad surface roads (not service roads, paths, bridges, or tunnels) are
  * generated per 256 m cell, off the main thread when a worker is available, and
- * cached by cell plus centreline signature. Vector `global-roads` /
- * `global-road-casing` keep only service roads once the camera cell is replaced;
- * uncovered remainder uses slightly narrower GeoJSON fallback lines so original
- * strokes cannot protrude. Wide paved carriageways also get dashed centerlines
- * from the same draped geometry. Cost stays bounded: three GeoJSON sources,
- * five layers, 25 nearby cells, and two in-flight jobs.
+ * cached by cell plus centreline signature. Once the camera cell is replaced,
+ * vector `global-roads` / `global-road-casing` keep service roads opaque and fade
+ * the replaced classes out with zoom; polygons fade in over the same band so
+ * zoom-out never blanks the road. Uncovered remainder uses slightly narrower
+ * GeoJSON fallback lines so original strokes cannot protrude. Wide paved
+ * carriageways also get dashed centerlines from the same draped geometry. Cost
+ * stays bounded: three GeoJSON sources, five layers, 25 nearby cells, and two
+ * in-flight jobs.
  */
 import type {
   ExpressionSpecification,
@@ -67,13 +69,6 @@ const SURFACE_ROAD_FILTER: FilterSpecification = [
   ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
 ];
 
-const SERVICE_ONLY_FILTER: FilterSpecification = [
-  'all',
-  ['==', ['geometry-type'], 'LineString'],
-  ['==', ['get', 'class'], 'service'],
-  ['!', ['in', ['get', 'brunnel'], ['literal', ['bridge', 'tunnel']]]],
-];
-
 const QUERY_FILTER: FilterSpecification = [
   'all',
   ['==', ['geometry-type'], 'LineString'],
@@ -86,6 +81,11 @@ const CLOSEUP_ROAD_CASING = '#ffffff';
 const UNPAVED_ROAD = '#d9cbaa';
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 const VECTOR_ROAD_LAYER_IDS = ['global-road-casing', 'global-roads'] as const;
+const VECTOR_ROAD_FULL_OPACITY = {
+  'global-road-casing': 0.78,
+  'global-roads': 0.98,
+} as const;
+const INSTANT_OPACITY_TRANSITION = { duration: 0, delay: 0 } as const;
 
 type CachedCell = RoadCellGeometry & { inputSignature: string };
 type PendingWork = { requestId: number; cellKey: string; inputSignature: string };
@@ -102,6 +102,7 @@ export type RoadPolygonScheduler = (job: RoadPolygonJob) => void;
 
 export type RoadPolygonController = {
   update: () => void;
+  syncZoom: () => void;
   invalidateSource: () => void;
   dispose: () => void;
 };
@@ -149,6 +150,43 @@ export function shouldActivateRoadPolygons(zoom: number, currentlyActive: boolea
   return zoom >= ROAD_POLYGON_ENTER_ZOOM;
 }
 
+/** Polygon replacement fades out across the hysteresis band as vector lines return. */
+export function roadPolygonFadeOpacity(fullOpacity = 1): ExpressionSpecification {
+  return [
+    'interpolate', ['linear'], ['zoom'],
+    ROAD_POLYGON_EXIT_ZOOM, 0,
+    ROAD_POLYGON_ENTER_ZOOM, fullOpacity,
+  ];
+}
+
+export function uncoveredVectorRoadOpacity(fullOpacity: number): ExpressionSpecification {
+  return ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, fullOpacity];
+}
+
+/** Replaced classes disappear at enter zoom; service roads stay on the vector layers. */
+export function coveredVectorRoadOpacity(fullOpacity: number): ExpressionSpecification {
+  return [
+    'case',
+    ['==', ['get', 'class'], 'service'],
+    uncoveredVectorRoadOpacity(fullOpacity),
+    [
+      'interpolate', ['linear'], ['zoom'],
+      10.5, 0,
+      12, fullOpacity,
+      ROAD_POLYGON_EXIT_ZOOM, fullOpacity,
+      ROAD_POLYGON_ENTER_ZOOM, 0,
+    ],
+  ];
+}
+
+export function roadPolygonCenterlineOpacity(): ExpressionSpecification {
+  return [
+    '*',
+    roadPolygonFadeOpacity(1),
+    ['interpolate', ['linear'], ['zoom'], 15, 0.45, 16, 0.72, 18, 0.9],
+  ];
+}
+
 export function installRoadPolygonLayer(
   map: MapLibreMap,
   options?: { schedule?: RoadPolygonScheduler },
@@ -167,11 +205,14 @@ export function installRoadPolygonLayer(
       scheduleUpdate();
     }
   };
+  const onZoom = () => controller.syncZoom();
   map.on('moveend', scheduleUpdate);
+  map.on('zoom', onZoom);
   map.on('sourcedata', sourceData);
   return () => {
     if (timer !== undefined) window.clearTimeout(timer);
     map.off('moveend', scheduleUpdate);
+    map.off('zoom', onZoom);
     map.off('sourcedata', sourceData);
     controller.dispose();
   };
@@ -240,7 +281,8 @@ export function createRoadPolygonController(
         paint: {
           'line-color': CLOSEUP_ROAD_CASING,
           'line-width': roadWidthExpression(map.getCenter().lat, true),
-          'line-opacity': 0.9,
+          'line-opacity': roadPolygonFadeOpacity(0.9),
+          'line-opacity-transition': INSTANT_OPACITY_TRANSITION,
         },
       }, before);
     }
@@ -254,7 +296,8 @@ export function createRoadPolygonController(
         paint: {
           'line-color': polygonFillColor(),
           'line-width': roadWidthExpression(map.getCenter().lat),
-          'line-opacity': 1,
+          'line-opacity': roadPolygonFadeOpacity(1),
+          'line-opacity-transition': INSTANT_OPACITY_TRANSITION,
         },
       }, before);
     }
@@ -271,7 +314,8 @@ export function createRoadPolygonController(
         },
         paint: {
           'fill-color': CLOSEUP_ROAD_CASING,
-          'fill-opacity': 1,
+          'fill-opacity': roadPolygonFadeOpacity(1),
+          'fill-opacity-transition': INSTANT_OPACITY_TRANSITION,
         },
       }, before);
     }
@@ -288,7 +332,8 @@ export function createRoadPolygonController(
         },
         paint: {
           'fill-color': polygonFillColor(),
-          'fill-opacity': 1,
+          'fill-opacity': roadPolygonFadeOpacity(1),
+          'fill-opacity-transition': INSTANT_OPACITY_TRANSITION,
         },
       }, before);
     }
@@ -308,21 +353,29 @@ export function createRoadPolygonController(
           'line-color': '#ffffff',
           'line-width': roadCenterlineWidthExpression(map.getCenter().lat),
           'line-dasharray': [3, 4],
-          'line-opacity': [
-            'interpolate', ['linear'], ['zoom'],
-            15, 0.45,
-            16, 0.72,
-            18, 0.9,
-          ],
+          'line-opacity': roadPolygonCenterlineOpacity(),
+          'line-opacity-transition': INSTANT_OPACITY_TRANSITION,
         },
       }, before);
     }
   };
 
-  const setVectorRoadFilter = (replaced: boolean) => {
-    const filter = replaced ? SERVICE_ONLY_FILTER : SURFACE_ROAD_FILTER;
+  const restoreVectorRoadFilter = () => {
     for (const id of VECTOR_ROAD_LAYER_IDS) {
-      if (map.getLayer(id)) map.setFilter(id, filter);
+      if (map.getLayer(id)) map.setFilter(id, SURFACE_ROAD_FILTER);
+    }
+  };
+
+  const setCoveredVectorOpacity = (covered: boolean) => {
+    for (const id of VECTOR_ROAD_LAYER_IDS) {
+      if (!map.getLayer(id)) continue;
+      const fullOpacity = VECTOR_ROAD_FULL_OPACITY[id];
+      map.setPaintProperty(
+        id,
+        'line-opacity',
+        covered ? coveredVectorRoadOpacity(fullOpacity) : uncoveredVectorRoadOpacity(fullOpacity),
+      );
+      map.setPaintProperty(id, 'line-opacity-transition', INSTANT_OPACITY_TRANSITION);
     }
   };
 
@@ -337,6 +390,19 @@ export function createRoadPolygonController(
     }
     if (map.getLayer(VECTOR_CENTER_MARKINGS_LAYER_ID)) {
       map.setLayoutProperty(VECTOR_CENTER_MARKINGS_LAYER_ID, 'visibility', visible ? 'none' : 'visible');
+    }
+  };
+
+  const applyCoverage = (nextCovering: boolean) => {
+    if (nextCovering) {
+      // Show polygons first so zoom-driven line fade-out cannot blank the road.
+      setReplacementVisible(true);
+      setCoveredVectorOpacity(true);
+    } else {
+      // Restore vector strokes before hiding polygons so zoom-out stays covered.
+      setCoveredVectorOpacity(false);
+      restoreVectorRoadFilter();
+      setReplacementVisible(false);
     }
   };
 
@@ -384,8 +450,7 @@ export function createRoadPolygonController(
     const nextCovering = centerReady && completed.length > 0;
     if (nextCovering !== covering) {
       covering = nextCovering;
-      setVectorRoadFilter(covering);
-      setReplacementVisible(covering);
+      applyCoverage(covering);
       refreshMapRenderState(map);
     }
   };
@@ -502,8 +567,7 @@ export function createRoadPolygonController(
     lastPublished = '';
     lastFallback = '';
     lastCenterlines = '';
-    setVectorRoadFilter(false);
-    setReplacementVisible(false);
+    applyCoverage(false);
     (map.getSource(ROAD_POLYGON_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
     (map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
     (map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
@@ -542,6 +606,10 @@ export function createRoadPolygonController(
 
   return {
     update,
+    syncZoom: () => {
+      if (disposed || (!active && !covering)) return;
+      if (!shouldActivateRoadPolygons(map.getZoom(), active)) teardown();
+    },
     invalidateSource: () => {
       cache.clear();
       inFlight.clear();

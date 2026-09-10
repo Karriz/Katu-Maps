@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createExpression } from '@maplibre/maplibre-gl-style-spec';
 import { buildRoadCellPolygons } from './RoadPolygonGeometry';
 import {
   ROAD_POLYGON_CENTERLINE_LAYER_ID,
@@ -6,8 +7,12 @@ import {
   ROAD_POLYGON_EXIT_ZOOM,
   ROAD_POLYGON_FALLBACK_LAYER_ID,
   ROAD_POLYGON_LAYER_ID,
+  coveredVectorRoadOpacity,
   createRoadPolygonController,
+  roadPolygonCenterlineOpacity,
+  roadPolygonFadeOpacity,
   shouldActivateRoadPolygons,
+  uncoveredVectorRoadOpacity,
   type RoadPolygonJob,
 } from './RoadPolygonLayer';
 
@@ -76,6 +81,16 @@ function createMap(options?: {
   return { map, layers, sources, setData, setZoom: (value: number) => { zoom = value; } };
 }
 
+function evaluateOpacity(
+  expression: ReturnType<typeof roadPolygonFadeOpacity>,
+  zoom: number,
+  properties: Record<string, unknown> = {},
+) {
+  const compiled = createExpression(expression, 'road-polygon-opacity');
+  if (compiled.result !== 'success') throw new Error('Invalid opacity expression');
+  return compiled.value.evaluate({ zoom }, { properties } as never) as number;
+}
+
 describe('road polygon layer', () => {
   it('uses hysteresis so close zooms stay active until the exit zoom', () => {
     expect(shouldActivateRoadPolygons(15.2, false)).toBe(true);
@@ -85,7 +100,26 @@ describe('road polygon layer', () => {
     expect(ROAD_POLYGON_ENTER_ZOOM).toBeGreaterThan(ROAD_POLYGON_EXIT_ZOOM);
   });
 
-  it('switches vector road filters only after the camera cell is replaced', () => {
+  it('crossfades polygon fills and replaced vector roads across the hysteresis band', () => {
+    expect(evaluateOpacity(roadPolygonFadeOpacity(1), ROAD_POLYGON_EXIT_ZOOM)).toBe(0);
+    expect(evaluateOpacity(roadPolygonFadeOpacity(1), ROAD_POLYGON_ENTER_ZOOM)).toBe(1);
+    expect(evaluateOpacity(roadPolygonFadeOpacity(1), 16)).toBe(1);
+    const midZoom = (ROAD_POLYGON_EXIT_ZOOM + ROAD_POLYGON_ENTER_ZOOM) / 2;
+    expect(evaluateOpacity(roadPolygonFadeOpacity(1), midZoom)).toBeCloseTo(0.5, 5);
+
+    const primary = { class: 'primary' };
+    const service = { class: 'service' };
+    expect(evaluateOpacity(coveredVectorRoadOpacity(0.98), 16, primary)).toBe(0);
+    expect(evaluateOpacity(coveredVectorRoadOpacity(0.98), ROAD_POLYGON_ENTER_ZOOM, primary)).toBe(0);
+    expect(evaluateOpacity(coveredVectorRoadOpacity(0.98), ROAD_POLYGON_EXIT_ZOOM, primary)).toBe(0.98);
+    expect(evaluateOpacity(coveredVectorRoadOpacity(0.98), midZoom, primary)).toBeCloseTo(0.49, 5);
+    expect(evaluateOpacity(coveredVectorRoadOpacity(0.98), 16, service)).toBe(0.98);
+    expect(evaluateOpacity(uncoveredVectorRoadOpacity(0.98), 16, primary)).toBe(0.98);
+    expect(evaluateOpacity(roadPolygonCenterlineOpacity(), ROAD_POLYGON_EXIT_ZOOM)).toBe(0);
+    expect(evaluateOpacity(roadPolygonCenterlineOpacity(), 16)).toBeGreaterThan(0.6);
+  });
+
+  it('fades vector roads with zoom after the camera cell is replaced', () => {
     const jobs: RoadPolygonJob[] = [];
     const { map, layers } = createMap();
     const controller = createRoadPolygonController(map as never, {
@@ -93,18 +127,21 @@ describe('road polygon layer', () => {
     });
     controller.update();
     expect(map.setFilter).not.toHaveBeenCalled();
+    expect(layers.get('global-roads')?.paint['line-opacity']).toBeUndefined();
     const centerJob = jobs[0];
     expect(centerJob).toBeTruthy();
     centerJob.complete(buildRoadCellPolygons(centerJob.cell, centerJob.lines));
-    expect(map.setFilter).toHaveBeenCalledWith('global-roads', expect.arrayContaining([
-      ['==', ['get', 'class'], 'service'],
-    ]));
+    expect(map.setFilter).not.toHaveBeenCalled();
+    expect(layers.get('global-roads')?.paint['line-opacity']).toEqual(coveredVectorRoadOpacity(0.98));
+    expect(layers.get('global-road-casing')?.paint['line-opacity']).toEqual(coveredVectorRoadOpacity(0.78));
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
+    expect(layers.get(ROAD_POLYGON_LAYER_ID)?.paint['fill-opacity']).toEqual(roadPolygonFadeOpacity(1));
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.layout['fill-sort-key']).toBeDefined();
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.paint['fill-sort-key']).toBeUndefined();
     expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout.visibility).toBe('visible');
     expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout['line-sort-key']).toBeDefined();
     expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.paint['line-dasharray']).toEqual([3, 4]);
+    expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.paint['line-opacity']).toEqual(roadPolygonCenterlineOpacity());
     expect(layers.get('global-road-center-markings')?.layout.visibility).toBe('none');
     expect((map.getSource('road-polygons') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
     expect((map.getSource('road-polygon-centerlines') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
@@ -113,7 +150,7 @@ describe('road polygon layer', () => {
 
   it('discards stale asynchronous cell results after a source invalidation', () => {
     const jobs: RoadPolygonJob[] = [];
-    const { map, setData } = createMap();
+    const { map, layers, setData } = createMap();
     const controller = createRoadPolygonController(map as never, {
       schedule: (job) => jobs.push(job),
     });
@@ -124,27 +161,29 @@ describe('road polygon layer', () => {
     controller.update();
     const freshJobs = jobs.slice(firstWave);
     stale.complete(buildRoadCellPolygons(stale.cell, stale.lines));
-    expect(map.setFilter).not.toHaveBeenCalled();
+    expect(layers.get('global-roads')?.paint['line-opacity']).toBeUndefined();
     const callsAfterStale = setData.mock.calls.length;
     for (const job of freshJobs) {
       job.complete(buildRoadCellPolygons(job.cell, job.lines));
     }
-    expect(map.setFilter).toHaveBeenCalled();
+    expect(layers.get('global-roads')?.paint['line-opacity']).toEqual(coveredVectorRoadOpacity(0.98));
     expect(setData.mock.calls.length).toBeGreaterThan(callsAfterStale);
     const published = setData.mock.calls.filter((call) => call[0] === 'road-polygons').at(-1)?.[1] as { features: unknown[] };
     expect(published.features.length).toBeGreaterThan(0);
     controller.dispose();
   });
 
-  it('restores original road filters when zooming back out', () => {
+  it('restores original road opacity when zooming back out', () => {
     const { map, setZoom } = createMap();
     const controller = createRoadPolygonController(map as never, {
       schedule: (job) => job.complete(buildRoadCellPolygons(job.cell, job.lines)),
     });
     controller.update();
-    expect(map.setFilter).toHaveBeenCalled();
+    expect(map.getLayer('global-roads')?.paint['line-opacity']).toEqual(coveredVectorRoadOpacity(0.98));
     setZoom(13);
     controller.update();
+    expect(map.getLayer('global-roads')?.paint['line-opacity']).toEqual(uncoveredVectorRoadOpacity(0.98));
+    expect(map.getLayer('global-road-casing')?.paint['line-opacity']).toEqual(uncoveredVectorRoadOpacity(0.78));
     expect(map.setFilter).toHaveBeenLastCalledWith('global-roads', expect.arrayContaining([
       ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service']]],
     ]));
@@ -152,6 +191,23 @@ describe('road polygon layer', () => {
     expect(map.getLayer(ROAD_POLYGON_FALLBACK_LAYER_ID)?.layout.visibility).toBe('none');
     expect(map.getLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout.visibility).toBe('none');
     expect(map.getLayer('global-road-center-markings')?.layout.visibility).toBe('visible');
+    controller.dispose();
+  });
+
+  it('tears down on zoom events as soon as the camera leaves the exit zoom', () => {
+    const { map, setZoom } = createMap();
+    const controller = createRoadPolygonController(map as never, {
+      schedule: (job) => job.complete(buildRoadCellPolygons(job.cell, job.lines)),
+    });
+    controller.update();
+    expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
+    setZoom(ROAD_POLYGON_EXIT_ZOOM);
+    controller.syncZoom();
+    expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
+    setZoom(ROAD_POLYGON_EXIT_ZOOM - 0.01);
+    controller.syncZoom();
+    expect(map.getLayer('global-roads')?.paint['line-opacity']).toEqual(uncoveredVectorRoadOpacity(0.98));
+    expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('none');
     controller.dispose();
   });
 
