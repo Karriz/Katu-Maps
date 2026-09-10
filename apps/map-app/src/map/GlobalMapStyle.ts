@@ -727,6 +727,17 @@ export function pathWidthExpression(
   ] as ExpressionSpecification;
 }
 
+/** Hairline dashes for draped polygon roads; floor keeps them readable at z16. */
+export function roadCenterlineWidthExpression(latitude: number): ExpressionSpecification {
+  return [
+    'interpolate', ['exponential', 2], ['zoom'],
+    15, ['max', 1.4, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(15, latitude)]],
+    16, ['max', 1.4, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(16, latitude)]],
+    18, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(18, latitude)],
+    22, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(22, latitude)],
+  ] as ExpressionSpecification;
+}
+
 /** Refresh every line whose pixel width represents a physical ground width. */
 export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
   const setWidth = (id: string, expression: ExpressionSpecification) => {
@@ -737,7 +748,7 @@ export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
   ['global-aeroway-lines', 'global-aeroway-runways']
     .forEach((id) => setWidth(id, aerowayWidthExpression(latitude)));
   setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude));
-  setWidth('global-road-polygon-centerlines', pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude));
+  setWidth('global-road-polygon-centerlines', roadCenterlineWidthExpression(latitude));
 
   const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [
     ['global-path-bridge-shadow', BRIDGE_PATH_WIDTH_METRES, true],

@@ -19,8 +19,8 @@ import type {
 import type { FeatureCollection } from 'geojson';
 import {
   OPENFREEMAP_SOURCE_ID,
-  pathWidthExpression,
   refreshMapRenderState,
+  roadCenterlineWidthExpression,
   roadWidthExpression,
 } from './GlobalMapStyle';
 import {
@@ -38,7 +38,6 @@ import {
   type RoadWorkCell,
 } from './RoadPolygonGeometry';
 import {
-  ROAD_CENTERLINE_WIDTH_METRES,
   ROAD_POLYGON_CLASSES,
   ROAD_WIDTH_MODEL_REVISION,
 } from './RoadWidth';
@@ -307,13 +306,13 @@ export function createRoadPolygonController(
         },
         paint: {
           'line-color': '#ffffff',
-          'line-width': pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, map.getCenter().lat),
+          'line-width': roadCenterlineWidthExpression(map.getCenter().lat),
           'line-dasharray': [3, 4],
           'line-opacity': [
             'interpolate', ['linear'], ['zoom'],
-            15, 0,
-            15.8, 0.6,
-            18, 0.82,
+            15, 0.45,
+            16, 0.72,
+            18, 0.9,
           ],
         },
       }, before);
@@ -413,7 +412,7 @@ export function createRoadPolygonController(
       map.setPaintProperty(
         ROAD_POLYGON_CENTERLINE_LAYER_ID,
         'line-width',
-        pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude),
+        roadCenterlineWidthExpression(latitude),
       );
     }
   };
