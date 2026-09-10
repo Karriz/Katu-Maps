@@ -708,7 +708,7 @@ export function roadWidthExpression(
     ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1]
     : ESTIMATED_ROAD_WIDTH_METRES;
 
-  const stops: ExpressionSpecification = [
+  const stops: Array<number | ExpressionSpecification> = [
     6, ['max', casing ? 0.65 : 0.4, ['*', widthMetres, pixelsPerMetre(6, latitude)]],
     10, ['max', casing ? 0.8 : 0.5, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
     12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
@@ -737,7 +737,7 @@ export function aerowayWidthExpression(
     6,
   ] as ExpressionSpecification;
 
-  const stops: ExpressionSpecification = [
+  const stops: Array<number | ExpressionSpecification> = [
     10, ['max', 1, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
     12, ['max', 1.5, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
