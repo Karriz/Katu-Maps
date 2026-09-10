@@ -10,6 +10,7 @@ import { Camera } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
+import { overlayIconCollisionLayout, overlayIconLabelLayout } from './overlaySymbolLayout';
 import {
   fetchTrafficCameraStations,
   type TrafficCameraSelection,
@@ -154,12 +155,11 @@ export class TrafficCamerasLayer {
       type: 'symbol',
       source: SOURCE_ID,
       minzoom: 7,
+      maxzoom: 10,
       layout: {
         'icon-image': ICON_ID,
         'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.15, 14, 1.45, 18, 1.7],
-        'icon-padding': 8,
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
+        ...overlayIconCollisionLayout(),
       },
     };
     const selectedIcon: SymbolLayerSpecification = {
@@ -180,6 +180,9 @@ export class TrafficCamerasLayer {
       source: SOURCE_ID,
       minzoom: 10,
       layout: {
+        'icon-image': ICON_ID,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.15, 14, 1.45, 18, 1.7],
+        ...overlayIconCollisionLayout(),
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Regular', 'Open Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 16, 12],
@@ -187,7 +190,7 @@ export class TrafficCamerasLayer {
         'text-anchor': 'top',
         'text-padding': 6,
         'text-max-width': 12,
-        'text-optional': true,
+        ...overlayIconLabelLayout(),
       },
       paint: {
         'text-color': '#385d5d',

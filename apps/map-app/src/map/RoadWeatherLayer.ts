@@ -11,6 +11,7 @@ import { Thermometer } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
+import { overlayIconCollisionLayout, overlayIconLabelLayout } from './overlaySymbolLayout';
 import {
   fetchRoadWeatherStations,
   formatTemperature,
@@ -183,12 +184,11 @@ export class RoadWeatherLayer {
       type: 'symbol',
       source: SOURCE_ID,
       minzoom: 7,
+      maxzoom: 8,
       layout: {
         'icon-image': ['get', 'icon'],
         'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.15, 14, 1.45, 18, 1.7],
-        'icon-padding': 8,
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
+        ...overlayIconCollisionLayout(),
       },
     };
     const selectedIcon: SymbolLayerSpecification = {
@@ -209,6 +209,9 @@ export class RoadWeatherLayer {
       source: SOURCE_ID,
       minzoom: 8,
       layout: {
+        'icon-image': ['get', 'icon'],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.15, 14, 1.45, 18, 1.7],
+        ...overlayIconCollisionLayout(),
         'text-field': ['get', 'temperatureLabel'],
         'text-font': ['Noto Sans Regular', 'Open Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 9, 10, 16, 12],
@@ -216,7 +219,7 @@ export class RoadWeatherLayer {
         'text-anchor': 'top',
         'text-padding': 6,
         'text-max-width': 12,
-        'text-optional': true,
+        ...overlayIconLabelLayout(),
       },
       paint: {
         'text-color': '#385d5d',

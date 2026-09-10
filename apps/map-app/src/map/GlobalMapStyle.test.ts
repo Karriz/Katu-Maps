@@ -8,6 +8,7 @@ import {
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
+  GLOBAL_BASE_LABEL_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
   pastelBuildingColor,
   updateBridgeFallback,
@@ -434,5 +435,8 @@ describe('global map overlay styles', () => {
     expect(layersById.get('global-locality-labels')?.minzoom).toBe(11);
     expect(filterOf('global-place-labels')).toContain('city');
     expect(filterOf('global-place-labels')).not.toContain('village');
+    for (const layerId of GLOBAL_BASE_LABEL_LAYER_IDS) {
+      expect(layersById.has(layerId), layerId).toBe(true);
+    }
   });
 });

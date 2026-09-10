@@ -13,6 +13,7 @@ import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
+import { overlayIconCollisionLayout, overlayIconLabelLayout } from './overlaySymbolLayout';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 
@@ -489,6 +490,27 @@ export const GLOBAL_TRANSIT_LINE_LAYER_IDS = [
   'global-local-transit-casing',
   'global-local-transit-lines',
   'global-local-transit-route-colors',
+  'global-transit-line-labels',
+];
+
+export const GLOBAL_BASE_LABEL_LAYER_IDS = [
+  'global-cycleway-labels',
+  'global-road-labels',
+  'global-road-labels-regional',
+  'global-major-protected-area-labels',
+  'global-water-labels',
+  'global-park-labels',
+  'global-country-labels',
+  'global-place-labels',
+  'global-state-labels',
+  'global-town-labels',
+  'global-locality-labels',
+  'global-housenumbers',
+];
+
+export const GLOBAL_FEATURE_LABEL_LAYER_IDS = [
+  'global-cycling-route-labels',
+  'global-hiking-route-labels',
   'global-transit-line-labels',
 ];
 
@@ -2425,7 +2447,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'poi',
       minzoom: 10,
-      maxzoom: 13.5,
+      maxzoom: 14,
       filter: [
         'any',
         ['in', ['get', 'class'], ['literal', [...HIKING_POI_CLASSES]]],
@@ -2462,15 +2484,15 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
             'location-shelter-icon',
           ],
         ],
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.9, 13.5, 1.18],
-        'icon-padding': 8,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.9, 14, 1.18],
+        ...overlayIconCollisionLayout(),
         'text-field': LOCALIZED_NAME,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 9.5, 13.5, 11],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 9.5, 14, 11],
         'text-font': ['Noto Sans Regular'],
         'text-offset': [0, 1.25],
         'text-anchor': 'top',
         'text-padding': 10,
-        'text-optional': true,
+        ...overlayIconLabelLayout(),
       },
       paint: {
         'text-color': '#6f563b',

@@ -15,6 +15,7 @@ import {
   Home,
   Code2,
   Layers3,
+  MapPin,
   Route,
   Mountain,
   Minus,
@@ -22,6 +23,7 @@ import {
   Search,
   Star,
   Thermometer,
+  Type,
   TrainFront,
   TrainTrack,
   Trees,
@@ -58,7 +60,9 @@ export type MapLayerKey =
   | 'roadTraffic'
   | 'weather'
   | 'clouds'
-  | 'dayNight';
+  | 'dayNight'
+  | 'locationIcons'
+  | 'labels';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
 
@@ -93,6 +97,8 @@ export function defaultMapLayerState(mobileDefault2d: boolean): MapLayerState {
     weather: false,
     clouds: true,
     dayNight: false,
+    locationIcons: true,
+    labels: true,
   };
 }
 
@@ -135,6 +141,8 @@ const layerGroups: LayerGroup[] = [
       { key: 'terrain', label: 'Terrain', description: 'Land & elevation', icon: Mountain },
       { key: 'buildings', label: '3D buildings', description: 'Flat footprints when off', icon: Building2 },
       { key: 'bridges', label: '3D bridges', description: 'Draped roads when off', icon: Waypoints },
+      { key: 'locationIcons', label: 'Location icons', description: 'Places, amenities & favourites', icon: MapPin },
+      { key: 'labels', label: 'Map labels', description: 'Place names, roads & numbers', icon: Type },
     ],
   },
   {

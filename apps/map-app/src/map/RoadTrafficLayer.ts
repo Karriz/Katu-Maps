@@ -12,6 +12,7 @@ import { CarFront, Construction, TriangleAlert, type LucideIcon } from 'lucide-r
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MAP_COLORS } from './MapPalette';
+import { overlayIconCollisionLayout } from './overlaySymbolLayout';
 import {
   fetchRoadTrafficStations,
   stationCongestion,
@@ -269,9 +270,7 @@ export class RoadTrafficLayer {
       layout: {
         'icon-image': ['get', 'icon'],
         'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 1.15, 14, 1.45, 18, 1.7],
-        'icon-padding': 8,
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
+        ...overlayIconCollisionLayout(),
       },
     };
     const selectedIcon: SymbolLayerSpecification = {
@@ -348,9 +347,7 @@ export class RoadTrafficLayer {
       layout: {
         'icon-image': ['get', 'icon'],
         'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 1.12, 14, 1.4, 18, 1.6],
-        'icon-padding': 8,
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
+        ...overlayIconCollisionLayout(),
       },
     };
     const messageSelectedLine: LineLayerSpecification = {

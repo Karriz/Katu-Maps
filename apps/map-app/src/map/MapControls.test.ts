@@ -7,6 +7,8 @@ describe('map layer 3D mode', () => {
     expect(layers.buildingColors).toBe(true);
     expect(layers.proceduralBuildingDetails).toBe(true);
     expect(is3dModeEnabled(layers)).toBe(true);
+    expect(layers.locationIcons).toBe(true);
+    expect(layers.labels).toBe(true);
   });
 
   it('disables building colors and procedural details by default on mobile', () => {

@@ -32,6 +32,7 @@ import {
   type ObservedPositionTransition,
 } from './transit/vehiclePosition';
 import { serviceConfig } from './ServiceConfig';
+import { overlayIconCollisionLayout, overlayIconLabelLayout } from './overlaySymbolLayout';
 
 const TRANSIT_SOURCE_ID = 'transit-stops';
 const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
@@ -554,6 +555,7 @@ export class TransitStopsLayer {
     const iconLayer = (
       id: string,
       minzoom: number,
+      maxzoom: number,
       iconImage: string,
       modes: string[],
     ): SymbolLayerSpecification => ({
@@ -561,23 +563,23 @@ export class TransitStopsLayer {
       type: 'symbol',
       source: TRANSIT_SOURCE_ID,
       minzoom,
+      maxzoom,
       filter: ['in', ['get', 'mode'], ['literal', modes]],
       layout: {
         'icon-image': iconImage,
         'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.32, 14, 1.58, 18, 1.82],
-        'icon-padding': 9,
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
+        ...overlayIconCollisionLayout(),
+        'symbol-sort-key': ['-', ['coalesce', ['get', 'importance'], 0]],
       },
     });
     const icons = [
       // Rail stops carry the city-scale network, so they appear first.
-      iconLayer('transit-train-stop-icons', 10, TRANSIT_ICON_IDS.train, [
+      iconLayer('transit-train-stop-icons', 10, 11, TRANSIT_ICON_IDS.train, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
       ]),
-      iconLayer('transit-metro-stop-icons', 10, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
-      iconLayer('transit-tram-stop-icons', 12, TRANSIT_ICON_IDS.tram, ['TRAM']),
-      iconLayer('transit-bus-stop-icons', 14, TRANSIT_ICON_IDS.bus, ['BUS']),
+      iconLayer('transit-metro-stop-icons', 10, 12, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
+      iconLayer('transit-tram-stop-icons', 12, 14, TRANSIT_ICON_IDS.tram, ['TRAM']),
+      iconLayer('transit-bus-stop-icons', 14, 16, TRANSIT_ICON_IDS.bus, ['BUS']),
     ];
     const hitLayer = (
       id: string,
@@ -607,6 +609,7 @@ export class TransitStopsLayer {
     const labelLayer = (
       id: string,
       minzoom: number,
+      iconImage: string,
       modes: string[],
     ): SymbolLayerSpecification => ({
       id,
@@ -615,6 +618,9 @@ export class TransitStopsLayer {
       minzoom,
       filter: ['in', ['get', 'mode'], ['literal', modes]],
       layout: {
+        'icon-image': iconImage,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.32, 14, 1.58, 18, 1.82],
+        ...overlayIconCollisionLayout(),
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Regular', 'Open Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], minzoom, 10, 18, 12],
@@ -622,6 +628,8 @@ export class TransitStopsLayer {
         'text-anchor': 'top',
         'text-padding': 8,
         'text-max-width': 12,
+        ...overlayIconLabelLayout(),
+        'symbol-sort-key': ['-', ['coalesce', ['get', 'importance'], 0]],
       },
       paint: {
         'text-color': '#385d5d',
@@ -630,12 +638,12 @@ export class TransitStopsLayer {
       },
     });
     const labels = [
-      labelLayer('transit-train-stop-labels', 11, [
+      labelLayer('transit-train-stop-labels', 11, TRANSIT_ICON_IDS.train, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
       ]),
-      labelLayer('transit-metro-stop-labels', 12, ['SUBWAY']),
-      labelLayer('transit-tram-stop-labels', 14, ['TRAM']),
-      labelLayer('transit-bus-stop-labels', 16, ['BUS']),
+      labelLayer('transit-metro-stop-labels', 12, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
+      labelLayer('transit-tram-stop-labels', 14, TRANSIT_ICON_IDS.tram, ['TRAM']),
+      labelLayer('transit-bus-stop-labels', 16, TRANSIT_ICON_IDS.bus, ['BUS']),
     ];
     // Keep transit symbols below the app's close-zoom POI labels when the
     // style provides that anchor, otherwise let MapLibre append them.

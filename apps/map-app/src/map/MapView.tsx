@@ -160,6 +160,7 @@ import {
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
+import { overlayIconCollisionLayout, overlayIconLabelLayout } from './overlaySymbolLayout';
 import {
   patternImageExpression,
   groundPatternLayers,
@@ -606,13 +607,11 @@ function locationPoiLayers() {
     layers: [
       {
         id: 'location-poi-icons', type: 'symbol' as const, source, 'source-layer': sourceLayer,
-        minzoom: 13.5, maxzoom: 15.5, filter: locationPoiFilter(),
+        minzoom: 14, maxzoom: 15.5, filter: locationPoiFilter(),
         layout: {
           'icon-image': iconImage as unknown as ExpressionSpecification,
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 1.3, 15.5, 1.48, 18, 1.62] as ExpressionSpecification,
-          'icon-padding': 8,
-          'icon-allow-overlap': false,
-          'icon-ignore-placement': false,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 1.3, 15.5, 1.48, 18, 1.62] as ExpressionSpecification,
+          ...overlayIconCollisionLayout(),
           'symbol-sort-key': locationPriorityExpression(),
         },
       },
@@ -622,20 +621,14 @@ function locationPoiLayers() {
         layout: {
           'icon-image': iconImage as unknown as ExpressionSpecification,
           'icon-size': ['interpolate', ['linear'], ['zoom'], 15.5, 1.2, 18, 1.5] as ExpressionSpecification,
-          'icon-padding': 5,
-          'icon-allow-overlap': false,
-          'icon-ignore-placement': false,
+          ...overlayIconCollisionLayout(),
           'text-field': ['get', 'name'] as ExpressionSpecification,
           'text-font': ['Noto Sans Regular'],
           'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 10, 18, 13] as ExpressionSpecification,
           'text-offset': [0, 1.35] as [number, number],
           'text-anchor': 'top' as const,
-          'text-padding': 7,
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
-          // Icons remain useful when a label cannot fit; priority places the
-          // most useful destinations before ordinary retail points.
-          'text-optional': true,
+          'text-padding': 10,
+          ...overlayIconLabelLayout(),
           'symbol-sort-key': locationPriorityExpression(),
         },
         paint: {

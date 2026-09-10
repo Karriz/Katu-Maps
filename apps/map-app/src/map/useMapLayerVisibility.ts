@@ -8,13 +8,19 @@ import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { RouteLineDeckLayer } from './RouteLineDeckLayer';
 import type { MapLayerState } from './MapControls';
-import { applyMapTheme, buildingColorPaint } from './GlobalMapStyle';
+import { applyMapTheme, buildingColorPaint, GLOBAL_BASE_LABEL_LAYER_IDS, GLOBAL_FEATURE_LABEL_LAYER_IDS } from './GlobalMapStyle';
 import { syncTerrain3d } from './MapTerrain';
 import { TRAFFIC_CAMERA_LAYER_IDS } from './TrafficCamerasLayer';
 import { CHARGING_STATION_LAYER_IDS } from './ChargingStationsLayer';
 import { ROAD_WEATHER_LAYER_IDS } from './RoadWeatherLayer';
 import { ROAD_TRAFFIC_LAYER_IDS } from './RoadTrafficLayer';
 import { applyGroundPatternTheme } from './GroundPatterns';
+import {
+  COMBINED_SYMBOL_TEXT_LAYER_IDS,
+  RUNTIME_LABEL_LAYER_IDS,
+  setLayerTextVisible,
+  syncIconLabelZoomBands,
+} from './overlaySymbolLayout';
 
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
@@ -118,8 +124,17 @@ export function useMapLayerVisibility({
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees);
     setVisibility(cyclingLayerIds, layerToggles.cycling);
     setVisibility(hikingLayerIds, layerToggles.hiking);
+    setVisibility(['location-poi-icons', 'favorite-icons'], layerToggles.locationIcons);
+    setVisibility(['location-poi-labels'], layerToggles.locationIcons && layerToggles.labels);
+    if (!layerToggles.locationIcons) setVisibility(['global-hiking-pois'], false);
     transitRouteOverlayRef.current?.setVisibility(layerToggles.transitLines);
     if (layerToggles.transitLines) void transitRouteOverlayRef.current?.update(map.getBounds(), map.getZoom());
+    setVisibility(GLOBAL_BASE_LABEL_LAYER_IDS, layerToggles.labels);
+    if (!layerToggles.labels) {
+      setVisibility([...GLOBAL_FEATURE_LABEL_LAYER_IDS, ...RUNTIME_LABEL_LAYER_IDS], false);
+    }
+    setLayerTextVisible(map, COMBINED_SYMBOL_TEXT_LAYER_IDS, layerToggles.labels);
+    syncIconLabelZoomBands(map, layerToggles.labels);
     // 3D deck layers draw bridge-crossing segments on top of bridge decks.
     // Native 2D lines stay visible everywhere else (no hiding needed).
     const deckActive = layerToggles.terrain && layerToggles.bridges;
@@ -139,6 +154,7 @@ export function useMapLayerVisibility({
     layerToggles.trees, layerToggles.cycling, layerToggles.hiking, layerToggles.transit,
     layerToggles.transitLines, layerToggles.transitModels, layerToggles.trafficCameras,
     layerToggles.chargingStations, layerToggles.roadWeather, layerToggles.roadTraffic,
+    layerToggles.locationIcons, layerToggles.labels,
     building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId,
     cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled,
     onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled,
