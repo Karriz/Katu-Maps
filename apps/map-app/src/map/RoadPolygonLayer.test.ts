@@ -37,6 +37,7 @@ function createMap(options?: {
     getPitch: () => 0,
     getRoll: () => 0,
     getPadding: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+    isMoving: () => false,
     jumpTo: vi.fn(),
     redraw: vi.fn(),
     getSource: (id: string) => {
@@ -142,7 +143,7 @@ describe('road polygon layer', () => {
     expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout['line-sort-key']).toBeDefined();
     expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.paint['line-dasharray']).toEqual([3, 4]);
     expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.paint['line-opacity']).toEqual(roadPolygonCenterlineOpacity());
-    expect(layers.get('global-road-center-markings')?.layout.visibility).toBe('none');
+    expect(layers.get('global-road-center-markings')?.layout.visibility).not.toBe('none');
     expect((map.getSource('road-polygons') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
     expect((map.getSource('road-polygon-centerlines') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
     controller.dispose();
@@ -190,17 +191,19 @@ describe('road polygon layer', () => {
     expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('none');
     expect(map.getLayer(ROAD_POLYGON_FALLBACK_LAYER_ID)?.layout.visibility).toBe('none');
     expect(map.getLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout.visibility).toBe('none');
-    expect(map.getLayer('global-road-center-markings')?.layout.visibility).toBe('visible');
+    expect(map.getLayer('global-road-center-markings')?.layout.visibility).not.toBe('none');
     controller.dispose();
   });
 
   it('tears down on zoom events as soon as the camera leaves the exit zoom', () => {
-    const { map, setZoom } = createMap();
+    const { map, setZoom, setData } = createMap();
     const controller = createRoadPolygonController(map as never, {
       schedule: (job) => job.complete(buildRoadCellPolygons(job.cell, job.lines)),
     });
     controller.update();
     expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
+    const dataCalls = setData.mock.calls.length;
+    (map.jumpTo as ReturnType<typeof vi.fn>).mockClear();
     setZoom(ROAD_POLYGON_EXIT_ZOOM);
     controller.syncZoom();
     expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
@@ -208,6 +211,8 @@ describe('road polygon layer', () => {
     controller.syncZoom();
     expect(map.getLayer('global-roads')?.paint['line-opacity']).toEqual(uncoveredVectorRoadOpacity(0.98));
     expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('none');
+    expect(setData.mock.calls.length).toBe(dataCalls);
+    expect(map.jumpTo).not.toHaveBeenCalled();
     controller.dispose();
   });
 

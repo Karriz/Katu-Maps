@@ -3,7 +3,7 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 export const ROAD_CASING_METRES = 1;
 /** Keep leftover vector strokes slightly inside metre-accurate polygons. */
 export const ROAD_LINE_UNDER_POLYGON_SCALE = 0.88;
-export const ROAD_WIDTH_MODEL_REVISION = 2;
+export const ROAD_WIDTH_MODEL_REVISION = 3;
 /** Dashed markings only where a carriageway is wide enough to hold them. */
 export const ROAD_CENTERLINE_MIN_WIDTH_METRES = 8;
 export const ROAD_CENTERLINE_WIDTH_METRES = 0.2;

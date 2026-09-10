@@ -13,7 +13,12 @@ export const ROAD_CELL_PADDING_METRES = 36;
 export const ROAD_POLYGON_SEAM_METRES = 0.6;
 export const ROAD_DENSIFY_METRES = 12;
 export const ROAD_SIMPLIFY_METRES = 0.85;
-const ROUND_CAP_SEGMENTS = 5;
+/** Sample curved carriageways often enough that roundabouts stay circular. */
+export const ROAD_CURVE_STEP_RADIANS = Math.PI / 12;
+const MIN_CURVE_RADIUS_METRES = 8;
+const MAX_CURVE_RADIUS_METRES = 80;
+const CLOSED_LOOP_GAP_METRES = 1.6;
+const ROUND_JOIN_STEP_RADIANS = Math.PI / 10;
 const MITER_LIMIT = 2.8;
 const STITCH_METRES = 2.4;
 const MIN_POLYGON_AREA_METRES = 2;
@@ -164,14 +169,23 @@ export function lineSignature(coordinates: Array<[number, number]>) {
 
 export function collectRoadCenterlines(
   features: Array<{ geometry?: { type?: string; coordinates?: unknown } | null; properties?: Record<string, unknown> | null }>,
+  range?: { longitude: number; latitude: number; metres: number },
 ): RoadCenterline[] {
   const unique = new Map<string, RoadCenterline>();
+  const origin = range ? planOriginFromLngLat(range.longitude, range.latitude) : undefined;
+  const rect = range ? {
+    minEast: -range.metres,
+    maxEast: range.metres,
+    minNorth: -range.metres,
+    maxNorth: range.metres,
+  } : undefined;
   for (const feature of features) {
     const properties = propertiesFromFeature(feature.properties);
     if (!isRoadPolygonClass(properties.className)) continue;
     if (properties.brunnel === 'bridge' || properties.brunnel === 'tunnel') continue;
     for (const coordinates of linePartsFromGeometry(feature.geometry)) {
       if (coordinates.length < 2) continue;
+      if (origin && rect && !lineIntersectsRect(coordinates, origin, rect)) continue;
       const identity = `${properties.className}:${properties.layer}:${properties.ramp ? 1 : 0}:${properties.service ?? ''}:${properties.surface ?? ''}`;
       const forward = identity + lineSignature(coordinates);
       const reverse = identity + lineSignature(coordinates.slice().reverse());
@@ -296,6 +310,12 @@ export function lineIntersectsRect(coordinates: Array<[number, number]>, origin:
 
 export function simplifyPlanLine(points: PlanPoint[], tolerance: number) {
   if (points.length <= 2) return points.slice();
+  if (isClosedPlanLine(points)) {
+    const body = closedRingBody(points);
+    const simplified = body.length <= 2 ? body.slice() : douglasPeucker(body, tolerance);
+    if (simplified.length < 3) return points.slice();
+    return [...simplified, { ...simplified[0] }];
+  }
   return douglasPeucker(points, tolerance);
 }
 
@@ -326,10 +346,22 @@ function pointLineDistance(point: PlanPoint, start: PlanPoint, end: PlanPoint) {
 
 export function densifyPlanLine(points: PlanPoint[], spacingMetres: number) {
   if (points.length < 2) return points.slice();
-  const densified: PlanPoint[] = [points[0]];
-  for (let index = 1; index < points.length; index += 1) {
-    const start = points[index - 1];
-    const end = points[index];
+  const closed = isClosedPlanLine(points);
+  const body = closedRingBody(points);
+  const densified: PlanPoint[] = [];
+  const segmentCount = closed ? body.length : body.length - 1;
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = body[index];
+    const end = body[(index + 1) % body.length];
+    if (densified.length === 0) densified.push(start);
+    const prev = body[(index - 1 + body.length) % body.length];
+    const next = body[(index + 2) % body.length];
+    const canCurve = closed || (index > 0 && index < body.length - 2);
+    const arc = canCurve ? curveSegment(prev, start, end, next) : null;
+    if (arc && arc.length > 2) {
+      densified.push(...arc.slice(1));
+      continue;
+    }
     const length = Math.hypot(end.east - start.east, end.north - start.north);
     const steps = Math.max(1, Math.ceil(length / spacingMetres));
     for (let step = 1; step <= steps; step += 1) {
@@ -340,7 +372,85 @@ export function densifyPlanLine(points: PlanPoint[], spacingMetres: number) {
       });
     }
   }
+  if (closed && densified.length > 0) densified.push({ ...densified[0] });
   return densified;
+}
+
+export function isClosedPlanLine(points: PlanPoint[]) {
+  if (points.length < 4) return false;
+  const first = points[0];
+  const last = points[points.length - 1];
+  return Math.hypot(first.east - last.east, first.north - last.north) <= CLOSED_LOOP_GAP_METRES;
+}
+
+function closedRingBody(points: PlanPoint[]) {
+  if (!isClosedPlanLine(points)) return points;
+  return points.slice(0, -1);
+}
+
+function curveSegment(prev: PlanPoint, start: PlanPoint, end: PlanPoint, next: PlanPoint) {
+  const startTurn = turnSign(prev, start, end);
+  const endTurn = turnSign(start, end, next);
+  if (startTurn === 0 || endTurn === 0 || startTurn !== endTurn) return null;
+  const startCircle = circumcircle(prev, start, end);
+  const endCircle = circumcircle(start, end, next);
+  if (!startCircle || !endCircle) return null;
+  if (!similarRadius(startCircle.radius, endCircle.radius)) return null;
+  if (startCircle.radius < MIN_CURVE_RADIUS_METRES || startCircle.radius > MAX_CURVE_RADIUS_METRES) return null;
+  if (endCircle.radius < MIN_CURVE_RADIUS_METRES || endCircle.radius > MAX_CURVE_RADIUS_METRES) return null;
+  return sampleCircleArc(startCircle.center, start, end, startTurn);
+}
+
+function similarRadius(left: number, right: number) {
+  const larger = Math.max(left, right);
+  const smaller = Math.min(left, right);
+  return larger <= smaller * 1.45 + 2;
+}
+
+function turnSign(a: PlanPoint, b: PlanPoint, c: PlanPoint) {
+  const cross = (b.east - a.east) * (c.north - b.north) - (b.north - a.north) * (c.east - b.east);
+  if (Math.abs(cross) < 1e-6) return 0;
+  return cross > 0 ? 1 : -1;
+}
+
+function circumcircle(a: PlanPoint, b: PlanPoint, c: PlanPoint) {
+  const d = 2 * (
+    a.east * (b.north - c.north)
+    + b.east * (c.north - a.north)
+    + c.east * (a.north - b.north)
+  );
+  if (Math.abs(d) < 1e-8) return null;
+  const a2 = a.east * a.east + a.north * a.north;
+  const b2 = b.east * b.east + b.north * b.north;
+  const c2 = c.east * c.east + c.north * c.north;
+  const east = (a2 * (b.north - c.north) + b2 * (c.north - a.north) + c2 * (a.north - b.north)) / d;
+  const north = (a2 * (c.east - b.east) + b2 * (a.east - c.east) + c2 * (b.east - a.east)) / d;
+  const center = { east, north };
+  return { center, radius: Math.hypot(a.east - east, a.north - north) };
+}
+
+function sampleCircleArc(center: PlanPoint, from: PlanPoint, to: PlanPoint, turn: number) {
+  const startAngle = Math.atan2(from.north - center.north, from.east - center.east);
+  const endAngle = Math.atan2(to.north - center.north, to.east - center.east);
+  let delta = endAngle - startAngle;
+  if (turn > 0) {
+    while (delta <= 0) delta += Math.PI * 2;
+  } else {
+    while (delta >= 0) delta -= Math.PI * 2;
+  }
+  if (Math.abs(delta) < 1e-3 || Math.abs(delta) > Math.PI * 1.15) return null;
+  const radius = Math.hypot(from.east - center.east, from.north - center.north);
+  const steps = Math.max(1, Math.ceil(Math.abs(delta) / ROAD_CURVE_STEP_RADIANS));
+  const points: PlanPoint[] = [from];
+  for (let step = 1; step < steps; step += 1) {
+    const angle = startAngle + delta * (step / steps);
+    points.push({
+      east: center.east + Math.cos(angle) * radius,
+      north: center.north + Math.sin(angle) * radius,
+    });
+  }
+  points.push(to);
+  return points;
 }
 
 export function bufferPlanLine(
@@ -348,83 +458,153 @@ export function bufferPlanLine(
   halfWidth: number,
   options: { startCap: 'round' | 'butt'; endCap: 'round' | 'butt' } = { startCap: 'round', endCap: 'round' },
 ) {
+  return bufferPlanRings(points, halfWidth, options)[0] ?? [];
+}
+
+/** Closed carriageways become an outer ring plus a hole so the island stays open. */
+export function bufferPlanRings(
+  points: PlanPoint[],
+  halfWidth: number,
+  options: { startCap: 'round' | 'butt'; endCap: 'round' | 'butt' } = { startCap: 'round', endCap: 'round' },
+) {
   if (points.length < 2 || halfWidth <= 0) return [];
-  const left = offsetSide(points, halfWidth);
-  const right = offsetSide(points, -halfWidth);
+  const closed = isClosedPlanLine(points);
+  const body = closed ? closedRingBody(points) : points;
+  if (body.length < 2) return [];
+  const left = offsetSide(body, halfWidth, closed);
+  const right = offsetSide(body, -halfWidth, closed);
+  if (left.length < 2 || right.length < 2) return [];
+  if (closed) {
+    const leftRadius = meanRadius(left);
+    const rightRadius = meanRadius(right);
+    const outer = leftRadius >= rightRadius ? left : right;
+    const inner = leftRadius >= rightRadius ? right : left;
+    return [orientRing(outer, false), orientRing(inner, true)];
+  }
   const ring: PlanPoint[] = [...left];
   if (options.endCap === 'round') {
-    ring.push(...capArc(points[points.length - 1], left[left.length - 1], right[right.length - 1]));
+    ring.push(...joinArc(body[body.length - 1], left[left.length - 1], right[right.length - 1]));
   }
   ring.push(...right.slice().reverse());
   if (options.startCap === 'round') {
-    ring.push(...capArc(points[0], right[0], left[0]));
+    ring.push(...joinArc(body[0], right[0], left[0]));
   }
-  if (ring.length > 0) {
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first.east !== last.east || first.north !== last.north) ring.push({ ...first });
+  return [orientRing(ring, false)];
+}
+
+function meanRadius(points: PlanPoint[]) {
+  const center = {
+    east: points.reduce((sum, point) => sum + point.east, 0) / points.length,
+    north: points.reduce((sum, point) => sum + point.north, 0) / points.length,
+  };
+  return points.reduce((sum, point) => sum + Math.hypot(point.east - center.east, point.north - center.north), 0)
+    / points.length;
+}
+
+function signedArea(ring: PlanPoint[]) {
+  let area = 0;
+  for (let index = 1; index < ring.length; index += 1) {
+    area += ring[index - 1].east * ring[index].north - ring[index].east * ring[index - 1].north;
   }
+  return area / 2;
+}
+
+function orientRing(points: PlanPoint[], clockwise: boolean) {
+  const ring = points.map((point) => ({ ...point }));
+  if (ring.length === 0) return ring;
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first.east !== last.east || first.north !== last.north) ring.push({ ...first });
+  const isClockwise = signedArea(ring) < 0;
+  if (isClockwise !== clockwise) ring.reverse();
   return ring;
 }
 
-function offsetSide(points: PlanPoint[], distance: number) {
+function offsetSide(points: PlanPoint[], distance: number, closed = false) {
   const offset: PlanPoint[] = [];
-  for (let index = 0; index < points.length; index += 1) {
-    const previous = points[Math.max(0, index - 1)];
-    const next = points[Math.min(points.length - 1, index + 1)];
-    const inEast = points[index].east - previous.east;
-    const inNorth = points[index].north - previous.north;
-    const outEast = next.east - points[index].east;
-    const outNorth = next.north - points[index].north;
+  const count = points.length;
+  for (let index = 0; index < count; index += 1) {
+    const previous = points[closed ? (index - 1 + count) % count : Math.max(0, index - 1)];
+    const next = points[closed ? (index + 1) % count : Math.min(count - 1, index + 1)];
+    const current = points[index];
+    const inEast = current.east - previous.east;
+    const inNorth = current.north - previous.north;
+    const outEast = next.east - current.east;
+    const outNorth = next.north - current.north;
     const inLength = Math.hypot(inEast, inNorth) || 1;
     const outLength = Math.hypot(outEast, outNorth) || 1;
     const n1x = -inNorth / inLength;
     const n1y = inEast / inLength;
     const n2x = -outNorth / outLength;
     const n2y = outEast / outLength;
-    if (index === 0 || index === points.length - 1 || (inEast === 0 && inNorth === 0) || (outEast === 0 && outNorth === 0)) {
+    const endpoint = !closed && (index === 0 || index === count - 1);
+    if (endpoint || (inEast === 0 && inNorth === 0) || (outEast === 0 && outNorth === 0)) {
       const nx = index === 0 ? n2x : n1x;
       const ny = index === 0 ? n2y : n1y;
       offset.push({
-        east: points[index].east + nx * distance,
-        north: points[index].north + ny * distance,
+        east: current.east + nx * distance,
+        north: current.north + ny * distance,
       });
       continue;
     }
-    let mx = n1x + n2x;
-    let my = n1y + n2y;
-    const mLength = Math.hypot(mx, my);
-    if (mLength < 1e-6) {
-      offset.push({
-        east: points[index].east + n1x * distance,
-        north: points[index].north + n1y * distance,
-      });
+    const from = {
+      east: current.east + n1x * distance,
+      north: current.north + n1y * distance,
+    };
+    const to = {
+      east: current.east + n2x * distance,
+      north: current.north + n2y * distance,
+    };
+    const cross = inEast * outNorth - inNorth * outEast;
+    const outerJoin = distance >= 0 ? cross < 0 : cross > 0;
+    if (!outerJoin) {
+      offset.push(miterOffset(current, n1x, n1y, n2x, n2y, distance));
       continue;
     }
-    mx /= mLength;
-    my /= mLength;
-    const dot = mx * n1x + my * n1y;
-    const miter = Math.abs(distance) / Math.max(0.25, Math.abs(dot));
-    const limited = Math.min(miter, Math.abs(distance) * MITER_LIMIT);
-    const signed = distance >= 0 ? limited : -limited;
-    offset.push({
-      east: points[index].east + mx * signed,
-      north: points[index].north + my * signed,
-    });
+    offset.push(from);
+    offset.push(...joinArc(current, from, to));
+    offset.push(to);
   }
   return offset;
 }
 
-function capArc(center: PlanPoint, from: PlanPoint, to: PlanPoint) {
+function miterOffset(
+  point: PlanPoint,
+  n1x: number,
+  n1y: number,
+  n2x: number,
+  n2y: number,
+  distance: number,
+) {
+  let mx = n1x + n2x;
+  let my = n1y + n2y;
+  const mLength = Math.hypot(mx, my);
+  if (mLength < 1e-6) {
+    return { east: point.east + n1x * distance, north: point.north + n1y * distance };
+  }
+  mx /= mLength;
+  my /= mLength;
+  const dot = mx * n1x + my * n1y;
+  const miter = Math.abs(distance) / Math.max(0.25, Math.abs(dot));
+  const limited = Math.min(miter, Math.abs(distance) * MITER_LIMIT);
+  const signed = distance >= 0 ? limited : -limited;
+  return {
+    east: point.east + mx * signed,
+    north: point.north + my * signed,
+  };
+}
+
+function joinArc(center: PlanPoint, from: PlanPoint, to: PlanPoint) {
   const startAngle = Math.atan2(from.north - center.north, from.east - center.east);
   const endAngle = Math.atan2(to.north - center.north, to.east - center.east);
   let delta = endAngle - startAngle;
   while (delta <= 0) delta += Math.PI * 2;
   if (delta > Math.PI) delta -= Math.PI * 2;
   const radius = Math.hypot(from.east - center.east, from.north - center.north);
+  const steps = Math.max(1, Math.ceil(Math.abs(delta) / ROUND_JOIN_STEP_RADIANS));
   const points: PlanPoint[] = [];
-  for (let step = 1; step < ROUND_CAP_SEGMENTS; step += 1) {
-    const angle = startAngle + delta * (step / ROUND_CAP_SEGMENTS);
+  for (let step = 1; step < steps; step += 1) {
+    const angle = startAngle + delta * (step / steps);
     points.push({
       east: center.east + Math.cos(angle) * radius,
       north: center.north + Math.sin(angle) * radius,
@@ -732,10 +912,11 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
     const casingWidth = estimatedRoadCasingWidthMetres(line.properties);
     for (const kind of ['casing', 'surface'] as const) {
       const halfWidth = (kind === 'casing' ? casingWidth : surfaceWidth) / 2;
-      const buffered = bufferPlanLine(densified, halfWidth);
-      const clipped = clipPolygonToRect(buffered, clip);
-      if (clipped.length < 4 || polygonArea(clipped) < MIN_POLYGON_AREA_METRES) continue;
-      vertexCount += clipped.length;
+      const rings = bufferPlanRings(densified, halfWidth)
+        .map((ring) => clipPolygonToRect(ring, clip))
+        .filter((ring) => ring.length >= 4 && polygonArea(ring) >= MIN_POLYGON_AREA_METRES);
+      if (rings.length === 0) continue;
+      vertexCount += rings.reduce((sum, ring) => sum + ring.length, 0);
       if (vertexCount > MAX_VERTICES_PER_CELL) {
         return { cellKey: cell.key, polygons: [], centerlines: [], vertexCount, skipped: true };
       }
@@ -750,7 +931,7 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
         },
         geometry: {
           type: 'Polygon',
-          coordinates: [closeRing(clipped.map((point) => planToLngLat(point, origin)))],
+          coordinates: rings.map((ring) => closeRing(ring.map((point) => planToLngLat(point, origin)))),
         },
       });
     }
