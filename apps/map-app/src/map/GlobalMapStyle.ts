@@ -13,11 +13,6 @@ import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
-import {
-  ROAD_CENTERLINE_WIDTH_METRES,
-  ROAD_LINE_UNDER_POLYGON_SCALE,
-  estimatedRoadWidthExpression,
-} from './RoadWidth';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 
@@ -660,7 +655,41 @@ const GLOBAL_BUILDING_UPPER_BASE: ExpressionSpecification = [
   GLOBAL_BUILDING_BASE,
 ] as ExpressionSpecification;
 
-const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = estimatedRoadWidthExpression();
+const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = [
+  'case',
+  ['==', ['get', 'ramp'], 1],
+  [
+    'match', ['get', 'class'],
+    'motorway', 7.5,
+    'trunk', 7,
+    'primary', 6.5,
+    'secondary', 6,
+    'tertiary', 5.5,
+    5,
+  ],
+  ['==', ['get', 'class'], 'service'],
+  [
+    'match', ['get', 'service'],
+    'parking_aisle', 3,
+    'driveway', 3.2,
+    'alley', 3.2,
+    'crossover', 3.5,
+    4,
+  ],
+  [
+    'match', ['get', 'class'],
+    // Divided highways are normally encoded as one centerline per
+    // carriageway, so using the full combined-road width overstates them at
+    // close zooms. Allow roughly two lanes plus shoulders per line instead.
+    'motorway', 10.5,
+    'trunk', 9.5,
+    'primary', 9,
+    'secondary', 8,
+    'tertiary', 7,
+    'minor', 5.5,
+    5,
+  ],
+] as ExpressionSpecification;
 
 function pixelsPerMetre(zoom: number, latitude: number) {
   const safeLatitude = Math.max(-80, Math.min(80, latitude));
@@ -682,9 +711,9 @@ export function roadWidthExpression(
     10, ['max', casing ? 0.8 : 0.5, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
     12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
-    16, ['*', widthMetres, pixelsPerMetre(16, latitude) * ROAD_LINE_UNDER_POLYGON_SCALE],
-    18, ['*', widthMetres, pixelsPerMetre(18, latitude) * ROAD_LINE_UNDER_POLYGON_SCALE],
-    22, ['*', widthMetres, pixelsPerMetre(22, latitude) * ROAD_LINE_UNDER_POLYGON_SCALE],
+    16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
+    18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
+    22, ['*', widthMetres, pixelsPerMetre(22, latitude)],
   ] as ExpressionSpecification;
 }
 
@@ -708,7 +737,7 @@ export function aerowayWidthExpression(latitude: number): ExpressionSpecificatio
   ] as ExpressionSpecification;
 }
 
-export function pathWidthExpression(
+function pathWidthExpression(
   widthMetres: number | ExpressionSpecification,
   latitude: number,
   casing = false,
@@ -727,17 +756,6 @@ export function pathWidthExpression(
   ] as ExpressionSpecification;
 }
 
-/** Hairline dashes for draped polygon roads; floor keeps them readable at z16. */
-export function roadCenterlineWidthExpression(latitude: number): ExpressionSpecification {
-  return [
-    'interpolate', ['exponential', 2], ['zoom'],
-    15, ['max', 1.4, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(15, latitude)]],
-    16, ['max', 1.4, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(16, latitude)]],
-    18, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(18, latitude)],
-    22, ['*', ROAD_CENTERLINE_WIDTH_METRES, pixelsPerMetre(22, latitude)],
-  ] as ExpressionSpecification;
-}
-
 /** Refresh every line whose pixel width represents a physical ground width. */
 export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
   const setWidth = (id: string, expression: ExpressionSpecification) => {
@@ -747,8 +765,7 @@ export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
   GLOBAL_ROAD_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude)));
   ['global-aeroway-lines', 'global-aeroway-runways']
     .forEach((id) => setWidth(id, aerowayWidthExpression(latitude)));
-  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude));
-  setWidth('global-road-polygon-centerlines', roadCenterlineWidthExpression(latitude));
+  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude));
 
   const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [
     ['global-path-bridge-shadow', BRIDGE_PATH_WIDTH_METRES, true],
@@ -1583,7 +1600,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'line-color': '#ffffff',
-        'line-width': pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, 0),
+        'line-width': pathWidthExpression(0.2, 0),
         'line-dasharray': [3, 4],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -3021,22 +3038,6 @@ export function applyMapTheme(
     originalPaints.forEach((paint, id) => Object.entries(paint).forEach(([property, value]) => {
       if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
     }));
-    if (map.getLayer('global-road-polygon-casing')) {
-      map.setPaintProperty('global-road-polygon-casing', 'fill-color', CLOSEUP_ROAD_CASING);
-    }
-    if (map.getLayer('global-road-polygons')) {
-      map.setPaintProperty('global-road-polygons', 'fill-color', [
-        'case', ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa', CLOSEUP_ROAD_GRAY,
-      ]);
-    }
-    if (map.getLayer('global-road-polygon-fallback-casing')) {
-      map.setPaintProperty('global-road-polygon-fallback-casing', 'line-color', CLOSEUP_ROAD_CASING);
-    }
-    if (map.getLayer('global-road-polygon-fallback')) {
-      map.setPaintProperty('global-road-polygon-fallback', 'line-color', [
-        'case', ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa', CLOSEUP_ROAD_GRAY,
-      ]);
-    }
     if (map.getLayer('global-aerodrome-labels')) map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon');
     if (map.getLayer('location-poi-icons')) map.setPaintProperty('location-poi-icons', 'icon-opacity', 1);
     if (map.getLayer('location-poi-labels')) map.setPaintProperty('location-poi-labels', 'icon-opacity', 1);
@@ -3071,8 +3072,8 @@ export function applyMapTheme(
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
-  ['global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing', 'global-road-polygon-casing', 'global-road-polygon-fallback-casing'].forEach((id) => set(id, id.includes('polygon-casing') && !id.includes('fallback') ? 'fill-color' : 'line-color', colors.roadCasing));
-  ['global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads', 'global-road-polygons', 'global-road-polygon-fallback'].forEach((id) => set(id, id.includes('polygons') ? 'fill-color' : 'line-color', colors.road));
+  ['global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
+  ['global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);
