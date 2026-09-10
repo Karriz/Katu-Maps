@@ -76,6 +76,8 @@ describe('global map overlay styles', () => {
           for (const zoom of [18.5, 19, 20, 21, 22]) {
             expect(evaluate(zoom) / reference).toBeCloseTo(2 ** (zoom - 18), 6);
           }
+          const unscaled14 = evaluate(14) / 0.25;
+          expect(evaluate(16) / unscaled14).toBeCloseTo(0.88, 5);
         }
       }
     }

@@ -13,6 +13,10 @@ import { globeBiomeColor } from './GlobeBiomeStyle';
 import { MAP_COLORS } from './MapPalette';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
+import {
+  ROAD_LINE_UNDER_POLYGON_SCALE,
+  estimatedRoadWidthExpression,
+} from './RoadWidth';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { FeatureCollection } from 'geojson';
 
@@ -655,41 +659,7 @@ const GLOBAL_BUILDING_UPPER_BASE: ExpressionSpecification = [
   GLOBAL_BUILDING_BASE,
 ] as ExpressionSpecification;
 
-const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = [
-  'case',
-  ['==', ['get', 'ramp'], 1],
-  [
-    'match', ['get', 'class'],
-    'motorway', 7.5,
-    'trunk', 7,
-    'primary', 6.5,
-    'secondary', 6,
-    'tertiary', 5.5,
-    5,
-  ],
-  ['==', ['get', 'class'], 'service'],
-  [
-    'match', ['get', 'service'],
-    'parking_aisle', 3,
-    'driveway', 3.2,
-    'alley', 3.2,
-    'crossover', 3.5,
-    4,
-  ],
-  [
-    'match', ['get', 'class'],
-    // Divided highways are normally encoded as one centerline per
-    // carriageway, so using the full combined-road width overstates them at
-    // close zooms. Allow roughly two lanes plus shoulders per line instead.
-    'motorway', 10.5,
-    'trunk', 9.5,
-    'primary', 9,
-    'secondary', 8,
-    'tertiary', 7,
-    'minor', 5.5,
-    5,
-  ],
-] as ExpressionSpecification;
+const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = estimatedRoadWidthExpression();
 
 function pixelsPerMetre(zoom: number, latitude: number) {
   const safeLatitude = Math.max(-80, Math.min(80, latitude));
@@ -711,9 +681,9 @@ export function roadWidthExpression(
     10, ['max', casing ? 0.8 : 0.5, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
     12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
-    16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
-    22, ['*', widthMetres, pixelsPerMetre(22, latitude)],
+    16, ['*', widthMetres, pixelsPerMetre(16, latitude) * ROAD_LINE_UNDER_POLYGON_SCALE],
+    18, ['*', widthMetres, pixelsPerMetre(18, latitude) * ROAD_LINE_UNDER_POLYGON_SCALE],
+    22, ['*', widthMetres, pixelsPerMetre(22, latitude) * ROAD_LINE_UNDER_POLYGON_SCALE],
   ] as ExpressionSpecification;
 }
 
@@ -3038,6 +3008,22 @@ export function applyMapTheme(
     originalPaints.forEach((paint, id) => Object.entries(paint).forEach(([property, value]) => {
       if (map.getLayer(id)) map.setPaintProperty(id, property as never, value as never);
     }));
+    if (map.getLayer('global-road-polygon-casing')) {
+      map.setPaintProperty('global-road-polygon-casing', 'fill-color', CLOSEUP_ROAD_CASING);
+    }
+    if (map.getLayer('global-road-polygons')) {
+      map.setPaintProperty('global-road-polygons', 'fill-color', [
+        'case', ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa', CLOSEUP_ROAD_GRAY,
+      ]);
+    }
+    if (map.getLayer('global-road-polygon-fallback-casing')) {
+      map.setPaintProperty('global-road-polygon-fallback-casing', 'line-color', CLOSEUP_ROAD_CASING);
+    }
+    if (map.getLayer('global-road-polygon-fallback')) {
+      map.setPaintProperty('global-road-polygon-fallback', 'line-color', [
+        'case', ['==', ['get', 'surface'], 'unpaved'], '#d9cbaa', CLOSEUP_ROAD_GRAY,
+      ]);
+    }
     if (map.getLayer('global-aerodrome-labels')) map.setLayoutProperty('global-aerodrome-labels', 'icon-image', 'location-airport-icon');
     if (map.getLayer('location-poi-icons')) map.setPaintProperty('location-poi-icons', 'icon-opacity', 1);
     if (map.getLayer('location-poi-labels')) map.setPaintProperty('location-poi-labels', 'icon-opacity', 1);
@@ -3072,8 +3058,8 @@ export function applyMapTheme(
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
-  ['global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
-  ['global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
+  ['global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing', 'global-road-polygon-casing', 'global-road-polygon-fallback-casing'].forEach((id) => set(id, id.includes('polygon-casing') && !id.includes('fallback') ? 'fill-color' : 'line-color', colors.roadCasing));
+  ['global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads', 'global-road-polygons', 'global-road-polygon-fallback'].forEach((id) => set(id, id.includes('polygons') ? 'fill-color' : 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);
