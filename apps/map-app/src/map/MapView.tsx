@@ -994,6 +994,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     return () => onFlightModeChange?.(false);
   }, [flight.active, onFlightModeChange]);
   useEffect(() => {
+    if (!mapLoaded) return;
+    const map = mapRef.current;
+    if (!map) return;
+    // Road width expressions cap at z18 in map mode and z19 in flight mode.
+    // The latitude-based cache in the main map effect would skip the first
+    // reapplication after a mode switch at the same latitude, so force it.
+    const latitude = map.getCenter().lat;
+    updatePhysicalWidthPaint(map, latitude, flight.active ? 19 : 18);
+  }, [flight.active, mapLoaded]);
+  useEffect(() => {
     if (flight.active) {
       flightWasActiveRef.current = true;
       return;
@@ -2071,7 +2081,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       const latitude = map.getCenter().lat;
       if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
       roadWidthLatitude = latitude;
-      updatePhysicalWidthPaint(map, latitude);
+      updatePhysicalWidthPaint(map, latitude, flightActiveRef.current ? 19 : 18);
     };
     const updateGlobalLabelDensity = () => {
       if (!map.isStyleLoaded()) return;

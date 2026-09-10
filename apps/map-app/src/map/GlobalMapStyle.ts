@@ -697,27 +697,38 @@ function pixelsPerMetre(zoom: number, latitude: number) {
   return (512 * 2 ** zoom) / groundCircumference;
 }
 
+const ROAD_WIDTH_DEFAULT_MAX_ZOOM = 18;
+
 export function roadWidthExpression(
   latitude: number,
   casing = false,
+  maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM,
 ): ExpressionSpecification {
   const widthMetres: ExpressionSpecification = casing
     ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1]
     : ESTIMATED_ROAD_WIDTH_METRES;
 
-  return [
-    'interpolate', ['exponential', 2], ['zoom'],
+  const stops: ExpressionSpecification = [
     6, ['max', casing ? 0.65 : 0.4, ['*', widthMetres, pixelsPerMetre(6, latitude)]],
     10, ['max', casing ? 0.8 : 0.5, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
     12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
-    22, ['*', widthMetres, pixelsPerMetre(22, latitude)],
-  ] as ExpressionSpecification;
+    ROAD_WIDTH_DEFAULT_MAX_ZOOM, ['*', widthMetres, pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude)],
+  ];
+  // Flight mode lifts the camera max zoom above the default 18. Allow one
+  // more exponential step so close-range roads stay in proportion, then hold
+  // that width for every closer zoom so screen-space strokes do not balloon.
+  if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
+    stops.push(maxZoom, ['*', widthMetres, pixelsPerMetre(maxZoom, latitude)]);
+  }
+  return ['interpolate', ['exponential', 2], ['zoom'], ...stops] as ExpressionSpecification;
 }
 
-export function aerowayWidthExpression(latitude: number): ExpressionSpecification {
+export function aerowayWidthExpression(
+  latitude: number,
+  maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM,
+): ExpressionSpecification {
   const widthMetres: ExpressionSpecification = [
     'match', ['get', 'class'],
     'runway', 45,
@@ -726,15 +737,17 @@ export function aerowayWidthExpression(latitude: number): ExpressionSpecificatio
     6,
   ] as ExpressionSpecification;
 
-  return [
-    'interpolate', ['exponential', 2], ['zoom'],
+  const stops: ExpressionSpecification = [
     10, ['max', 1, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
     12, ['max', 1.5, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
-    22, ['*', widthMetres, pixelsPerMetre(22, latitude)],
-  ] as ExpressionSpecification;
+    ROAD_WIDTH_DEFAULT_MAX_ZOOM, ['*', widthMetres, pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude)],
+  ];
+  if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
+    stops.push(maxZoom, ['*', widthMetres, pixelsPerMetre(maxZoom, latitude)]);
+  }
+  return ['interpolate', ['exponential', 2], ['zoom'], ...stops] as ExpressionSpecification;
 }
 
 function pathWidthExpression(
@@ -757,14 +770,14 @@ function pathWidthExpression(
 }
 
 /** Refresh every line whose pixel width represents a physical ground width. */
-export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
+export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number, maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
   const setWidth = (id: string, expression: ExpressionSpecification) => {
     if (map.getLayer(id)) map.setPaintProperty(id, 'line-width', expression);
   };
-  GLOBAL_ROAD_CASING_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude, true)));
-  GLOBAL_ROAD_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude)));
+  GLOBAL_ROAD_CASING_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude, true, maxZoom)));
+  GLOBAL_ROAD_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude, false, maxZoom)));
   ['global-aeroway-lines', 'global-aeroway-runways']
-    .forEach((id) => setWidth(id, aerowayWidthExpression(latitude)));
+    .forEach((id) => setWidth(id, aerowayWidthExpression(latitude, maxZoom)));
   setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude));
 
   const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [

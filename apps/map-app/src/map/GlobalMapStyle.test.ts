@@ -65,34 +65,69 @@ describe('global map overlay styles', () => {
     expect(buildingColorPaint('#fffdf8', false)).toBe('#fffdf8');
   });
 
-  it('keeps road and casing widths in ground metres through close landing zooms', () => {
+  it('caps road widths at z18 in map mode and z19 in flight mode', () => {
     for (const latitude of [0, 61.4981]) {
       for (const casing of [false, true]) {
-        const compiled = createExpression(roadWidthExpression(latitude, casing), 'flight-road-width');
-        if (compiled.result !== 'success') throw new Error('Invalid road width expression');
+        const compile = (maxZoom?: number) =>
+          createExpression(roadWidthExpression(latitude, casing, maxZoom), 'flight-road-width');
+        const mapCompiled = compile();
+        const flightCompiled = compile(19);
+        if (mapCompiled.result !== 'success' || flightCompiled.result !== 'success') {
+          throw new Error('Invalid road width expression');
+        }
         for (const properties of [{ class: 'motorway' }, { class: 'minor' }, { class: 'service', service: 'driveway' }]) {
-          const evaluate = (zoom: number) => compiled.value.evaluate({ zoom }, { properties } as any) as number;
-          const reference = evaluate(18);
+          const evaluate = (compiled: typeof mapCompiled, zoom: number) =>
+            compiled.value.evaluate({ zoom }, { properties } as any) as number;
+
+          // Map mode: widths plateau at z18.
+          const mapRef = evaluate(mapCompiled, 18);
           for (const zoom of [18.5, 19, 20, 21, 22]) {
-            expect(evaluate(zoom) / reference).toBeCloseTo(2 ** (zoom - 18), 6);
+            expect(evaluate(mapCompiled, zoom)).toBeCloseTo(mapRef, 6);
+          }
+
+          // Flight mode: widths scale one step to z19, then plateau.
+          const flightRef18 = evaluate(flightCompiled, 18);
+          expect(evaluate(flightCompiled, 19)).toBeCloseTo(flightRef18 * 2, 6);
+          const flightRef19 = evaluate(flightCompiled, 19);
+          for (const zoom of [19.5, 20, 21, 22]) {
+            expect(evaluate(flightCompiled, zoom)).toBeCloseTo(flightRef19, 6);
           }
         }
       }
     }
   });
 
-  it('also keeps airfield and path widths in ground metres at close zooms', () => {
-    const path = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-path-casing') as any;
-    const expressions = [aerowayWidthExpression(61.4981)];
-    if (!path) throw new Error('Missing path layer');
-    expressions.push(path.paint['line-width']);
-    for (const expression of expressions) {
-      const compiled = createExpression(expression, 'flight-surface-width');
-      if (compiled.result !== 'success') throw new Error('Invalid surface width expression');
-      const feature = { properties: { class: 'runway' } } as any;
-      expect(compiled.value.evaluate({ zoom: 22 }, feature)
-        / compiled.value.evaluate({ zoom: 18 }, feature)).toBeCloseTo(16, 6);
+  it('caps aeroway widths at z18 in map mode and z19 in flight mode', () => {
+    const feature = { properties: { class: 'runway' } } as any;
+    const evaluate = (expression: any, zoom: number, label: string) => {
+      const compiled = createExpression(expression, label);
+      if (compiled.result !== 'success') throw new Error('Invalid aeroway width expression');
+      return compiled.value.evaluate({ zoom }, feature) as number;
+    };
+
+    // Map mode: aeroway widths plateau at z18.
+    const mapRef = evaluate(aerowayWidthExpression(61.4981), 18, 'aeroway-map-width');
+    for (const zoom of [18.5, 19, 20, 21, 22]) {
+      expect(evaluate(aerowayWidthExpression(61.4981), zoom, 'aeroway-map-width')).toBeCloseTo(mapRef, 6);
     }
+
+    // Flight mode: aeroway widths scale one step to z19, then plateau.
+    const flightRef18 = evaluate(aerowayWidthExpression(61.4981, 19), 18, 'aeroway-flight-width');
+    expect(evaluate(aerowayWidthExpression(61.4981, 19), 19, 'aeroway-flight-width')).toBeCloseTo(flightRef18 * 2, 6);
+    const flightRef19 = evaluate(aerowayWidthExpression(61.4981, 19), 19, 'aeroway-flight-width');
+    for (const zoom of [19.5, 20, 21, 22]) {
+      expect(evaluate(aerowayWidthExpression(61.4981, 19), zoom, 'aeroway-flight-width')).toBeCloseTo(flightRef19, 6);
+    }
+  });
+
+  it('keeps path widths in ground metres at close zooms', () => {
+    const path = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-path-casing') as any;
+    if (!path) throw new Error('Missing path layer');
+    const compiled = createExpression(path.paint['line-width'], 'path-surface-width');
+    if (compiled.result !== 'success') throw new Error('Invalid path width expression');
+    const feature = { properties: { class: 'track' } } as any;
+    expect(compiled.value.evaluate({ zoom: 22 }, feature)
+      / compiled.value.evaluate({ zoom: 18 }, feature)).toBeCloseTo(16, 6);
   });
 
   it('uses metre-scaled paired rails inside the ground railway bed at close zoom', () => {
