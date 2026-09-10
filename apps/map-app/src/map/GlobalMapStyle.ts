@@ -712,9 +712,8 @@ export function roadWidthExpression(
     12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    // Keep the close-zoom cap: extending pixel widths exponentially through
-    // flight zooms makes nearby roads overwhelm the view during landing.
-    18, ['*', widthMetres, pixelsPerMetre(18, latitude) * 0.82],
+    18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
+    22, ['*', widthMetres, pixelsPerMetre(22, latitude)],
   ] as ExpressionSpecification;
 }
 
@@ -734,6 +733,7 @@ export function aerowayWidthExpression(latitude: number): ExpressionSpecificatio
     14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
     18, ['*', widthMetres, pixelsPerMetre(18, latitude)],
+    22, ['*', widthMetres, pixelsPerMetre(22, latitude)],
   ] as ExpressionSpecification;
 }
 
@@ -751,8 +751,42 @@ function pathWidthExpression(
     12, ['max', casing ? 1 : 0.6, ['*', renderedWidthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', renderedWidthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', renderedWidthMetres, pixelsPerMetre(16, latitude)],
-    18, ['*', renderedWidthMetres, pixelsPerMetre(18, latitude) * 0.82],
+    18, ['*', renderedWidthMetres, pixelsPerMetre(18, latitude)],
+    22, ['*', renderedWidthMetres, pixelsPerMetre(22, latitude)],
   ] as ExpressionSpecification;
+}
+
+/** Refresh every line whose pixel width represents a physical ground width. */
+export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
+  const setWidth = (id: string, expression: ExpressionSpecification) => {
+    if (map.getLayer(id)) map.setPaintProperty(id, 'line-width', expression);
+  };
+  GLOBAL_ROAD_CASING_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude, true)));
+  GLOBAL_ROAD_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude)));
+  ['global-aeroway-lines', 'global-aeroway-runways']
+    .forEach((id) => setWidth(id, aerowayWidthExpression(latitude)));
+  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude));
+
+  const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [
+    ['global-path-bridge-shadow', BRIDGE_PATH_WIDTH_METRES, true],
+    ['global-path-bridge-edge', BRIDGE_PATH_WIDTH_METRES, true],
+    ['global-path-casing', ['case', ['==', ['get', 'class'], 'track'], 3, 1.8] as ExpressionSpecification, true],
+    ['global-cycleway-casing', 2.5, true],
+    ['global-tracks', 3],
+    ['global-cycleways', 2.5],
+    ['global-footways', 1.8],
+    ['global-steps', 1.8],
+    ['global-other-paths', 1.8],
+    ['global-paths-under-construction', 2],
+  ];
+  paths.forEach(([id, metres, casing]) => setWidth(id, pathWidthExpression(metres, latitude, casing)));
+
+  setWidth('global-railway-bed', railwayWidth(RAIL_BED_WIDTH, false, latitude));
+  setWidth('global-railway-sleepers', railwayWidth(SLEEPER_WIDTH, false, latitude));
+  setWidth('global-railways', railwayWidth(RAIL_WIDTH, false, latitude));
+  if (map.getLayer('global-railways')) {
+    map.setPaintProperty('global-railways', 'line-gap-width', railwayWidth(RAIL_GAUGE - RAIL_WIDTH, true, latitude));
+  }
 }
 
 // OpenMapTiles/OpenFreeMap put leisure=park in landcover (usually
@@ -1341,7 +1375,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       paint: {
         'line-color': '#26302e',
         'line-blur': 1.5,
-        'line-width': roadWidthExpression(61.4981, true),
+        'line-width': roadWidthExpression(0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.62],
       },
     },
@@ -1467,7 +1501,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           13, MAP_COLORS.roadCasing,
           15.5, CLOSEUP_ROAD_CASING,
         ],
-        'line-width': roadWidthExpression(61.4981, true),
+        'line-width': roadWidthExpression(0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.78],
       },
     },
@@ -1485,7 +1519,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'line-color': ROAD_COLOR,
-        'line-width': roadWidthExpression(61.4981),
+        'line-width': roadWidthExpression(0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.98],
       },
     },
@@ -1503,7 +1537,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': roadWidthExpression(61.4981, true),
+        'line-width': roadWidthExpression(0, true),
         'line-translate': [2, -2],
         'line-translate-anchor': 'map',
         'line-blur': 1.4,
@@ -1530,7 +1564,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           13, '#87918d',
           15.5, CLOSEUP_ROAD_CASING,
         ],
-        'line-width': roadWidthExpression(61.4981, true),
+        'line-width': roadWidthExpression(0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.84],
       },
     },
@@ -1548,7 +1582,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'line-color': BRIDGE_ROAD_COLOR,
-        'line-width': roadWidthExpression(61.4981),
+        'line-width': roadWidthExpression(0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 1],
       },
     },
@@ -1566,12 +1600,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'line-color': '#ffffff',
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          15, 0.5,
-          16, 0.9,
-          18, 1.6,
-        ],
+        'line-width': pathWidthExpression(0.2, 0),
         'line-dasharray': [3, 4],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -1591,7 +1620,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': pathWidthExpression(BRIDGE_PATH_WIDTH_METRES, 61.4981, true),
+        'line-width': pathWidthExpression(BRIDGE_PATH_WIDTH_METRES, 0, true),
         'line-translate': [1.5, -1.5],
         'line-translate-anchor': 'map',
         'line-blur': ['interpolate', ['linear'], ['zoom'], 12, 0.6, 18, 1.2],
@@ -1608,7 +1637,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': BRIDGE_PATH_EDGE_COLOR,
-        'line-width': pathWidthExpression(BRIDGE_PATH_WIDTH_METRES, 61.4981, true),
+        'line-width': pathWidthExpression(BRIDGE_PATH_WIDTH_METRES, 0, true),
         'line-opacity': 0.84,
       },
     },
@@ -1624,7 +1653,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': '#d8d4ca',
         'line-width': pathWidthExpression(
           ['case', ['==', ['get', 'class'], 'track'], 3, 1.8] as ExpressionSpecification,
-          61.4981,
+          0,
           true,
         ),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.42],
@@ -1640,7 +1669,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#f3f0e9',
-        'line-width': pathWidthExpression(2.5, 61.4981, true),
+        'line-width': pathWidthExpression(2.5, 0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11.5, 0.58, 13, 0.82],
       },
     },
@@ -1659,7 +1688,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'unpaved', '#a99578',
           '#a99c86',
         ],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.65, 18, 3],
+        'line-width': pathWidthExpression(3, 0),
         'line-dasharray': [2.5, 1.4],
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.56],
       },
@@ -1674,7 +1703,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#b99a91',
-        'line-width': pathWidthExpression(2.5, 61.4981),
+        'line-width': pathWidthExpression(2.5, 0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.76],
       },
     },
@@ -1693,7 +1722,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
           'unpaved', '#a99578',
           '#a99c86',
         ],
-        'line-width': pathWidthExpression(1.8, 61.4981),
+        'line-width': pathWidthExpression(1.8, 0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13.5, 0.5],
       },
     },
@@ -1707,7 +1736,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': '#968a78',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1, 18, 4],
+        'line-width': pathWidthExpression(1.8, 0),
         'line-dasharray': [0.45, 0.55],
       },
     },
@@ -1721,7 +1750,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#a99c86',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 18, 2.5],
+        'line-width': pathWidthExpression(1.8, 0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0, 13, 0.5],
       },
     },
@@ -1734,7 +1763,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       filter: PATH_CONSTRUCTION_FILTER,
       paint: {
         'line-color': '#b5a997',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.55, 18, 2.5],
+        'line-width': pathWidthExpression(2, 0),
         'line-dasharray': [1.5, 1.5],
         'line-opacity': 0.46,
       },
