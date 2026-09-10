@@ -65,7 +65,7 @@ describe('global map overlay styles', () => {
     expect(buildingColorPaint('#fffdf8', false)).toBe('#fffdf8');
   });
 
-  it('caps road and casing pixel widths through close landing zooms', () => {
+  it('keeps road and casing widths in ground metres through close landing zooms', () => {
     for (const latitude of [0, 61.4981]) {
       for (const casing of [false, true]) {
         const compiled = createExpression(roadWidthExpression(latitude, casing), 'flight-road-width');
@@ -74,14 +74,14 @@ describe('global map overlay styles', () => {
           const evaluate = (zoom: number) => compiled.value.evaluate({ zoom }, { properties } as any) as number;
           const reference = evaluate(18);
           for (const zoom of [18.5, 19, 20, 21, 22]) {
-            expect(evaluate(zoom)).toBeCloseTo(reference, 6);
+            expect(evaluate(zoom) / reference).toBeCloseTo(2 ** (zoom - 18), 6);
           }
         }
       }
     }
   });
 
-  it('also caps airfield and path widths at close landing zooms', () => {
+  it('also keeps airfield and path widths in ground metres at close zooms', () => {
     const path = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-path-casing') as any;
     const expressions = [aerowayWidthExpression(61.4981)];
     if (!path) throw new Error('Missing path layer');
@@ -91,7 +91,7 @@ describe('global map overlay styles', () => {
       if (compiled.result !== 'success') throw new Error('Invalid surface width expression');
       const feature = { properties: { class: 'runway' } } as any;
       expect(compiled.value.evaluate({ zoom: 22 }, feature)
-        / compiled.value.evaluate({ zoom: 18 }, feature)).toBeCloseTo(1, 6);
+        / compiled.value.evaluate({ zoom: 18 }, feature)).toBeCloseTo(16, 6);
     }
   });
 

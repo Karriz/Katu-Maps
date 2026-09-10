@@ -155,11 +155,8 @@ import {
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
-  GLOBAL_ROAD_CASING_LAYER_IDS,
-  GLOBAL_ROAD_LAYER_IDS,
   OPENFREEMAP_SOURCE_ID,
-  aerowayWidthExpression,
-  roadWidthExpression,
+  updatePhysicalWidthPaint,
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
@@ -2070,26 +2067,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     let lastModelUpdateSignature: string | undefined;
     const modelVectorSourceId = OPENFREEMAP_SOURCE_ID;
 
-    const updateGlobalRoadWidths = () => {
+    const updateGlobalPhysicalWidths = () => {
       const latitude = map.getCenter().lat;
       if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
       roadWidthLatitude = latitude;
-      GLOBAL_ROAD_CASING_LAYER_IDS.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude, true));
-        }
-      });
-      GLOBAL_ROAD_LAYER_IDS.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setPaintProperty(layerId, 'line-width', roadWidthExpression(latitude));
-        }
-      });
-      if (map.getLayer('global-aeroway-lines')) {
-        map.setPaintProperty('global-aeroway-lines', 'line-width', aerowayWidthExpression(latitude));
-      }
-      if (map.getLayer('global-aeroway-runways')) {
-        map.setPaintProperty('global-aeroway-runways', 'line-width', aerowayWidthExpression(latitude));
-      }
+      updatePhysicalWidthPaint(map, latitude);
     };
     const updateGlobalLabelDensity = () => {
       if (!map.isStyleLoaded()) return;
@@ -2885,7 +2867,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       ['global-bus-stops', 'global-railway-stations', 'global-railway-station-labels', 'global-poi-labels', 'poi-labels'].forEach((layerId) => {
         if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
       });
-      updateGlobalRoadWidths();
+      updateGlobalPhysicalWidths();
       updateGlobalLabelDensity();
       scheduleTreeUpdate();
       scheduleTransitStopsUpdate();
@@ -2941,7 +2923,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     const handleMoveEnd = (event?: unknown) => {
       if (flightActiveRef.current || isTerrainCameraFollowEvent(event)) return;
       persistCamera();
-      updateGlobalRoadWidths();
+      updateGlobalPhysicalWidths();
       scheduleTreeUpdate();
       // Vehicle follow recenters the map several times per second. Those
       // camera-only moves must not trigger a fresh stop query on every moveend.
@@ -2962,7 +2944,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     });
     const handleCameraMove = (event?: unknown) => {
       if (flightActiveRef.current) {
-        updateGlobalRoadWidths();
+        updateGlobalPhysicalWidths();
         return;
       }
       if (isTerrainCameraFollowEvent(event)) return;
