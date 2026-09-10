@@ -210,6 +210,49 @@ describe('road polygon geometry', () => {
     expect(buildRoadCellPolygons(cell, [road([start, end], { className: 'primary', surface: 'unpaved' })]).centerlines).toHaveLength(0);
   });
 
+  it('smooths a closed roundabout instead of buffering an octagon with miters', () => {
+    const origin = planOriginFromLngLat(...TAMPERE);
+    const radius = 18;
+    const loop: Array<{ east: number; north: number }> = [];
+    for (let index = 0; index < 8; index += 1) {
+      const angle = (index / 8) * Math.PI * 2;
+      loop.push({ east: Math.cos(angle) * radius, north: Math.sin(angle) * radius });
+    }
+    loop.push({ ...loop[0] });
+    const densified = densifyPlanLine(loop, 12);
+    expect(densified.length).toBeGreaterThan(loop.length * 2);
+    const ring = bufferPlanLine(densified, 4);
+    const distances = ring.map((point) => Math.hypot(point.east, point.north));
+    const outer = distances.filter((distance) => distance > radius);
+    expect(outer.length).toBeGreaterThan(12);
+    expect(Math.max(...outer) - Math.min(...outer)).toBeLessThan(2.2);
+    const cell = roadWorkCellAt(...TAMPERE);
+    const coordinates = loop.map((point) => planToLngLat(point, origin));
+    const polygons = buildRoadCellPolygons(cell, [road(coordinates, { className: 'primary' })]);
+    const surface = polygons.polygons.find((feature) => feature.properties.kind === 'surface');
+    expect(surface).toBeTruthy();
+    expect(surface!.geometry.coordinates[0].length).toBeGreaterThan(20);
+  });
+
+  it('keeps a right-angle city corner from becoming a roundabout arc', () => {
+    const origin = planOriginFromLngLat(...TAMPERE);
+    const corner = densifyPlanLine(lngLatsToPlan([
+      planToLngLat({ east: -40, north: 0 }, origin),
+      planToLngLat({ east: 0, north: 0 }, origin),
+      planToLngLat({ east: 0, north: 40 }, origin),
+    ], origin), 12);
+    expect(corner.some((point) => point.east > 4 && point.north > 4)).toBe(false);
+  });
+
+  it('ignores far-away roads when collecting nearby centerlines', () => {
+    const nearby = collectRoadCenterlines([
+      { geometry: { type: 'LineString', coordinates: [TAMPERE, [TAMPERE[0] + 0.001, TAMPERE[1]]] }, properties: { class: 'primary' } },
+      { geometry: { type: 'LineString', coordinates: [[24.9, 60.2], [24.91, 60.2]] }, properties: { class: 'motorway' } },
+    ], { longitude: TAMPERE[0], latitude: TAMPERE[1], metres: 2200 });
+    expect(nearby).toHaveLength(1);
+    expect(nearby[0].properties.className).toBe('primary');
+  });
+
   it('densifies long segments so draped vertices can follow terrain', () => {
     const origin = planOriginFromLngLat(...TAMPERE);
     const points = densifyPlanLine(lngLatsToPlan([TAMPERE, [TAMPERE[0] + 0.003, TAMPERE[1]]], origin), 12);

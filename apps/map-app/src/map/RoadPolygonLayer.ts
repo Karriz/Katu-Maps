@@ -6,8 +6,11 @@
  * vector `global-roads` / `global-road-casing` keep service roads opaque and fade
  * the replaced classes out with zoom; polygons fade in over the same band so
  * zoom-out never blanks the road. Uncovered remainder uses slightly narrower
- * GeoJSON fallback lines so original strokes cannot protrude. Wide paved
- * carriageways also get dashed centerlines from the same draped geometry. Cost
+ * GeoJSON fallback lines so original strokes cannot protrude. Dashed
+ * centerlines stay on the original vector marking layer, which paints above
+ * the fills; draped GeoJSON dashes remain as a backup. Zoom-out only flips
+ * visibility and opacity while the camera is moving; GeoJSON teardown waits
+ * until the gesture ends so a terrain `jumpTo` cannot freeze the zoom. Cost
  * stays bounded: three GeoJSON sources, five layers, 25 nearby cells, and two
  * in-flight jobs.
  */
@@ -124,10 +127,6 @@ function createWorker(): Worker | null {
   }
 }
 
-function collectionSignature(data: FeatureCollection) {
-  return JSON.stringify(data.features.map((feature) => [feature.properties, feature.geometry]));
-}
-
 function cellInputSignature(lines: RoadCenterline[]) {
   return `${ROAD_WIDTH_MODEL_REVISION}:${lines.map((line) => (
     `${line.properties.className}:${line.properties.layer}:${line.properties.ramp ? 1 : 0}:${line.properties.surface ?? ''}:${line.coordinates.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join(';')}`
@@ -201,9 +200,10 @@ export function installRoadPolygonLayer(
     }, 80);
   };
   const sourceData = (event: MapSourceDataEvent) => {
-    if (event.sourceId === OPENFREEMAP_SOURCE_ID && event.sourceDataType === 'content') {
-      scheduleUpdate();
-    }
+    if (event.sourceId !== OPENFREEMAP_SOURCE_ID || event.sourceDataType !== 'content') return;
+    // Tile loads during zoom-out would otherwise query the whole viewport.
+    if (typeof map.isMoving === 'function' && map.isMoving()) return;
+    scheduleUpdate();
   };
   const onZoom = () => controller.syncZoom();
   map.on('moveend', scheduleUpdate);
@@ -355,6 +355,8 @@ export function createRoadPolygonController(
           'line-dasharray': [3, 4],
           'line-opacity': roadPolygonCenterlineOpacity(),
           'line-opacity-transition': INSTANT_OPACITY_TRANSITION,
+          'line-translate': [0, -0.6],
+          'line-translate-anchor': 'viewport',
         },
       }, before);
     }
@@ -388,9 +390,8 @@ export function createRoadPolygonController(
     ]) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility);
     }
-    if (map.getLayer(VECTOR_CENTER_MARKINGS_LAYER_ID)) {
-      map.setLayoutProperty(VECTOR_CENTER_MARKINGS_LAYER_ID, 'visibility', visible ? 'none' : 'visible');
-    }
+    // Keep original dashes visible: they paint after the fills, so they are
+    // not buried by terrain-draped road polygons the way GeoJSON hairlines are.
   };
 
   const applyCoverage = (nextCovering: boolean) => {
@@ -407,19 +408,20 @@ export function createRoadPolygonController(
   };
 
   const publish = () => {
-    const completed = lastCells.filter((cell) => {
+    const completed: Array<{ cell: RoadWorkCell; cached: CachedCell }> = [];
+    for (const cell of lastCells) {
       const cached = cachedFor(cell);
-      return cached && !cached.skipped;
-    });
+      if (cached && !cached.skipped) completed.push({ cell, cached });
+    }
     const centerCell = roadWorkCellAt(lastCenter.longitude, lastCenter.latitude);
-    const centerReady = completed.some((cell) => cell.key === centerCell.key);
+    const centerReady = completed.some((entry) => entry.cell.key === centerCell.key);
     const polygonData: FeatureCollection = {
       type: 'FeatureCollection',
-      features: completed.flatMap((cell) => cachedFor(cell)!.polygons),
+      features: completed.flatMap((entry) => entry.cached.polygons),
     };
     const fallbackData: FeatureCollection = {
       type: 'FeatureCollection',
-      features: fallbackLinesForCoverage(lastLines, completed, {
+      features: fallbackLinesForCoverage(lastLines, completed.map((entry) => entry.cell), {
         longitude: lastCenter.longitude,
         latitude: lastCenter.latitude,
         metres: ROAD_POLYGON_FALLBACK_METRES,
@@ -427,14 +429,14 @@ export function createRoadPolygonController(
     };
     const centerlineData: FeatureCollection = {
       type: 'FeatureCollection',
-      features: completed.flatMap((cell) => cachedFor(cell)!.centerlines ?? []),
+      features: completed.flatMap((entry) => entry.cached.centerlines ?? []),
     };
     const polygonSource = map.getSource(ROAD_POLYGON_SOURCE_ID) as GeoJSONSource | undefined;
     const fallbackSource = map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID) as GeoJSONSource | undefined;
     const centerlineSource = map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID) as GeoJSONSource | undefined;
-    const polygonSignature = collectionSignature(polygonData);
-    const fallbackSignature = collectionSignature(fallbackData);
-    const centerlineSignature = collectionSignature(centerlineData);
+    const polygonSignature = completed.map((entry) => `${entry.cell.key}:${entry.cached.inputSignature}`).join('|');
+    const fallbackSignature = `${polygonSignature}:${fallbackData.features.length}`;
+    const centerlineSignature = completed.map((entry) => `${entry.cell.key}:${entry.cached.centerlines?.length ?? 0}`).join('|');
     if (polygonSource && polygonSignature !== lastPublished) {
       polygonSource.setData(polygonData);
       lastPublished = polygonSignature;
@@ -451,7 +453,8 @@ export function createRoadPolygonController(
     if (nextCovering !== covering) {
       covering = nextCovering;
       applyCoverage(covering);
-      refreshMapRenderState(map);
+      const moving = typeof map.isMoving === 'function' && map.isMoving();
+      if (!moving) refreshMapRenderState(map);
     }
   };
 
@@ -558,20 +561,27 @@ export function createRoadPolygonController(
     });
   }
 
-  const teardown = () => {
-    if (!active && !covering) return;
-    active = false;
-    covering = false;
-    queuedCells.clear();
-    inFlight.clear();
-    lastPublished = '';
-    lastFallback = '';
-    lastCenterlines = '';
-    applyCoverage(false);
-    (map.getSource(ROAD_POLYGON_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
-    (map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
-    (map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
-    refreshMapRenderState(map);
+  const teardown = (options?: { clearData?: boolean; refresh?: boolean }) => {
+    const clearData = options?.clearData !== false;
+    const refresh = options?.refresh === true;
+    if (active || covering) {
+      active = false;
+      covering = false;
+      queuedCells.clear();
+      inFlight.clear();
+      applyCoverage(false);
+    } else if (!clearData) {
+      return;
+    }
+    if (clearData && (lastPublished || lastFallback || lastCenterlines)) {
+      lastPublished = '';
+      lastFallback = '';
+      lastCenterlines = '';
+      (map.getSource(ROAD_POLYGON_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
+      (map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
+      (map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
+    }
+    if (refresh) refreshMapRenderState(map);
   };
 
   const update = () => {
@@ -582,6 +592,7 @@ export function createRoadPolygonController(
       teardown();
       return;
     }
+    if (typeof map.isMoving === 'function' && map.isMoving()) return;
     active = true;
     const center = map.getCenter();
     lastCenter = { longitude: center.lng, latitude: center.lat };
@@ -598,7 +609,11 @@ export function createRoadPolygonController(
     } catch {
       return;
     }
-    lastLines = collectRoadCenterlines(features);
+    lastLines = collectRoadCenterlines(features, {
+      longitude: center.lng,
+      latitude: center.lat,
+      metres: ROAD_POLYGON_FALLBACK_METRES + ROAD_CELL_PADDING_METRES,
+    });
     lastCells = cellsAround(center.lng, center.lat, ROAD_POLYGON_NEAR_METRES, ROAD_POLYGON_MAX_CELLS);
     for (const cell of lastCells) scheduleCell(cell);
     publish();
@@ -608,7 +623,9 @@ export function createRoadPolygonController(
     update,
     syncZoom: () => {
       if (disposed || (!active && !covering)) return;
-      if (!shouldActivateRoadPolygons(map.getZoom(), active)) teardown();
+      if (!shouldActivateRoadPolygons(map.getZoom(), active)) {
+        teardown({ clearData: false, refresh: false });
+      }
     },
     invalidateSource: () => {
       cache.clear();
