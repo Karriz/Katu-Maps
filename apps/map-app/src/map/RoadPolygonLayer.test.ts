@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildRoadCellPolygons } from './RoadPolygonGeometry';
 import {
+  ROAD_POLYGON_CENTERLINE_LAYER_ID,
   ROAD_POLYGON_ENTER_ZOOM,
   ROAD_POLYGON_EXIT_ZOOM,
   ROAD_POLYGON_FALLBACK_LAYER_ID,
@@ -101,7 +102,12 @@ describe('road polygon layer', () => {
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.layout['fill-sort-key']).toBeDefined();
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.paint['fill-sort-key']).toBeUndefined();
+    expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout.visibility).toBe('visible');
+    expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout['line-sort-key']).toBeDefined();
+    expect(layers.get(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.paint['line-dasharray']).toEqual([3, 4]);
+    expect(layers.get('global-road-center-markings')?.layout.visibility).toBe('none');
     expect((map.getSource('road-polygons') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
+    expect((map.getSource('road-polygon-centerlines') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
     controller.dispose();
   });
 
@@ -144,6 +150,8 @@ describe('road polygon layer', () => {
     ]));
     expect(map.getLayer(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('none');
     expect(map.getLayer(ROAD_POLYGON_FALLBACK_LAYER_ID)?.layout.visibility).toBe('none');
+    expect(map.getLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID)?.layout.visibility).toBe('none');
+    expect(map.getLayer('global-road-center-markings')?.layout.visibility).toBe('visible');
     controller.dispose();
   });
 

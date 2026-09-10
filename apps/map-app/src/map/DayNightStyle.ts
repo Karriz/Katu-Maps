@@ -81,6 +81,7 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
     'global-road-polygon-fallback',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.road));
   setPaint(map, 'global-road-polygons', 'fill-color', colors.road);
+  setPaint(map, 'global-road-polygon-centerlines', 'line-color', '#ffffff');
   [
     'global-path-casing', 'global-cycleway-casing', 'global-footways',
     'global-steps', 'global-other-paths',

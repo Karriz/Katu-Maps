@@ -2,6 +2,7 @@ import {
   estimatedRoadCasingWidthMetres,
   estimatedRoadWidthMetres,
   isRoadPolygonClass,
+  shouldDrawRoadCenterline,
   type RoadWidthProperties,
 } from './RoadWidth';
 
@@ -16,6 +17,7 @@ const ROUND_CAP_SEGMENTS = 5;
 const MITER_LIMIT = 2.8;
 const STITCH_METRES = 2.4;
 const MIN_POLYGON_AREA_METRES = 2;
+const MIN_CENTERLINE_LENGTH_METRES = 4;
 const MAX_FEATURES_PER_CELL = 280;
 const MAX_VERTICES_PER_CELL = 12_000;
 
@@ -57,9 +59,23 @@ export type RoadPolygonFeature = {
   };
 };
 
+export type RoadCenterlineFeature = {
+  type: 'Feature';
+  properties: {
+    kind: 'centerline';
+    class: string;
+    layer: number;
+  };
+  geometry: {
+    type: 'LineString';
+    coordinates: Array<[number, number]>;
+  };
+};
+
 export type RoadCellGeometry = {
   cellKey: string;
   polygons: RoadPolygonFeature[];
+  centerlines: RoadCenterlineFeature[];
   vertexCount: number;
   skipped: boolean;
 };
@@ -465,6 +481,74 @@ function interpolate(start: PlanPoint, end: PlanPoint, t: number): PlanPoint {
   };
 }
 
+export function clipPlanLineToRect(points: PlanPoint[], rect: PlanRect) {
+  if (points.length < 2) return [];
+  const parts: PlanPoint[][] = [];
+  let current: PlanPoint[] = [];
+  const pushPoint = (point: PlanPoint) => {
+    const last = current[current.length - 1];
+    if (last && last.east === point.east && last.north === point.north) return;
+    current.push(point);
+  };
+  const flush = () => {
+    if (current.length >= 2) parts.push(current);
+    current = [];
+  };
+  for (let index = 1; index < points.length; index += 1) {
+    const clipped = clipSegmentInside(points[index - 1], points[index], rect);
+    if (!clipped) {
+      flush();
+      continue;
+    }
+    if (current.length === 0) {
+      pushPoint(clipped[0]);
+      pushPoint(clipped[1]);
+    } else {
+      const last = current[current.length - 1];
+      if (Math.hypot(last.east - clipped[0].east, last.north - clipped[0].north) > 0.05) {
+        flush();
+        pushPoint(clipped[0]);
+      }
+      pushPoint(clipped[1]);
+    }
+  }
+  flush();
+  return parts;
+}
+
+function clipSegmentInside(start: PlanPoint, end: PlanPoint, rect: PlanRect): [PlanPoint, PlanPoint] | null {
+  const startInside = pointInRect(start, rect);
+  const endInside = pointInRect(end, rect);
+  if (!startInside && !endInside && !segmentIntersectsRect(start, end, rect)) return null;
+  const hits = segmentRectHits(start, end, rect);
+  const points = [start, ...hits, end].sort((left, right) => {
+    const leftT = paramOnSegment(start, end, left);
+    const rightT = paramOnSegment(start, end, right);
+    return leftT - rightT;
+  });
+  const unique: PlanPoint[] = [];
+  for (const point of points) {
+    const last = unique[unique.length - 1];
+    if (last && Math.hypot(last.east - point.east, last.north - point.north) < 1e-6) continue;
+    unique.push(point);
+  }
+  for (let index = 1; index < unique.length; index += 1) {
+    const from = unique[index - 1];
+    const to = unique[index];
+    const mid = { east: (from.east + to.east) / 2, north: (from.north + to.north) / 2 };
+    if (pointInRect(mid, rect)) return [from, to];
+  }
+  return null;
+}
+
+function planLength(points: PlanPoint[]) {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(points[index].east - points[index - 1].east, points[index].north - points[index - 1].north);
+  }
+  return length;
+}
+
 export function clipLineOutsideRects(coordinates: Array<[number, number]>, rects: RoadWorkCell[], seamMetres: number) {
   if (coordinates.length < 2 || rects.length === 0) return [coordinates];
   const origin = planOriginFromLngLat(coordinates[0][0], coordinates[0][1]);
@@ -632,13 +716,14 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
   const clip = cellRect(cell, origin);
   const nearby = lines.filter((line) => lineIntersectsRect(line.coordinates, origin, padded));
   if (nearby.length === 0) {
-    return { cellKey: cell.key, polygons: [], vertexCount: 0, skipped: false };
+    return { cellKey: cell.key, polygons: [], centerlines: [], vertexCount: 0, skipped: false };
   }
   if (nearby.length > MAX_FEATURES_PER_CELL) {
-    return { cellKey: cell.key, polygons: [], vertexCount: 0, skipped: true };
+    return { cellKey: cell.key, polygons: [], centerlines: [], vertexCount: 0, skipped: true };
   }
   const stitched = stitchRoadCenterlines(nearby);
   const polygons: RoadPolygonFeature[] = [];
+  const centerlines: RoadCenterlineFeature[] = [];
   let vertexCount = 0;
   for (const line of stitched) {
     const simplified = simplifyPlanLine(lngLatsToPlan(line.coordinates, origin), ROAD_SIMPLIFY_METRES);
@@ -652,7 +737,7 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
       if (clipped.length < 4 || polygonArea(clipped) < MIN_POLYGON_AREA_METRES) continue;
       vertexCount += clipped.length;
       if (vertexCount > MAX_VERTICES_PER_CELL) {
-        return { cellKey: cell.key, polygons: [], vertexCount, skipped: true };
+        return { cellKey: cell.key, polygons: [], centerlines: [], vertexCount, skipped: true };
       }
       polygons.push({
         type: 'Feature',
@@ -669,8 +754,24 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
         },
       });
     }
+    if (!shouldDrawRoadCenterline(line.properties)) continue;
+    for (const part of clipPlanLineToRect(densified, clip)) {
+      if (part.length < 2 || planLength(part) < MIN_CENTERLINE_LENGTH_METRES) continue;
+      centerlines.push({
+        type: 'Feature',
+        properties: {
+          kind: 'centerline',
+          class: line.properties.className,
+          layer: line.properties.layer,
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: part.map((point) => planToLngLat(point, origin)),
+        },
+      });
+    }
   }
-  return { cellKey: cell.key, polygons, vertexCount, skipped: false };
+  return { cellKey: cell.key, polygons, centerlines, vertexCount, skipped: false };
 }
 
 export function fallbackLinesForCoverage(

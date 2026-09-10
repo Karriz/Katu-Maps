@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createExpression } from '@maplibre/maplibre-gl-style-spec';
-import { estimatedRoadWidthExpression, estimatedRoadWidthMetres } from './RoadWidth';
+import { estimatedRoadWidthExpression, estimatedRoadWidthMetres, shouldDrawRoadCenterline } from './RoadWidth';
 import {
   bufferPlanLine,
   buildRoadCellPolygons,
   cellsAround,
   clipLineOutsideRects,
+  clipPlanLineToRect,
   collectRoadCenterlines,
   densifyPlanLine,
   fallbackLinesForCoverage,
@@ -61,6 +62,16 @@ describe('road width model', () => {
       });
       expect(compiled.value.evaluate({ zoom: 16 }, { properties } as never)).toBe(expected);
     }
+  });
+
+  it('draws centerlines only on wide paved carriageways', () => {
+    expect(shouldDrawRoadCenterline({ className: 'motorway' })).toBe(true);
+    expect(shouldDrawRoadCenterline({ className: 'secondary' })).toBe(true);
+    expect(shouldDrawRoadCenterline({ className: 'tertiary' })).toBe(false);
+    expect(shouldDrawRoadCenterline({ className: 'minor' })).toBe(false);
+    expect(shouldDrawRoadCenterline({ className: 'motorway', ramp: true })).toBe(false);
+    expect(shouldDrawRoadCenterline({ className: 'primary', surface: 'unpaved' })).toBe(false);
+    expect(shouldDrawRoadCenterline({ className: 'primary', surface: 'gravel' })).toBe(false);
   });
 });
 
@@ -167,6 +178,36 @@ describe('road polygon geometry', () => {
     const midLng = (cell.west + cell.east) / 2;
     const coveredInterior = parts.some((part) => part.some(([lng]) => Math.abs(lng - midLng) < 0.0003));
     expect(coveredInterior).toBe(false);
+  });
+
+  it('clips a line to the interior of a rectangle', () => {
+    const rect = { minEast: -10, maxEast: 10, minNorth: -10, maxNorth: 10 };
+    const parts = clipPlanLineToRect([
+      { east: -20, north: 0 },
+      { east: 20, north: 0 },
+    ], rect);
+    expect(parts).toHaveLength(1);
+    expect(parts[0][0].east).toBeCloseTo(-10, 5);
+    expect(parts[0].at(-1)?.east).toBeCloseTo(10, 5);
+  });
+
+  it('adds dashed centerlines on wide roads and skips narrow, ramp, and unpaved ones', () => {
+    const cell = roadWorkCellAt(...TAMPERE);
+    const origin = planOriginFromLngLat((cell.west + cell.east) / 2, (cell.south + cell.north) / 2);
+    const start = planToLngLat({ east: -80, north: 0 }, origin);
+    const end = planToLngLat({ east: 80, north: 0 }, origin);
+    const wide = buildRoadCellPolygons(cell, [road([start, end], { className: 'secondary' })]);
+    expect(wide.centerlines.length).toBeGreaterThan(0);
+    const allInside = wide.centerlines.every((feature) => (
+      feature.geometry.coordinates.every(([lng, lat]) => {
+        const point = lngLatsToPlan([[lng, lat]], origin)[0];
+        return Math.abs(point.east) <= ROAD_CELL_HALF + 0.05 && Math.abs(point.north) <= ROAD_CELL_HALF + 0.05;
+      })
+    ));
+    expect(allInside).toBe(true);
+    expect(buildRoadCellPolygons(cell, [road([start, end], { className: 'minor' })]).centerlines).toHaveLength(0);
+    expect(buildRoadCellPolygons(cell, [road([start, end], { className: 'motorway', ramp: true })]).centerlines).toHaveLength(0);
+    expect(buildRoadCellPolygons(cell, [road([start, end], { className: 'primary', surface: 'unpaved' })]).centerlines).toHaveLength(0);
   });
 
   it('densifies long segments so draped vertices can follow terrain', () => {

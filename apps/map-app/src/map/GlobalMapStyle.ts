@@ -14,6 +14,7 @@ import { MAP_COLORS } from './MapPalette';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT, RAIL_GAUGE, RAIL_WIDTH, RAIL_BED_WIDTH, SLEEPER_WIDTH, SLEEPER_THICKNESS, SLEEPER_SPACING, railwayWidth } from './RailwayAppearance';
 import { HIKING_POI_CLASSES } from './PoiClasses';
 import {
+  ROAD_CENTERLINE_WIDTH_METRES,
   ROAD_LINE_UNDER_POLYGON_SCALE,
   estimatedRoadWidthExpression,
 } from './RoadWidth';
@@ -707,7 +708,7 @@ export function aerowayWidthExpression(latitude: number): ExpressionSpecificatio
   ] as ExpressionSpecification;
 }
 
-function pathWidthExpression(
+export function pathWidthExpression(
   widthMetres: number | ExpressionSpecification,
   latitude: number,
   casing = false,
@@ -735,7 +736,8 @@ export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number) {
   GLOBAL_ROAD_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude)));
   ['global-aeroway-lines', 'global-aeroway-runways']
     .forEach((id) => setWidth(id, aerowayWidthExpression(latitude)));
-  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude));
+  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude));
+  setWidth('global-road-polygon-centerlines', pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude));
 
   const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [
     ['global-path-bridge-shadow', BRIDGE_PATH_WIDTH_METRES, true],
@@ -1570,7 +1572,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       },
       paint: {
         'line-color': '#ffffff',
-        'line-width': pathWidthExpression(0.2, 0),
+        'line-width': pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, 0),
         'line-dasharray': [3, 4],
         'line-opacity': [
           'interpolate', ['linear'], ['zoom'],

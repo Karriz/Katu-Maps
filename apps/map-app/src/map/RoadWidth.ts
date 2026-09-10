@@ -3,7 +3,11 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 export const ROAD_CASING_METRES = 1;
 /** Keep leftover vector strokes slightly inside metre-accurate polygons. */
 export const ROAD_LINE_UNDER_POLYGON_SCALE = 0.88;
-export const ROAD_WIDTH_MODEL_REVISION = 1;
+export const ROAD_WIDTH_MODEL_REVISION = 2;
+/** Dashed markings only where a carriageway is wide enough to hold them. */
+export const ROAD_CENTERLINE_MIN_WIDTH_METRES = 8;
+export const ROAD_CENTERLINE_WIDTH_METRES = 0.2;
+const UNPAVED_ROAD_SURFACES = new Set(['unpaved', 'gravel', 'dirt', 'ground', 'sand']);
 
 export const ROAD_POLYGON_CLASSES = [
   'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor',
@@ -42,6 +46,7 @@ export type RoadWidthProperties = {
   className: string;
   ramp?: boolean;
   service?: string;
+  surface?: string;
 };
 
 export function estimatedRoadWidthMetres(properties: RoadWidthProperties) {
@@ -61,6 +66,13 @@ export function estimatedRoadCasingWidthMetres(properties: RoadWidthProperties) 
 
 export function isRoadPolygonClass(className: string): className is RoadPolygonClass {
   return (ROAD_POLYGON_CLASSES as readonly string[]).includes(className);
+}
+
+export function shouldDrawRoadCenterline(properties: RoadWidthProperties) {
+  if (properties.ramp) return false;
+  const surface = properties.surface?.toLowerCase();
+  if (surface && UNPAVED_ROAD_SURFACES.has(surface)) return false;
+  return estimatedRoadWidthMetres(properties) >= ROAD_CENTERLINE_MIN_WIDTH_METRES;
 }
 
 function matchTable(

@@ -11,6 +11,7 @@ export type RoadPolygonWorkerResponse = {
   cellKey: string;
   ok: boolean;
   polygons?: ReturnType<typeof buildRoadCellPolygons>['polygons'];
+  centerlines?: ReturnType<typeof buildRoadCellPolygons>['centerlines'];
   vertexCount?: number;
   skipped?: boolean;
   error?: string;
@@ -25,6 +26,7 @@ self.onmessage = (event: MessageEvent<RoadPolygonWorkerRequest>) => {
       cellKey: result.cellKey,
       ok: true,
       polygons: result.polygons,
+      centerlines: result.centerlines,
       vertexCount: result.vertexCount,
       skipped: result.skipped,
     };

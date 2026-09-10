@@ -5,8 +5,9 @@
  * cached by cell plus centreline signature. Vector `global-roads` /
  * `global-road-casing` keep only service roads once the camera cell is replaced;
  * uncovered remainder uses slightly narrower GeoJSON fallback lines so original
- * strokes cannot protrude. Cost stays bounded: two GeoJSON sources, four
- * layers, 25 nearby cells, and two in-flight jobs.
+ * strokes cannot protrude. Wide paved carriageways also get dashed centerlines
+ * from the same draped geometry. Cost stays bounded: three GeoJSON sources,
+ * five layers, 25 nearby cells, and two in-flight jobs.
  */
 import type {
   ExpressionSpecification,
@@ -18,6 +19,7 @@ import type {
 import type { FeatureCollection } from 'geojson';
 import {
   OPENFREEMAP_SOURCE_ID,
+  pathWidthExpression,
   refreshMapRenderState,
   roadWidthExpression,
 } from './GlobalMapStyle';
@@ -36,16 +38,20 @@ import {
   type RoadWorkCell,
 } from './RoadPolygonGeometry';
 import {
+  ROAD_CENTERLINE_WIDTH_METRES,
   ROAD_POLYGON_CLASSES,
   ROAD_WIDTH_MODEL_REVISION,
 } from './RoadWidth';
 
 export const ROAD_POLYGON_SOURCE_ID = 'road-polygons';
 export const ROAD_POLYGON_FALLBACK_SOURCE_ID = 'road-polygon-fallback';
+export const ROAD_POLYGON_CENTERLINE_SOURCE_ID = 'road-polygon-centerlines';
 export const ROAD_POLYGON_CASING_LAYER_ID = 'global-road-polygon-casing';
 export const ROAD_POLYGON_LAYER_ID = 'global-road-polygons';
 export const ROAD_POLYGON_FALLBACK_CASING_LAYER_ID = 'global-road-polygon-fallback-casing';
 export const ROAD_POLYGON_FALLBACK_LAYER_ID = 'global-road-polygon-fallback';
+export const ROAD_POLYGON_CENTERLINE_LAYER_ID = 'global-road-polygon-centerlines';
+const VECTOR_CENTER_MARKINGS_LAYER_ID = 'global-road-center-markings';
 
 export const ROAD_POLYGON_ENTER_ZOOM = 15.2;
 export const ROAD_POLYGON_EXIT_ZOOM = 14.75;
@@ -124,7 +130,7 @@ function collectionSignature(data: FeatureCollection) {
 
 function cellInputSignature(lines: RoadCenterline[]) {
   return `${ROAD_WIDTH_MODEL_REVISION}:${lines.map((line) => (
-    `${line.properties.className}:${line.properties.layer}:${line.properties.ramp ? 1 : 0}:${line.coordinates.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join(';')}`
+    `${line.properties.className}:${line.properties.layer}:${line.properties.ramp ? 1 : 0}:${line.properties.surface ?? ''}:${line.coordinates.map((point) => `${point[0].toFixed(5)},${point[1].toFixed(5)}`).join(';')}`
   )).sort().join('|')}`;
 }
 
@@ -185,6 +191,7 @@ export function createRoadPolygonController(
   let covering = false;
   let lastPublished = '';
   let lastFallback = '';
+  let lastCenterlines = '';
   let lastLatitude: number | undefined;
   let lastLines: RoadCenterline[] = [];
   let lastCells: RoadWorkCell[] = [];
@@ -208,8 +215,8 @@ export function createRoadPolygonController(
   };
 
   const insertBefore = () => (
-    map.getLayer('global-road-center-markings')
-      ? 'global-road-center-markings'
+    map.getLayer(VECTOR_CENTER_MARKINGS_LAYER_ID)
+      ? VECTOR_CENTER_MARKINGS_LAYER_ID
       : map.getLayer('global-path-casing') ? 'global-path-casing' : undefined
   );
 
@@ -219,6 +226,9 @@ export function createRoadPolygonController(
     }
     if (!map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID)) {
       map.addSource(ROAD_POLYGON_FALLBACK_SOURCE_ID, { type: 'geojson', data: EMPTY, maxzoom: 16 });
+    }
+    if (!map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID)) {
+      map.addSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID, { type: 'geojson', data: EMPTY, maxzoom: 16 });
     }
     const before = insertBefore();
     if (!map.getLayer(ROAD_POLYGON_FALLBACK_CASING_LAYER_ID)) {
@@ -283,6 +293,31 @@ export function createRoadPolygonController(
         },
       }, before);
     }
+    if (!map.getLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID)) {
+      map.addLayer({
+        id: ROAD_POLYGON_CENTERLINE_LAYER_ID,
+        type: 'line',
+        source: ROAD_POLYGON_CENTERLINE_SOURCE_ID,
+        minzoom: ROAD_POLYGON_EXIT_ZOOM,
+        layout: {
+          'line-cap': 'butt',
+          'line-join': 'round',
+          visibility: 'none',
+          'line-sort-key': ['+', ['coalesce', ['get', 'layer'], 0], 0.2],
+        },
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, map.getCenter().lat),
+          'line-dasharray': [3, 4],
+          'line-opacity': [
+            'interpolate', ['linear'], ['zoom'],
+            15, 0,
+            15.8, 0.6,
+            18, 0.82,
+          ],
+        },
+      }, before);
+    }
   };
 
   const setVectorRoadFilter = (replaced: boolean) => {
@@ -297,8 +332,12 @@ export function createRoadPolygonController(
     for (const id of [
       ROAD_POLYGON_CASING_LAYER_ID, ROAD_POLYGON_LAYER_ID,
       ROAD_POLYGON_FALLBACK_CASING_LAYER_ID, ROAD_POLYGON_FALLBACK_LAYER_ID,
+      ROAD_POLYGON_CENTERLINE_LAYER_ID,
     ]) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility);
+    }
+    if (map.getLayer(VECTOR_CENTER_MARKINGS_LAYER_ID)) {
+      map.setLayoutProperty(VECTOR_CENTER_MARKINGS_LAYER_ID, 'visibility', visible ? 'none' : 'visible');
     }
   };
 
@@ -321,10 +360,16 @@ export function createRoadPolygonController(
         metres: ROAD_POLYGON_FALLBACK_METRES,
       }),
     };
+    const centerlineData: FeatureCollection = {
+      type: 'FeatureCollection',
+      features: completed.flatMap((cell) => cachedFor(cell)!.centerlines ?? []),
+    };
     const polygonSource = map.getSource(ROAD_POLYGON_SOURCE_ID) as GeoJSONSource | undefined;
     const fallbackSource = map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID) as GeoJSONSource | undefined;
+    const centerlineSource = map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID) as GeoJSONSource | undefined;
     const polygonSignature = collectionSignature(polygonData);
     const fallbackSignature = collectionSignature(fallbackData);
+    const centerlineSignature = collectionSignature(centerlineData);
     if (polygonSource && polygonSignature !== lastPublished) {
       polygonSource.setData(polygonData);
       lastPublished = polygonSignature;
@@ -332,6 +377,10 @@ export function createRoadPolygonController(
     if (fallbackSource && fallbackSignature !== lastFallback) {
       fallbackSource.setData(fallbackData);
       lastFallback = fallbackSignature;
+    }
+    if (centerlineSource && centerlineSignature !== lastCenterlines) {
+      centerlineSource.setData(centerlineData);
+      lastCenterlines = centerlineSignature;
     }
     const nextCovering = centerReady && completed.length > 0;
     if (nextCovering !== covering) {
@@ -358,6 +407,13 @@ export function createRoadPolygonController(
         ROAD_POLYGON_FALLBACK_LAYER_ID,
         'line-width',
         roadWidthExpression(latitude),
+      );
+    }
+    if (map.getLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID)) {
+      map.setPaintProperty(
+        ROAD_POLYGON_CENTERLINE_LAYER_ID,
+        'line-width',
+        pathWidthExpression(ROAD_CENTERLINE_WIDTH_METRES, latitude),
       );
     }
   };
@@ -418,6 +474,7 @@ export function createRoadPolygonController(
         cellKey: string;
         ok: boolean;
         polygons?: RoadCellGeometry['polygons'];
+        centerlines?: RoadCellGeometry['centerlines'];
         vertexCount?: number;
         skipped?: boolean;
       };
@@ -430,6 +487,7 @@ export function createRoadPolygonController(
       completeCell({
         cellKey: data.cellKey,
         polygons: data.polygons ?? [],
+        centerlines: data.centerlines ?? [],
         vertexCount: data.vertexCount ?? 0,
         skipped: Boolean(data.skipped),
       }, data.requestId, pending.inputSignature);
@@ -444,10 +502,12 @@ export function createRoadPolygonController(
     inFlight.clear();
     lastPublished = '';
     lastFallback = '';
+    lastCenterlines = '';
     setVectorRoadFilter(false);
     setReplacementVisible(false);
     (map.getSource(ROAD_POLYGON_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
     (map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
+    (map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID) as GeoJSONSource | undefined)?.setData(EMPTY);
     refreshMapRenderState(map);
   };
 
@@ -495,10 +555,12 @@ export function createRoadPolygonController(
       queuedCells.clear();
       cache.clear();
       teardown();
+      if (map.getLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID)) map.removeLayer(ROAD_POLYGON_CENTERLINE_LAYER_ID);
       if (map.getLayer(ROAD_POLYGON_FALLBACK_LAYER_ID)) map.removeLayer(ROAD_POLYGON_FALLBACK_LAYER_ID);
       if (map.getLayer(ROAD_POLYGON_FALLBACK_CASING_LAYER_ID)) map.removeLayer(ROAD_POLYGON_FALLBACK_CASING_LAYER_ID);
       if (map.getLayer(ROAD_POLYGON_LAYER_ID)) map.removeLayer(ROAD_POLYGON_LAYER_ID);
       if (map.getLayer(ROAD_POLYGON_CASING_LAYER_ID)) map.removeLayer(ROAD_POLYGON_CASING_LAYER_ID);
+      if (map.getSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID)) map.removeSource(ROAD_POLYGON_CENTERLINE_SOURCE_ID);
       if (map.getSource(ROAD_POLYGON_FALLBACK_SOURCE_ID)) map.removeSource(ROAD_POLYGON_FALLBACK_SOURCE_ID);
       if (map.getSource(ROAD_POLYGON_SOURCE_ID)) map.removeSource(ROAD_POLYGON_SOURCE_ID);
     },
