@@ -36,7 +36,6 @@ import {
   type RoadWorkCell,
 } from './RoadPolygonGeometry';
 import {
-  ROAD_LINE_UNDER_POLYGON_SCALE,
   ROAD_POLYGON_CLASSES,
   ROAD_WIDTH_MODEL_REVISION,
 } from './RoadWidth';
@@ -222,36 +221,6 @@ export function createRoadPolygonController(
       map.addSource(ROAD_POLYGON_FALLBACK_SOURCE_ID, { type: 'geojson', data: EMPTY, maxzoom: 16 });
     }
     const before = insertBefore();
-    if (!map.getLayer(ROAD_POLYGON_CASING_LAYER_ID)) {
-      map.addLayer({
-        id: ROAD_POLYGON_CASING_LAYER_ID,
-        type: 'fill',
-        source: ROAD_POLYGON_SOURCE_ID,
-        minzoom: ROAD_POLYGON_EXIT_ZOOM,
-        filter: ['==', ['get', 'kind'], 'casing'],
-        layout: { visibility: 'none' },
-        paint: {
-          'fill-color': CLOSEUP_ROAD_CASING,
-          'fill-opacity': 1,
-          'fill-sort-key': ['+', ['coalesce', ['get', 'layer'], 0], 0.05],
-        },
-      } as never, before);
-    }
-    if (!map.getLayer(ROAD_POLYGON_LAYER_ID)) {
-      map.addLayer({
-        id: ROAD_POLYGON_LAYER_ID,
-        type: 'fill',
-        source: ROAD_POLYGON_SOURCE_ID,
-        minzoom: ROAD_POLYGON_EXIT_ZOOM,
-        filter: ['==', ['get', 'kind'], 'surface'],
-        layout: { visibility: 'none' },
-        paint: {
-          'fill-color': polygonFillColor(),
-          'fill-opacity': 1,
-          'fill-sort-key': ['+', ['coalesce', ['get', 'layer'], 0], 0.1],
-        },
-      } as never, before);
-    }
     if (!map.getLayer(ROAD_POLYGON_FALLBACK_CASING_LAYER_ID)) {
       map.addLayer({
         id: ROAD_POLYGON_FALLBACK_CASING_LAYER_ID,
@@ -264,7 +233,7 @@ export function createRoadPolygonController(
           'line-width': roadWidthExpression(map.getCenter().lat, true),
           'line-opacity': 0.9,
         },
-      }, ROAD_POLYGON_CASING_LAYER_ID);
+      }, before);
     }
     if (!map.getLayer(ROAD_POLYGON_FALLBACK_LAYER_ID)) {
       map.addLayer({
@@ -278,7 +247,41 @@ export function createRoadPolygonController(
           'line-width': roadWidthExpression(map.getCenter().lat),
           'line-opacity': 1,
         },
-      }, ROAD_POLYGON_LAYER_ID);
+      }, before);
+    }
+    if (!map.getLayer(ROAD_POLYGON_CASING_LAYER_ID)) {
+      map.addLayer({
+        id: ROAD_POLYGON_CASING_LAYER_ID,
+        type: 'fill',
+        source: ROAD_POLYGON_SOURCE_ID,
+        minzoom: ROAD_POLYGON_EXIT_ZOOM,
+        filter: ['==', ['get', 'kind'], 'casing'],
+        layout: {
+          visibility: 'none',
+          'fill-sort-key': ['+', ['coalesce', ['get', 'layer'], 0], 0.05],
+        },
+        paint: {
+          'fill-color': CLOSEUP_ROAD_CASING,
+          'fill-opacity': 1,
+        },
+      }, before);
+    }
+    if (!map.getLayer(ROAD_POLYGON_LAYER_ID)) {
+      map.addLayer({
+        id: ROAD_POLYGON_LAYER_ID,
+        type: 'fill',
+        source: ROAD_POLYGON_SOURCE_ID,
+        minzoom: ROAD_POLYGON_EXIT_ZOOM,
+        filter: ['==', ['get', 'kind'], 'surface'],
+        layout: {
+          visibility: 'none',
+          'fill-sort-key': ['+', ['coalesce', ['get', 'layer'], 0], 0.1],
+        },
+        paint: {
+          'fill-color': polygonFillColor(),
+          'fill-opacity': 1,
+        },
+      }, before);
     }
   };
 
@@ -343,21 +346,18 @@ export function createRoadPolygonController(
     const latitude = map.getCenter().lat;
     if (lastLatitude !== undefined && Math.abs(latitude - lastLatitude) < 0.25) return;
     lastLatitude = latitude;
-    const scaleWidth = (expression: ExpressionSpecification): ExpressionSpecification => (
-      ['*', expression, ROAD_LINE_UNDER_POLYGON_SCALE] as ExpressionSpecification
-    );
     if (map.getLayer(ROAD_POLYGON_FALLBACK_CASING_LAYER_ID)) {
       map.setPaintProperty(
         ROAD_POLYGON_FALLBACK_CASING_LAYER_ID,
         'line-width',
-        scaleWidth(roadWidthExpression(latitude, true)),
+        roadWidthExpression(latitude, true),
       );
     }
     if (map.getLayer(ROAD_POLYGON_FALLBACK_LAYER_ID)) {
       map.setPaintProperty(
         ROAD_POLYGON_FALLBACK_LAYER_ID,
         'line-width',
-        scaleWidth(roadWidthExpression(latitude)),
+        roadWidthExpression(latitude),
       );
     }
   };
@@ -452,7 +452,7 @@ export function createRoadPolygonController(
   };
 
   const update = () => {
-    if (disposed || !map.getSource?.(OPENFREEMAP_SOURCE_ID)) return;
+    if (disposed || !map.getSource?.(OPENFREEMAP_SOURCE_ID) || map.isStyleLoaded?.() === false) return;
     ensureStyle();
     const zoom = map.getZoom();
     if (!shouldActivateRoadPolygons(zoom, active)) {

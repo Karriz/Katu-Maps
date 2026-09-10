@@ -99,6 +99,8 @@ describe('road polygon layer', () => {
       ['==', ['get', 'class'], 'service'],
     ]));
     expect(layers.get(ROAD_POLYGON_LAYER_ID)?.layout.visibility).toBe('visible');
+    expect(layers.get(ROAD_POLYGON_LAYER_ID)?.layout['fill-sort-key']).toBeDefined();
+    expect(layers.get(ROAD_POLYGON_LAYER_ID)?.paint['fill-sort-key']).toBeUndefined();
     expect((map.getSource('road-polygons') as { data: { features: unknown[] } }).data.features.length).toBeGreaterThan(0);
     controller.dispose();
   });
