@@ -458,6 +458,15 @@ export function bufferPlanLine(
   halfWidth: number,
   options: { startCap: 'round' | 'butt'; endCap: 'round' | 'butt' } = { startCap: 'round', endCap: 'round' },
 ) {
+  return bufferPlanRings(points, halfWidth, options)[0] ?? [];
+}
+
+/** Closed carriageways become an outer ring plus a hole so the island stays open. */
+export function bufferPlanRings(
+  points: PlanPoint[],
+  halfWidth: number,
+  options: { startCap: 'round' | 'butt'; endCap: 'round' | 'butt' } = { startCap: 'round', endCap: 'round' },
+) {
   if (points.length < 2 || halfWidth <= 0) return [];
   const closed = isClosedPlanLine(points);
   const body = closed ? closedRingBody(points) : points;
@@ -465,19 +474,49 @@ export function bufferPlanLine(
   const left = offsetSide(body, halfWidth, closed);
   const right = offsetSide(body, -halfWidth, closed);
   if (left.length < 2 || right.length < 2) return [];
+  if (closed) {
+    const leftRadius = meanRadius(left);
+    const rightRadius = meanRadius(right);
+    const outer = leftRadius >= rightRadius ? left : right;
+    const inner = leftRadius >= rightRadius ? right : left;
+    return [orientRing(outer, false), orientRing(inner, true)];
+  }
   const ring: PlanPoint[] = [...left];
-  if (!closed && options.endCap === 'round') {
+  if (options.endCap === 'round') {
     ring.push(...joinArc(body[body.length - 1], left[left.length - 1], right[right.length - 1]));
   }
   ring.push(...right.slice().reverse());
-  if (!closed && options.startCap === 'round') {
+  if (options.startCap === 'round') {
     ring.push(...joinArc(body[0], right[0], left[0]));
   }
-  if (ring.length > 0) {
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first.east !== last.east || first.north !== last.north) ring.push({ ...first });
+  return [orientRing(ring, false)];
+}
+
+function meanRadius(points: PlanPoint[]) {
+  const center = {
+    east: points.reduce((sum, point) => sum + point.east, 0) / points.length,
+    north: points.reduce((sum, point) => sum + point.north, 0) / points.length,
+  };
+  return points.reduce((sum, point) => sum + Math.hypot(point.east - center.east, point.north - center.north), 0)
+    / points.length;
+}
+
+function signedArea(ring: PlanPoint[]) {
+  let area = 0;
+  for (let index = 1; index < ring.length; index += 1) {
+    area += ring[index - 1].east * ring[index].north - ring[index].east * ring[index - 1].north;
   }
+  return area / 2;
+}
+
+function orientRing(points: PlanPoint[], clockwise: boolean) {
+  const ring = points.map((point) => ({ ...point }));
+  if (ring.length === 0) return ring;
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first.east !== last.east || first.north !== last.north) ring.push({ ...first });
+  const isClockwise = signedArea(ring) < 0;
+  if (isClockwise !== clockwise) ring.reverse();
   return ring;
 }
 
@@ -873,10 +912,11 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
     const casingWidth = estimatedRoadCasingWidthMetres(line.properties);
     for (const kind of ['casing', 'surface'] as const) {
       const halfWidth = (kind === 'casing' ? casingWidth : surfaceWidth) / 2;
-      const buffered = bufferPlanLine(densified, halfWidth);
-      const clipped = clipPolygonToRect(buffered, clip);
-      if (clipped.length < 4 || polygonArea(clipped) < MIN_POLYGON_AREA_METRES) continue;
-      vertexCount += clipped.length;
+      const rings = bufferPlanRings(densified, halfWidth)
+        .map((ring) => clipPolygonToRect(ring, clip))
+        .filter((ring) => ring.length >= 4 && polygonArea(ring) >= MIN_POLYGON_AREA_METRES);
+      if (rings.length === 0) continue;
+      vertexCount += rings.reduce((sum, ring) => sum + ring.length, 0);
       if (vertexCount > MAX_VERTICES_PER_CELL) {
         return { cellKey: cell.key, polygons: [], centerlines: [], vertexCount, skipped: true };
       }
@@ -891,7 +931,7 @@ export function buildRoadCellPolygons(cell: RoadWorkCell, lines: RoadCenterline[
         },
         geometry: {
           type: 'Polygon',
-          coordinates: [closeRing(clipped.map((point) => planToLngLat(point, origin)))],
+          coordinates: rings.map((ring) => closeRing(ring.map((point) => planToLngLat(point, origin)))),
         },
       });
     }

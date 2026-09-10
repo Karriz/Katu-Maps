@@ -15,6 +15,7 @@ import {
   planToLngLat,
   roadWorkCellAt,
   stitchRoadCenterlines,
+  bufferPlanRings,
   type RoadCenterline,
 } from './RoadPolygonGeometry';
 
@@ -221,16 +222,19 @@ describe('road polygon geometry', () => {
     loop.push({ ...loop[0] });
     const densified = densifyPlanLine(loop, 12);
     expect(densified.length).toBeGreaterThan(loop.length * 2);
-    const ring = bufferPlanLine(densified, 4);
-    const distances = ring.map((point) => Math.hypot(point.east, point.north));
-    const outer = distances.filter((distance) => distance > radius);
-    expect(outer.length).toBeGreaterThan(12);
-    expect(Math.max(...outer) - Math.min(...outer)).toBeLessThan(2.2);
+    const rings = bufferPlanRings(densified, 4);
+    expect(rings.length).toBe(2);
+    const distances = rings[0].map((point) => Math.hypot(point.east, point.north));
+    expect(Math.max(...distances) - Math.min(...distances)).toBeLessThan(2.2);
+    const island = { east: 0, north: 0 };
+    expect(pointInRing(island, rings[0])).toBe(true);
+    expect(pointInRing(island, rings[1])).toBe(true);
     const cell = roadWorkCellAt(...TAMPERE);
     const coordinates = loop.map((point) => planToLngLat(point, origin));
     const polygons = buildRoadCellPolygons(cell, [road(coordinates, { className: 'primary' })]);
     const surface = polygons.polygons.find((feature) => feature.properties.kind === 'surface');
     expect(surface).toBeTruthy();
+    expect(surface!.geometry.coordinates.length).toBe(2);
     expect(surface!.geometry.coordinates[0].length).toBeGreaterThan(20);
   });
 
