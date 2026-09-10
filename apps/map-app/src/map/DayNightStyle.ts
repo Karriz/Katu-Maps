@@ -72,11 +72,16 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
   [
     'global-road-casing', 'global-road-bridge-casing',
     'global-overview-road-casing', 'global-overview-regional-road-casing',
+    'global-road-polygon-fallback-casing',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.roadCasing));
+  setPaint(map, 'global-road-polygon-casing', 'fill-color', colors.roadCasing);
   [
     'global-roads', 'global-road-bridges',
     'global-overview-roads', 'global-overview-regional-roads',
+    'global-road-polygon-fallback',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.road));
+  setPaint(map, 'global-road-polygons', 'fill-color', colors.road);
+  setPaint(map, 'global-road-polygon-centerlines', 'line-color', '#ffffff');
   [
     'global-path-casing', 'global-cycleway-casing', 'global-footways',
     'global-steps', 'global-other-paths',

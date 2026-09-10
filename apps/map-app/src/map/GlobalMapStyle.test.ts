@@ -2,6 +2,7 @@ import { createExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-
 import { describe, expect, it } from 'vitest';
 import {
   aerowayWidthExpression,
+  roadCenterlineWidthExpression,
   roadWidthExpression,
   buildingColorPaint,
   GLOBAL_CYCLING_LAYER_IDS,
@@ -76,9 +77,19 @@ describe('global map overlay styles', () => {
           for (const zoom of [18.5, 19, 20, 21, 22]) {
             expect(evaluate(zoom) / reference).toBeCloseTo(2 ** (zoom - 18), 6);
           }
+          const unscaled14 = evaluate(14) / 0.25;
+          expect(evaluate(16) / unscaled14).toBeCloseTo(0.88, 5);
         }
       }
     }
+  });
+
+  it('keeps draped road centerlines at least a hairline until physical width takes over', () => {
+    const compiled = createExpression(roadCenterlineWidthExpression(61.4981), 'road-centerline-width');
+    if (compiled.result !== 'success') throw new Error('Invalid centerline width expression');
+    const evaluate = (zoom: number) => compiled.value.evaluate({ zoom }) as number;
+    expect(evaluate(16)).toBeGreaterThanOrEqual(1.4);
+    expect(evaluate(18.5) / evaluate(18)).toBeCloseTo(2 ** 0.5, 5);
   });
 
   it('also keeps airfield and path widths in ground metres at close zooms', () => {
