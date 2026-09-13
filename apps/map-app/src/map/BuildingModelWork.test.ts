@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { FacadeModelLayer } from './FacadeModelLayer';
 import { RoofModelLayer } from './RoofModelLayer';
 import { generateFacadeGeometry } from './FacadeGeometry';
-import { flightBuildingView, mergeBuildingGeometries, sortBuildingCandidates } from './BuildingModelWork';
+import { buildingViewOverlapRatio, flightBuildingView, mergeBuildingGeometries, sortBuildingCandidates } from './BuildingModelWork';
 
 function finish<T>(job: Generator<void, T>): T {
   for (;;) { const result = job.next(); if (result.done) return result.value; }
@@ -48,7 +48,7 @@ it('bounds windows for every facade style and detail level', () => {
 for (const kind of ['roof', 'facade'] as const) describe(`${kind} scheduling`, () => {
   function fixture(count = 1) {
     const layer = kind === 'roof' ? new RoofModelLayer('buildings') : new FacadeModelLayer('buildings');
-    const state = { moving: false, shift: 0, zoom: 17, loaded: true, bearing: 0 };
+    const state = { moving: false, shift: 0, zoom: 17, loaded: true, bearing: 0, featureLimit: count };
     const features = Array.from({ length: count }, (_, id) => {
       const x = (id % 20) * 0.0006, y = Math.floor(id / 20) * 0.0006;
       return { id, properties: { render_height: 45, render_min_height: 0 },
@@ -60,7 +60,7 @@ for (const kind of ['roof', 'facade'] as const) describe(`${kind} scheduling`, (
       getBounds: () => ({ getWest: () => -0.02 + state.shift, getEast: () => 0.02 + state.shift,
         getSouth: () => -0.02, getNorth: () => 0.02 }),
       isMoving: () => state.moving, getSource: () => ({}), isSourceLoaded: () => state.loaded,
-      querySourceFeatures: vi.fn(() => features), queryTerrainElevation: () => 0, triggerRepaint: vi.fn(),
+      querySourceFeatures: vi.fn(() => features.slice(0, state.featureLimit)), queryTerrainElevation: () => 0, triggerRepaint: vi.fn(),
     };
     const mesh = new THREE.Mesh(new THREE.BufferGeometry());
     Object.assign(layer, { map, sceneOrigin: map.getCenter(), [`${kind}Mesh`]: mesh });
@@ -104,6 +104,37 @@ for (const kind of ['roof', 'facade'] as const) describe(`${kind} scheduling`, (
     f.complete();
     expect(dispose).toHaveBeenCalledOnce();
     expect(f.mesh.geometry).not.toBe(old);
+  });
+  it('keeps the previous mesh positioned correctly while rebasing its scene origin', () => {
+    const f = fixture(); f.complete();
+    const old = f.mesh.geometry;
+    f.state.moving = true;
+    f.state.shift = 0.04;
+    Object.assign(f.layer as any, {
+      renderer: { resetState: vi.fn(), render: vi.fn() },
+    });
+    (f.layer as any).render({} as any, {
+      defaultProjectionData: { mainMatrix: new Float32Array([
+        1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+      ]) },
+    });
+    expect(f.mesh.geometry).toBe(old);
+    expect(f.mesh.visible).toBe(true);
+    expect(Math.abs(f.mesh.position.x)).toBeGreaterThan(3_000);
+  });
+  it('retains an overlapping mesh when the streamed source snapshot is drastically incomplete', () => {
+    const f = fixture(20); f.complete();
+    const old = f.mesh.geometry;
+    f.layer.setFlightMode(true);
+    f.state.loaded = false;
+    f.state.featureLimit = 0;
+    f.layer.requestFlightRefresh();
+    for (let frame = 0; frame < 1_000; frame += 1) {
+      f.update();
+      if (!(f.layer as any)[`${kind}Job`]) break;
+    }
+    expect(f.mesh.geometry).toBe(old);
+    expect(f.mesh.visible).toBe(true);
   });
   it('finishes flight jobs despite continuous movement and arriving tiles', () => {
     const f = fixture(20);
@@ -169,4 +200,11 @@ it('bounds flight building coverage ahead even when horizon bounds are unusable'
   const east = flightBuildingView(map as any);
   expect(east.east - 23.76).toBeCloseTo((23.76 - east.west) * 3, 7);
   expect(east.north - 61.5).toBeCloseTo(61.5 - east.south, 7);
+});
+
+it('measures overlap against the requested building view', () => {
+  const view = { west: 0, south: 0, east: 10, north: 10, zoom: 14, latitude: 0 };
+  expect(buildingViewOverlapRatio(view, view)).toBe(1);
+  expect(buildingViewOverlapRatio(view, { ...view, west: 5, east: 15 })).toBe(0.5);
+  expect(buildingViewOverlapRatio(view, { ...view, west: 11, east: 21 })).toBe(0);
 });

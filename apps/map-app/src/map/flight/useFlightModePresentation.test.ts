@@ -11,6 +11,7 @@ describe('flight presentation', () => {
     expect(shouldHideLayerInFlight({ id: 'global-poi-labels', type: 'symbol' } as any)).toBe(true);
     expect(shouldHideLayerInFlight({ id: 'transit-stop-icons', type: 'symbol' } as any)).toBe(true);
     expect(shouldHideLayerInFlight({ id: 'favorite-icons', type: 'symbol' } as any)).toBe(true);
+    expect(shouldHideLayerInFlight({ id: 'global-housenumbers', type: 'symbol' } as any)).toBe(true);
   });
 
   it('hides enabled transit, driving, and bike-and-walk overlays', () => {

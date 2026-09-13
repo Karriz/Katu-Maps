@@ -70,7 +70,9 @@ export function shouldHideLayerInFlight(layer: Pick<StyleLayer, 'id' | 'type'>) 
   if (OPTIONAL_OVERLAY_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) return true;
   if (APPLICATION_OVERLAY_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) return true;
   return layer.type === 'symbol'
-    && (layer.id.includes('poi') || layer.id.includes('transit'));
+    && (layer.id.includes('poi')
+      || layer.id.includes('transit')
+      || layer.id.includes('housenumber'));
 }
 
 export function useFlightModePresentation({

@@ -5,7 +5,7 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
-import { flightBuildingView, buildingView, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
+import { flightBuildingView, buildingView, buildingViewOverlapRatio, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
 import {
   CARTOON_AMBIENT_BASE_INTENSITY,
   CARTOON_AMBIENT_DAY_INTENSITY,
@@ -110,6 +110,9 @@ export class RoofModelLayer implements CustomLayerInterface {
   private readonly sceneScale = new THREE.Vector3();
   private sceneOrigin = new maplibregl.LngLat(23.7609, 61.4981);
   private sceneOriginElevation = 0;
+  private roofMeshOrigin = this.sceneOrigin;
+  private roofMeshOriginElevation = 0;
+  private roofMeshView?: BuildingView;
   private sampledRoofCount = 0;
   private completedView?: BuildingView;
   private roofMesh?: THREE.Mesh;
@@ -122,11 +125,16 @@ export class RoofModelLayer implements CustomLayerInterface {
   private flightMode = false;
   private flightRefreshRequested = false;
   private sourceRevision = 0;
-  private roofJob?: { generator: Generator<void, boolean, void>; signature: string; revision: number };
+  private roofJob?: { generator: Generator<void, boolean, void>; signature: string; revision: number; startedAt: number };
+  private readonly performanceStats = { jobs: 0, commits: 0, lastJobMs: 0, maxJobMs: 0 };
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
 
   constructor(private readonly sourceId: string = OPENFREEMAP_SOURCE_ID) {}
+
+  getPerformanceStats() {
+    return { ...this.performanceStats, sampledRoofs: this.sampledRoofCount, jobActive: Boolean(this.roofJob) };
+  }
 
   setFlightMode(enabled: boolean) {
     if (this.flightMode === enabled) return;
@@ -206,6 +214,8 @@ export class RoofModelLayer implements CustomLayerInterface {
     this.map = map;
     this.sceneOrigin = map.getCenter();
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
+    this.roofMeshOrigin = this.sceneOrigin;
+    this.roofMeshOriginElevation = this.sceneOriginElevation;
     this.latitude = this.sceneOrigin.lat;
     this.scene.rotateX(Math.PI / 2);
     this.scene.scale.multiply(new THREE.Vector3(1, 1, -1));
@@ -266,11 +276,22 @@ export class RoofModelLayer implements CustomLayerInterface {
     if (drift > ROOF_RECENTER_DISTANCE_METERS) {
       this.sceneOrigin = center;
       this.sceneOriginElevation = map.queryTerrainElevation(center) ?? 0;
+      if (this.roofMesh && this.sampledRoofCount > 0) {
+        const meshOrigin = maplibregl.MercatorCoordinate.fromLngLat(this.roofMeshOrigin);
+        const nextOrigin = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
+        const meshUnits = meshOrigin.meterInMercatorCoordinateUnits();
+        const nextUnits = nextOrigin.meterInMercatorCoordinateUnits();
+        const horizontalScale = meshUnits / nextUnits;
+        this.roofMesh.position.set(
+          (meshOrigin.x - nextOrigin.x) / nextUnits,
+          this.roofMeshOriginElevation - this.sceneOriginElevation,
+          (nextOrigin.y - meshOrigin.y) / nextUnits,
+        );
+        this.roofMesh.scale.set(horizontalScale, 1, horizontalScale);
+      }
       this.lastViewSignature = '';
       this.roofJob = undefined;
       this.completedView = undefined;
-      this.sampledRoofCount = 0;
-      this.clearMesh();
     }
 
     const zoom = map.getZoom();
@@ -332,7 +353,9 @@ export class RoofModelLayer implements CustomLayerInterface {
         generator: this.sampleRoofsJob(map, this.flightMode ? view : buildingView(map, 0.15)),
         signature,
         revision: this.sourceRevision,
+        startedAt: performance.now(),
       };
+      this.performanceStats.jobs += 1;
     }
 
     // Advance bounded geometry steps under a frame budget. The MapLibre
@@ -343,8 +366,12 @@ export class RoofModelLayer implements CustomLayerInterface {
       const result = job.generator.next();
       if (result.done) {
         this.roofJob = undefined;
+        const jobMs = performance.now() - job.startedAt;
+        this.performanceStats.lastJobMs = jobMs;
+        this.performanceStats.maxJobMs = Math.max(this.performanceStats.maxJobMs, jobMs);
         if (result.value && job.revision === this.sourceRevision) {
           this.lastViewSignature = job.signature;
+          this.performanceStats.commits += 1;
         } else {
           this.completedView = undefined;
           this.lastViewSignature = '';
@@ -510,10 +537,25 @@ export class RoofModelLayer implements CustomLayerInterface {
     }
 
     const merged = yield* mergeBuildingGeometries(roofs.map((entry) => entry.geometry));
+    const incompleteOverlappingSnapshot = this.flightMode
+      && !(map.isSourceLoaded?.(this.sourceId) ?? true)
+      && this.roofMeshView !== undefined
+      && buildingViewOverlapRatio(this.roofMeshView, view) >= 0.5
+      && this.sampledRoofCount > 0
+      && roofs.length < this.sampledRoofCount * 0.4;
+    if (incompleteOverlappingSnapshot) {
+      merged.dispose();
+      return false;
+    }
     if (this.roofMesh) {
       this.roofMesh.geometry.dispose();
       this.roofMesh.geometry = merged;
       this.roofMesh.visible = roofs.length > 0;
+      this.roofMesh.position.set(0, 0, 0);
+      this.roofMesh.scale.set(1, 1, 1);
+      this.roofMeshOrigin = this.sceneOrigin;
+      this.roofMeshOriginElevation = this.sceneOriginElevation;
+      this.roofMeshView = view;
     } else {
       merged.dispose();
     }
@@ -530,6 +572,9 @@ export class RoofModelLayer implements CustomLayerInterface {
 
     this.roofMesh.geometry = new THREE.BufferGeometry();
     this.roofMesh.visible = false;
+    this.roofMeshView = undefined;
+    this.roofMesh.position.set(0, 0, 0);
+    this.roofMesh.scale.set(1, 1, 1);
   }
 }
 

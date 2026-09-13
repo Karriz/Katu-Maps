@@ -5,7 +5,7 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
-import { flightBuildingView, buildingView, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
+import { flightBuildingView, buildingView, buildingViewOverlapRatio, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
 import {
   CARTOON_AMBIENT_BASE_INTENSITY,
   CARTOON_AMBIENT_DAY_INTENSITY,
@@ -101,6 +101,9 @@ export class FacadeModelLayer implements CustomLayerInterface {
   private readonly sceneScale = new THREE.Vector3();
   private sceneOrigin = new maplibregl.LngLat(23.7609, 61.4981);
   private sceneOriginElevation = 0;
+  private facadeMeshOrigin = this.sceneOrigin;
+  private facadeMeshOriginElevation = 0;
+  private facadeMeshView?: BuildingView;
   private sampledFacadeCount = 0;
   private completedView?: BuildingView;
   private facadeMesh?: THREE.Mesh;
@@ -112,11 +115,16 @@ export class FacadeModelLayer implements CustomLayerInterface {
   private flightMode = false;
   private flightRefreshRequested = false;
   private sourceRevision = 0;
-  private facadeJob?: { generator: Generator<void, boolean, void>; signature: string; revision: number };
+  private facadeJob?: { generator: Generator<void, boolean, void>; signature: string; revision: number; startedAt: number };
+  private readonly performanceStats = { jobs: 0, commits: 0, lastJobMs: 0, maxJobMs: 0 };
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
 
   constructor(private readonly sourceId: string = OPENFREEMAP_SOURCE_ID) {}
+
+  getPerformanceStats() {
+    return { ...this.performanceStats, sampledFacades: this.sampledFacadeCount, jobActive: Boolean(this.facadeJob) };
+  }
 
   setFlightMode(enabled: boolean) {
     if (this.flightMode === enabled) return;
@@ -197,6 +205,8 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.map = map;
     this.sceneOrigin = map.getCenter();
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
+    this.facadeMeshOrigin = this.sceneOrigin;
+    this.facadeMeshOriginElevation = this.sceneOriginElevation;
     this.scene.rotateX(Math.PI / 2);
     this.scene.scale.multiply(new THREE.Vector3(1, 1, -1));
 
@@ -253,11 +263,22 @@ export class FacadeModelLayer implements CustomLayerInterface {
     if (drift > FACADE_RECENTER_DISTANCE_METERS) {
       this.sceneOrigin = center;
       this.sceneOriginElevation = map.queryTerrainElevation(center) ?? 0;
+      if (this.facadeMesh && this.sampledFacadeCount > 0) {
+        const meshOrigin = maplibregl.MercatorCoordinate.fromLngLat(this.facadeMeshOrigin);
+        const nextOrigin = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
+        const meshUnits = meshOrigin.meterInMercatorCoordinateUnits();
+        const nextUnits = nextOrigin.meterInMercatorCoordinateUnits();
+        const horizontalScale = meshUnits / nextUnits;
+        this.facadeMesh.position.set(
+          (meshOrigin.x - nextOrigin.x) / nextUnits,
+          this.facadeMeshOriginElevation - this.sceneOriginElevation,
+          (nextOrigin.y - meshOrigin.y) / nextUnits,
+        );
+        this.facadeMesh.scale.set(horizontalScale, 1, horizontalScale);
+      }
       this.lastViewSignature = '';
       this.facadeJob = undefined;
       this.completedView = undefined;
-      this.sampledFacadeCount = 0;
-      this.clearMesh();
     }
 
     const zoom = map.getZoom();
@@ -318,7 +339,9 @@ export class FacadeModelLayer implements CustomLayerInterface {
         generator: this.sampleFacadesJob(map, this.flightMode ? view : buildingView(map, 0.15)),
         signature,
         revision: this.sourceRevision,
+        startedAt: performance.now(),
       };
+      this.performanceStats.jobs += 1;
     }
 
     const deadline = performance.now() + (this.flightMode ? 1.5 : FACADE_FRAME_BUDGET_MS);
@@ -327,8 +350,12 @@ export class FacadeModelLayer implements CustomLayerInterface {
       const result = job.generator.next();
       if (result.done) {
         this.facadeJob = undefined;
+        const jobMs = performance.now() - job.startedAt;
+        this.performanceStats.lastJobMs = jobMs;
+        this.performanceStats.maxJobMs = Math.max(this.performanceStats.maxJobMs, jobMs);
         if (result.value && job.revision === this.sourceRevision) {
           this.lastViewSignature = job.signature;
+          this.performanceStats.commits += 1;
         } else {
           this.completedView = undefined;
           this.lastViewSignature = '';
@@ -443,10 +470,25 @@ export class FacadeModelLayer implements CustomLayerInterface {
     }
 
     const merged = yield* mergeBuildingGeometries(facades.map((entry) => entry.geometry));
+    const incompleteOverlappingSnapshot = this.flightMode
+      && !(map.isSourceLoaded?.(this.sourceId) ?? true)
+      && this.facadeMeshView !== undefined
+      && buildingViewOverlapRatio(this.facadeMeshView, view) >= 0.5
+      && this.sampledFacadeCount > 0
+      && facades.length < this.sampledFacadeCount * 0.4;
+    if (incompleteOverlappingSnapshot) {
+      merged.dispose();
+      return false;
+    }
     if (this.facadeMesh) {
       this.facadeMesh.geometry.dispose();
       this.facadeMesh.geometry = merged;
       this.facadeMesh.visible = facades.length > 0;
+      this.facadeMesh.position.set(0, 0, 0);
+      this.facadeMesh.scale.set(1, 1, 1);
+      this.facadeMeshOrigin = this.sceneOrigin;
+      this.facadeMeshOriginElevation = this.sceneOriginElevation;
+      this.facadeMeshView = view;
     } else {
       merged.dispose();
     }
@@ -463,6 +505,9 @@ export class FacadeModelLayer implements CustomLayerInterface {
 
     this.facadeMesh.geometry = new THREE.BufferGeometry();
     this.facadeMesh.visible = false;
+    this.facadeMeshView = undefined;
+    this.facadeMesh.position.set(0, 0, 0);
+    this.facadeMesh.scale.set(1, 1, 1);
   }
 }
 

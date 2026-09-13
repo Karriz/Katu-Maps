@@ -35,6 +35,15 @@ export function containsBuildingView(cached: BuildingView, current: BuildingView
     && current.south >= cached.south && current.north <= cached.north;
 }
 
+export function buildingViewOverlapRatio(first: BuildingView, second: BuildingView) {
+  const width = Math.max(0, second.east - second.west);
+  const height = Math.max(0, second.north - second.south);
+  if (width === 0 || height === 0) return 0;
+  const overlapWidth = Math.max(0, Math.min(first.east, second.east) - Math.max(first.west, second.west));
+  const overlapHeight = Math.max(0, Math.min(first.north, second.north) - Math.max(first.south, second.south));
+  return overlapWidth * overlapHeight / (width * height);
+}
+
 // Stable, incremental sort: preserve largest-first duplicate selection without
 // blocking on a native sort of every loaded building footprint.
 export function* sortBuildingCandidates<T>(items: T[], compare: (a: T, b: T) => number): Generator<void, T[]> {

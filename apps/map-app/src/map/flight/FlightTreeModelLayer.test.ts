@@ -1,10 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   FlightTreeModelLayer,
+  flightTreeAdmissionBudget,
   flightTreePriority,
   shouldRenderTreesForViewport,
   treeViewportSignature,
 } from './FlightTreeModelLayer';
+
+it('reduces tree admission when recent frames are slow', () => {
+  expect(flightTreeAdmissionBudget(16)).toBe(6);
+  expect(flightTreeAdmissionBudget(19)).toBe(4);
+  expect(flightTreeAdmissionBudget(24)).toBe(2);
+  expect(flightTreeAdmissionBudget(32)).toBe(1);
+});
 
 describe('treeViewportSignature', () => {
   it('ignores minor map drift while preserving meaningful zoom and terrain changes', () => {

@@ -28,11 +28,14 @@ const FLIGHT_NEW_TREE_MIN_RADIUS_METERS = 1_200;
 // Cap how many new far-ring trees a single scan may queue. Admission spreads
 // them across later frames so they do not appear as one sudden batch.
 const FLIGHT_MAX_NEW_TREES_PER_UPDATE = 120;
+const FLIGHT_MAX_NEAR_RECOVERY_TREES_PER_UPDATE = 12;
 const FLIGHT_PENDING_TREE_LIMIT = 360;
 const FLIGHT_TREES_ADMIT_PER_FRAME = 6;
 const FLIGHT_TREE_GROWTH_DURATION_MS = 1_100;
 const FLIGHT_GROWTH_MESH_WRITE_MS = 50;
 const FLIGHT_ELEVATION_RETRIES_PER_UPDATE = 128;
+const FLIGHT_TREE_TRUNK_DETAIL_METERS = 1_400;
+const FLIGHT_TREE_SHADOW_DETAIL_METERS = 1_000;
 const FLIGHT_ORIGIN_REBASE_METERS = 4_000;
 const FLIGHT_UPDATE_MIN_INTERVAL_MS = 200;
 const FLIGHT_UPDATE_MOVE_METERS = 300;
@@ -58,6 +61,13 @@ const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
 const MIN_LONGITUDE_SCALE = Math.cos(85 * DEGREES_TO_RADIANS);
+
+export function flightTreeAdmissionBudget(frameIntervalMs: number) {
+  if (frameIntervalMs > 28) return 1;
+  if (frameIntervalMs > 21) return 2;
+  if (frameIntervalMs > 17.5) return 4;
+  return FLIGHT_TREES_ADMIT_PER_FRAME;
+}
 
 export type TreeSourceConfig = {
   sourceId: string;
@@ -348,6 +358,31 @@ function treeGrowth(start: number, now: number, duration = TREE_GROWTH_DURATION_
   return 1 - (1 - progress) ** 3;
 }
 
+function* sortTreesIncrementally<T>(
+  items: T[],
+  compare: (first: T, second: T) => number,
+): Generator<void, T[]> {
+  let source = items;
+  let target = new Array<T>(items.length);
+  for (let width = 1; width < items.length; width *= 2) {
+    for (let start = 0; start < items.length; start += width * 2) {
+      const middle = Math.min(start + width, items.length);
+      const end = Math.min(start + width * 2, items.length);
+      let left = start;
+      let right = middle;
+      for (let index = start; index < end; index += 1) {
+        if (index % 64 === 0) yield;
+        target[index] = left < middle
+          && (right >= end || compare(source[left], source[right]) <= 0)
+          ? source[left++]
+          : source[right++];
+      }
+    }
+    [source, target] = [target, source];
+  }
+  return source;
+}
+
 function viewportSpanMeters(
   bounds: { west: number; south: number; east: number; north: number },
 ) {
@@ -400,18 +435,17 @@ function* visibleTrees(
   const mappedTreeFeatures = sources.mappedTreeLayer
     ? sourceFeatures(map, sources.sourceId, [sources.mappedTreeLayer])
     : [];
-  const mappedTrees = collectTreeInstances(mappedTreeFeatures)
+  const mappedTreesUnsorted = collectTreeInstances(mappedTreeFeatures)
     .map((tree) => ({ ...tree, biome }))
     .filter((tree) => withinTreeBounds(tree, samplingBounds))
     .filter((tree) => {
       const point = toMetricPoint([tree.longitude, tree.latitude]);
       return point !== undefined && !pointInIndexedPolygons(point, waterIndex);
-    })
-    .sort((first, second) => (
+    });
+  const mappedTrees = (yield* sortTreesIncrementally(mappedTreesUnsorted, (first, second) => (
       coordinateSeed(first.longitude, first.latitude)
       - coordinateSeed(second.longitude, second.latitude)
-    ))
-    .slice(0, budget);
+    ))).slice(0, budget);
   const landuseFeatures = sourceFeatures(
     map,
     sources.sourceId,
@@ -426,7 +460,27 @@ function* visibleTrees(
     Math.max(0, budget - mappedTrees.length),
     biome,
   )).filter((tree) => withinTreeBounds(tree, samplingBounds));
-  return [...mappedTrees, ...proceduralTrees].slice(0, budget);
+  const combined = [...mappedTrees, ...proceduralTrees].slice(0, budget);
+  if (!boundsOverride) return combined;
+  const center = map.getCenter();
+  const centerMetric = toMetricPoint([center.lng, center.lat]);
+  if (!centerMetric) return combined;
+  const heading = map.getBearing() * DEGREES_TO_RADIANS;
+  const ranked = combined.map((tree) => {
+    const point = toMetricPoint([tree.longitude, tree.latitude]);
+    return {
+      tree,
+      priority: point ? flightTreePriority(
+        (point[0] - centerMetric[0]) * longitudeScaleAtMetricY(centerMetric[1]),
+        point[1] - centerMetric[1],
+        heading,
+      ) : Infinity,
+    };
+  });
+  return (yield* sortTreesIncrementally(
+    ranked,
+    (first, second) => first.priority - second.priority,
+  )).map(({ tree }) => tree);
 }
 
 function withinTreeBounds(tree: TreeInstance, bounds: MetricBounds) {
@@ -856,8 +910,10 @@ function* collectProceduralTrees(
     }
   }
 
-  const sortedCandidates = [...candidates.values()]
-    .sort((first, second) => first.priority - second.priority);
+  const sortedCandidates = yield* sortTreesIncrementally(
+    [...candidates.values()],
+    (first, second) => first.priority - second.priority,
+  );
 
   // Pick one candidate per deterministic world-space bucket before filling
   // the remaining budget. Sorting only by random priority can select a dense
@@ -918,6 +974,14 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   private lastOriginMercatorY?: number;
   private lastGrowthMeshWrite = 0;
   private elevationRetryOffset = 0;
+  private lastRenderTime?: number;
+  private readonly performanceStats = {
+    frames: 0,
+    slowFrames: 0,
+    admittedTrees: 0,
+    lastRenderCpuMs: 0,
+    maxRenderCpuMs: 0,
+  };
   private candidateJob?: Generator<void, TreeInstance[]>;
   private completedCandidates?: TreeInstance[];
   private trunkMesh?: THREE.InstancedMesh;
@@ -933,6 +997,22 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   private extendedViewportRangeEnabled = false;
 
   constructor(private readonly sources: TreeSourceConfig) {}
+
+  getPerformanceStats() {
+    let provisionalElevations = 0;
+    for (const tree of this.displayedTrees.values()) {
+      if (tree.elevationProvisional) provisionalElevations += 1;
+    }
+    return {
+      ...this.performanceStats,
+      displayedTrees: this.displayedTrees.size,
+      retainedTrees: this.retainedTrees.size,
+      pendingTrees: this.pendingFlightTrees.length,
+      provisionalElevations,
+      elevationCacheEntries: this.elevationCache.size,
+      candidateJobActive: Boolean(this.candidateJob),
+    };
+  }
 
   invalidateTerrain() {
     this.candidateJob = undefined;
@@ -1417,12 +1497,11 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     // bounds and rank before the admission cap, rather than by source order.
     if (flightMode && currentMetric) {
       generatedTrees = generatedTrees.filter((tree) => withinTreeBounds(tree, visibleBounds));
-      const scores = new Map(generatedTrees.map((tree) => [tree, this.treePriority(tree, currentMetric)]));
-      generatedTrees.sort((a, b) => scores.get(a)! - scores.get(b)!);
       this.pendingFlightTrees.sort((a, b) => this.treePriority(a, currentMetric) - this.treePriority(b, currentMetric));
     }
 
     let newTreesQueuedThisUpdate = 0;
+    let nearRecoveryTreesQueued = 0;
     for (const tree of generatedTrees) {
       if (trees.length >= budget) break;
       const key = displayedTreeKey(tree);
@@ -1432,10 +1511,12 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
         const treeMetric = toMetricPoint([tree.longitude, tree.latitude]);
         if (treeMetric) {
           const distSq = metricDistanceSquared(treeMetric, currentMetric);
-          // Close-up trees stay fixed once placed. New samples only appear on
-          // the far ring so they do not pop in under the nose.
+          // Late tiles can reveal a genuine nearby gap. Admit a small number
+          // per refresh through the same growth animation rather than leaving
+          // the hole permanently empty.
           if (distSq < FLIGHT_NEW_TREE_MIN_RADIUS_METERS ** 2) {
-            continue;
+            if (nearRecoveryTreesQueued >= FLIGHT_MAX_NEAR_RECOVERY_TREES_PER_UPDATE) continue;
+            nearRecoveryTreesQueued += 1;
           }
         }
         if (newTreesQueuedThisUpdate >= FLIGHT_MAX_NEW_TREES_PER_UPDATE) {
@@ -1573,6 +1654,15 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     let trunkCount = 0;
     let shadowCount = 0;
     let hasGrowingTrees = false;
+    let centerEast = 0;
+    let centerNorth = 0;
+    if (this.extendedViewportRangeEnabled) {
+      const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
+      const centerMercator = maplibregl.MercatorCoordinate.fromLngLat(map.getCenter());
+      const units = originMercator.meterInMercatorCoordinateUnits();
+      centerEast = (centerMercator.x - originMercator.x) / units;
+      centerNorth = (originMercator.y - centerMercator.y) / units;
+    }
 
     for (const displayedTree of this.displayedTrees.values()) {
       const {
@@ -1591,6 +1681,13 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
         displayedTree.growthDuration,
       );
       if (progress < 1) hasGrowingTrees = true;
+      const flightDistanceSquared = this.extendedViewportRangeEnabled
+        ? (east - centerEast) ** 2 + (north - centerNorth) ** 2
+        : 0;
+      const trunkDetail = !this.extendedViewportRangeEnabled
+        || flightDistanceSquared <= FLIGHT_TREE_TRUNK_DETAIL_METERS ** 2;
+      const shadowDetail = !this.extendedViewportRangeEnabled
+        || flightDistanceSquared <= FLIGHT_TREE_SHADOW_DETAIL_METERS ** 2;
       const isConifer = tree.vegetationType === 'conifer';
       const isPalm = tree.vegetationType === 'palm';
       const isShrub = tree.vegetationType === 'shrub';
@@ -1599,7 +1696,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
       const trunkHeight = (canopyBase + TRUNK_CANOPY_OVERLAP_METERS) * growth;
       const trunkWidth = tree.widthScale * (0.82 + tree.height / 60);
 
-      if (!isShrub) {
+      if (!isShrub && trunkDetail) {
         this.transformHelper.position.set(east, up, north);
         this.transformHelper.rotation.set(0, tree.rotation, 0);
         this.transformHelper.scale.set(
@@ -1625,16 +1722,18 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
       // A compact shadow under each crown acts as fake ambient occlusion. It
       // is deliberately independent of tree height and sun direction so it
       // matches the centered building-footprint treatment.
-      this.transformHelper.position.set(east, up + 0.06, north);
-      this.transformHelper.rotation.set(0, 0, 0);
-      this.transformHelper.scale.set(
-        canopyRadius * 1.18 * growth,
-        1,
-        canopyRadius * 1.18 * growth,
-      );
-      this.transformHelper.updateMatrix();
-      shadowMesh.setMatrixAt(shadowCount, this.transformHelper.matrix);
-      shadowCount += 1;
+      if (shadowDetail) {
+        this.transformHelper.position.set(east, up + 0.06, north);
+        this.transformHelper.rotation.set(0, 0, 0);
+        this.transformHelper.scale.set(
+          canopyRadius * 1.18 * growth,
+          1,
+          canopyRadius * 1.18 * growth,
+        );
+        this.transformHelper.updateMatrix();
+        shadowMesh.setMatrixAt(shadowCount, this.transformHelper.matrix);
+        shadowCount += 1;
+      }
 
       this.transformHelper.position.set(east, up + canopyBase * growth + canopyHeight / 2, north);
       this.transformHelper.rotation.set(0, tree.rotation, 0);
@@ -1725,6 +1824,9 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     const renderer = this.renderer;
     if (!map || !renderer) return;
 
+    const renderStarted = performance.now();
+    const frameInterval = this.lastRenderTime === undefined ? 0 : renderStarted - this.lastRenderTime;
+    this.lastRenderTime = renderStarted;
     let viewportAllowed = true;
     if (this.extendedViewportRangeEnabled) {
       viewportAllowed = map.getZoom() >= TREE_MIN_ZOOM;
@@ -1758,7 +1860,11 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     this.camera.projectionMatrixInverse.copy(this.projectionMatrix).invert();
 
     const now = performance.now();
-    const admitted = this.admitPendingFlightTrees(now, FLIGHT_TREES_ADMIT_PER_FRAME);
+    const admissionBudget = this.extendedViewportRangeEnabled
+      ? flightTreeAdmissionBudget(frameInterval)
+      : FLIGHT_TREES_ADMIT_PER_FRAME;
+    const admitted = this.admitPendingFlightTrees(now, admissionBudget);
+    this.performanceStats.admittedTrees += admitted;
     const needsGrowthWrite = this.growthAnimationActive || admitted > 0;
     const growthWriteInterval = this.extendedViewportRangeEnabled
       ? FLIGHT_GROWTH_MESH_WRITE_MS
@@ -1772,6 +1878,11 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
 
     renderer.resetState();
     renderer.render(this.scene, this.camera);
+    const renderCpuMs = performance.now() - renderStarted;
+    this.performanceStats.frames += 1;
+    this.performanceStats.lastRenderCpuMs = renderCpuMs;
+    this.performanceStats.maxRenderCpuMs = Math.max(this.performanceStats.maxRenderCpuMs, renderCpuMs);
+    if (renderCpuMs > 8) this.performanceStats.slowFrames += 1;
   }
 
   onRemove() {
