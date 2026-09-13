@@ -4,7 +4,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, X } from 'lucide-react';
 import type { DriveControl, DriveTelemetry } from './useDriveSimulator';
 
 function HoldControl({
@@ -100,41 +100,46 @@ export function DriveControls({
         <div><dt>HDG</dt><dd>{String(Math.round(telemetry.heading) % 360).padStart(3, '0')}°</dd></div>
       </dl>
 
+      <p className="drive-key-help">
+        <kbd>W</kbd> gas · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>Space</kbd> handbrake
+      </p>
+
       <div className="drive-inputs">
-        <div className="drive-input-group drive-handbrake-control" aria-label="Handbrake">
-          <span>Brake</span>
-          <HoldControl
-            control="handbrake"
-            label="Handbrake"
-            className={telemetry.handbrake ? 'is-active' : undefined}
-            onControlChange={onControlChange}
-          >
-            HB
-          </HoldControl>
-        </div>
-
-        <div className="drive-input-stack">
-          <p className="drive-key-help">
-            <kbd>W</kbd> gas · <kbd>S</kbd> brake · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>Space</kbd> handbrake
-          </p>
-
-          <div className="drive-input-group drive-stick-control" aria-label="Drive controls">
-            <span>Drive</span>
-            <div className="drive-stick-grid">
+        <div className="drive-inputs-left">
+          <div className="drive-input-group drive-throttle-control" aria-label="Throttle and brake">
+            <span>Power</span>
+            <div className="drive-throttle-column">
               <HoldControl control="throttleUp" label="Accelerate" onControlChange={onControlChange}>
                 <ArrowUp aria-hidden="true" />
-              </HoldControl>
-              <HoldControl control="steerLeft" label="Steer left" onControlChange={onControlChange}>
-                <ArrowLeft aria-hidden="true" />
-              </HoldControl>
-              <span className="drive-stick-center" aria-hidden="true"><Car /></span>
-              <HoldControl control="steerRight" label="Steer right" onControlChange={onControlChange}>
-                <ArrowRight aria-hidden="true" />
               </HoldControl>
               <HoldControl control="throttleDown" label="Brake or reverse" onControlChange={onControlChange}>
                 <ArrowDown aria-hidden="true" />
               </HoldControl>
             </div>
+          </div>
+
+          <div className="drive-input-group drive-handbrake-control" aria-label="Handbrake">
+            <span>Handbrake</span>
+            <HoldControl
+              control="handbrake"
+              label="Handbrake"
+              className={telemetry.handbrake ? 'is-active' : undefined}
+              onControlChange={onControlChange}
+            >
+              HB
+            </HoldControl>
+          </div>
+        </div>
+
+        <div className="drive-input-group drive-steer-control" aria-label="Steering">
+          <span>Steer</span>
+          <div className="drive-steer-row">
+            <HoldControl control="steerLeft" label="Steer left" onControlChange={onControlChange}>
+              <ArrowLeft aria-hidden="true" />
+            </HoldControl>
+            <HoldControl control="steerRight" label="Steer right" onControlChange={onControlChange}>
+              <ArrowRight aria-hidden="true" />
+            </HoldControl>
           </div>
         </div>
       </div>

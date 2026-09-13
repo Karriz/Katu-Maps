@@ -469,7 +469,7 @@ export function useDriveSimulator({
       bridgeDeckSourceRef.current,
       0,
       { maxHeadingDiffRadians: DRIVE_DECK_MAX_HEADING_DIFF_RADIANS },
-    ).terrainElevation;
+    ).terrainElevation ?? 0;
     modelLayer.setPose(initialState, lastTerrainElevation);
 
     let previousCameraOptions: { zoom: number; pitch: number; center: [number, number] } | null = null;

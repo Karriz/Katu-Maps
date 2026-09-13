@@ -890,11 +890,17 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .flight-reticle span::after { bottom: 0; height: 9px; left: 14px; width: 1px; }
 .flight-inputs { align-items: flex-end; bottom: calc(48px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: space-between; left: max(18px, env(safe-area-inset-left, 18px)); pointer-events: none; position: absolute; right: max(18px, env(safe-area-inset-right, 18px)); }
 .drive-inputs { align-items: flex-end; bottom: calc(48px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 14px; justify-content: space-between; left: max(18px, env(safe-area-inset-left, 18px)); pointer-events: none; position: absolute; right: max(18px, env(safe-area-inset-right, 18px)); }
-.drive-input-stack { align-items: flex-end; display: flex; flex-direction: column; gap: 6px; }
+.drive-inputs-left { align-items: flex-end; display: flex; gap: 10px; pointer-events: none; }
+.drive-inputs-left .drive-input-group { pointer-events: auto; }
+.drive-throttle-column,
+.drive-steer-row { display: flex; gap: 8px; }
+.drive-throttle-column { flex-direction: column; }
+.drive-handbrake-control { justify-content: flex-end; min-height: 100%; }
 .drive-handbrake-control button {
   font-family: var(--font-heading);
   font-size: 0.78rem;
   font-weight: 850;
+  height: 108px;
   letter-spacing: 0.06em;
   width: 64px;
 }
@@ -902,6 +908,22 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   background: var(--flight-accent);
   border-color: color-mix(in srgb, var(--flight-accent) 70%, transparent);
   color: #fff;
+}
+.drive-key-help {
+  backdrop-filter: blur(10px);
+  background: var(--flight-surface);
+  border: 1px solid var(--flight-border);
+  border-radius: 999px;
+  bottom: calc(168px + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--flight-shadow);
+  color: var(--flight-muted);
+  font-size: .64rem;
+  left: 50%;
+  margin: 0;
+  padding: 7px 11px;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-50%);
 }
 .flight-input-group,
 .drive-input-group { align-items: center; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
@@ -920,24 +942,16 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .drive-input-group button:focus-visible { outline: 3px solid color-mix(in srgb, var(--flight-accent) 38%, transparent); outline-offset: 2px; }
 .flight-input-group svg,
 .drive-input-group svg { height: 23px; width: 23px; }
-.flight-input-group .flight-stick-grid,
-.drive-input-group .drive-stick-grid { display: grid; gap: 5px; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); }
-.flight-stick-grid button,
-.drive-stick-grid button { height: 46px; width: 46px; }
-.flight-stick-grid button[aria-label='Pitch up'],
-.drive-stick-grid button[aria-label='Accelerate'] { grid-column: 2; grid-row: 1; }
-.flight-stick-grid button[aria-label='Roll left'],
-.drive-stick-grid button[aria-label='Steer left'] { grid-column: 1; grid-row: 2; }
-.flight-stick-grid button[aria-label='Roll right'],
-.drive-stick-grid button[aria-label='Steer right'] { grid-column: 3; grid-row: 2; }
-.flight-stick-grid button[aria-label='Pitch down'],
-.drive-stick-grid button[aria-label='Brake or reverse'] { grid-column: 2; grid-row: 3; }
-.flight-stick-center,
-.drive-stick-center { align-items: center; color: var(--flight-muted); display: flex; grid-column: 2; grid-row: 2; justify-content: center; }
+.flight-input-group .flight-stick-grid { display: grid; gap: 5px; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); }
+.flight-stick-grid button { height: 46px; width: 46px; }
+.flight-stick-grid button[aria-label='Pitch up'] { grid-column: 2; grid-row: 1; }
+.flight-stick-grid button[aria-label='Roll left'] { grid-column: 1; grid-row: 2; }
+.flight-stick-grid button[aria-label='Roll right'] { grid-column: 3; grid-row: 2; }
+.flight-stick-grid button[aria-label='Pitch down'] { grid-column: 2; grid-row: 3; }
+.flight-stick-center { align-items: center; color: var(--flight-muted); display: flex; grid-column: 2; grid-row: 2; justify-content: center; }
 .flight-stick-center svg { height: 20px; transform: rotate(-12deg); width: 20px; }
-.drive-stick-center svg { height: 20px; width: 20px; }
-.flight-key-help,
-.drive-key-help { backdrop-filter: blur(10px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 999px; box-shadow: var(--flight-shadow); color: var(--flight-muted); font-size: .64rem; margin: 0 0 2px; padding: 7px 11px; }
+.drive-input-group > .drive-throttle-column { flex-direction: column; }
+.flight-key-help { backdrop-filter: blur(10px); background: var(--flight-surface); border: 1px solid var(--flight-border); border-radius: 999px; box-shadow: var(--flight-shadow); color: var(--flight-muted); font-size: .64rem; margin: 0 0 2px; padding: 7px 11px; }
 .flight-key-help kbd,
 .drive-key-help kbd { background: var(--flight-surface-hover); border: 1px solid var(--flight-border); border-radius: 4px; color: var(--flight-text); font: inherit; font-weight: 800; margin-right: 3px; padding: 2px 4px; }
 
@@ -1107,10 +1121,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .drive-inputs { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 12px)); right: max(12px, env(safe-area-inset-right, 12px)); }
   .flight-input-group button,
   .drive-input-group button { height: 48px; width: 50px; }
-  .flight-input-group .flight-stick-grid,
-  .drive-input-group .drive-stick-grid { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
-  .flight-stick-grid button,
-  .drive-stick-grid button { height: 44px; width: 44px; }
+  .flight-input-group .flight-stick-grid { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
+  .flight-stick-grid button { height: 44px; width: 44px; }
+  .drive-handbrake-control button { height: 104px; width: 56px; }
   .flight-key-help,
   .drive-key-help { display: none; }
 
@@ -1300,10 +1313,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 390px) {
   .favorite-kind-options { grid-template-columns: 1fr; }
   .favorite-kind-options button { flex-direction: row; padding: 12px 14px; text-align: left; }
-  .flight-input-group .flight-stick-grid,
-  .drive-input-group .drive-stick-grid { grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px); }
-  .flight-stick-grid button,
-  .drive-stick-grid button { height: 42px; width: 42px; }
+  .flight-input-group .flight-stick-grid { grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px); }
+  .flight-stick-grid button { height: 42px; width: 42px; }
   .map-tool-dock button { height: 48px; width: 48px; }
   .map-tool-dock svg { height: 21px; width: 21px; }
   .layer-toggle { min-height: 62px; }
@@ -1326,10 +1337,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .drive-inputs { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 12px)); right: max(12px, env(safe-area-inset-right, 12px)); }
   .flight-input-group button,
   .drive-input-group button { height: 42px; width: 46px; }
-  .flight-input-group .flight-stick-grid,
-  .drive-input-group .drive-stick-grid { grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); }
-  .flight-stick-grid button,
-  .drive-stick-grid button { height: 40px; width: 40px; }
+  .flight-input-group .flight-stick-grid { grid-template-columns: repeat(3, 40px); grid-template-rows: repeat(3, 40px); }
+  .flight-stick-grid button { height: 40px; width: 40px; }
+  .drive-handbrake-control button { height: 92px; width: 52px; }
   .flight-key-help,
   .drive-key-help { display: none; }
   .location-search { width: min(300px, calc(100% - 24px)); }
