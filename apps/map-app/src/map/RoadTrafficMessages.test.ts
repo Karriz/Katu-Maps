@@ -50,7 +50,7 @@ const roadworksPayload = {
               { weekday: 'Wednesday', startTime: '22:00', endTime: '06:00' },
             ],
           }],
-          timeAndDuration: { startTime: '2026-08-31T21:00:00.000Z', endTime: '2026-09-11T20:59:59.999Z' },
+          timeAndDuration: { startTime: '2026-08-31T21:00:00.000Z', endTime: '2027-12-31T20:59:59.999Z' },
           sender: 'Fintraffic Tieliikennekeskus',
         }],
       },
@@ -122,6 +122,7 @@ const announcementsPayload = {
 afterEach(() => {
   resetRoadTrafficMessageCaches();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -170,6 +171,8 @@ describe('road traffic messages', () => {
   });
 
   it('fetches roadworks and announcements together and caches the result', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       const body = url.includes('roadworks') ? roadworksPayload : announcementsPayload;
@@ -190,5 +193,6 @@ describe('road traffic messages', () => {
       'https://tie.digitraffic.fi/api/traffic-message/v2/roadworks',
       'https://tie.digitraffic.fi/api/traffic-message/v2/traffic-announcements',
     ]);
+    vi.useRealTimers();
   });
 });
