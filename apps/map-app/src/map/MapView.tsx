@@ -156,6 +156,7 @@ import {
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
   OPENFREEMAP_SOURCE_ID,
+  updatePhysicalLineCaps,
   updatePhysicalWidthPaint,
   applyMapTheme,
   ensureMountainPeakIcon,
@@ -995,6 +996,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // reapplication after a mode switch at the same latitude, so force it.
     const latitude = map.getCenter().lat;
     updatePhysicalWidthPaint(map, latitude, flight.active ? 19 : 18);
+    updatePhysicalLineCaps(map, flight.active);
   }, [flight.active, mapLoaded]);
   useEffect(() => {
     if (flight.active) {
@@ -1055,16 +1057,19 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     if (!flight.active || !mapLoaded || !map) return;
     const roofLayer = roofLayerRef.current;
     const facadeLayer = facadeLayerRef.current;
+    const bridgeLayer = bridgeLayerRef.current;
+    bridgeLayer?.setFlightMode(true);
     roofLayer?.setFlightMode(true);
     facadeLayer?.setFlightMode(true);
     const stopRefresh = installFlightSceneScheduler(map, OPENFREEMAP_SOURCE_ID, [
       () => flightTreeLayerRef.current?.updateTrees(true),
-      () => bridgeLayerRef.current?.updateBridges(),
+      () => bridgeLayer?.updateBridges(),
       () => roofLayer?.requestFlightRefresh(),
       () => facadeLayer?.requestFlightRefresh(),
     ]);
     return () => {
       stopRefresh();
+      bridgeLayer?.setFlightMode(false);
       roofLayer?.setFlightMode(false);
       facadeLayer?.setFlightMode(false);
     };

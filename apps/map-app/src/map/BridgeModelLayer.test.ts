@@ -55,6 +55,7 @@ import {
   polygonAreaMetres,
   shouldMeshClusterLines,
   shouldRenderBridgesForView,
+  viewportSpanMeters,
   spanAxis,
   surfaceElevation,
   toPlanPoints,
@@ -87,6 +88,24 @@ describe('shouldRenderBridgesForView', () => {
       zoom: 14, pitch: 32, terrainEnabled: true,
     })).toBe(false);
   });
+});
+
+it('uses stable forward coverage for bridges in flight when screen bounds are unavailable', () => {
+  const layer = new BridgeModelLayer();
+  const internal = layer as any;
+  internal.flightMode = true;
+  const getBounds = vi.fn(() => { throw new Error('horizon'); });
+  const view = internal.currentView({
+    getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+    getBearing: () => 0,
+    getZoom: () => 14,
+    getPitch: () => 110,
+    getTerrain: () => ({ source: 'terrain' }),
+    getBounds,
+  });
+  expect(getBounds).not.toHaveBeenCalled();
+  expect(view.north - 61.5).toBeGreaterThan(61.5 - view.south);
+  expect(viewportSpanMeters(view)).toBeLessThanOrEqual(4_000);
 });
 
 describe('bridgePartsForView', () => {

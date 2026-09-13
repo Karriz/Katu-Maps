@@ -1,6 +1,7 @@
 import type {
   ExpressionSpecification,
   FilterSpecification,
+  LineLayerSpecification,
   StyleSpecification,
 } from 'maplibre-gl';
 import {
@@ -38,6 +39,76 @@ const LOCALIZED_NAME: ExpressionSpecification = [
 const ROAD_CLASSES = [
   'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service',
 ] as const;
+
+const NOT_RAMP: ExpressionSpecification = ['!=', ['get', 'ramp'], 1];
+const ROAD_WIDTH_COHORTS = [
+  {
+    id: 'service-narrow',
+    metres: 3.2,
+    filter: ['all', NOT_RAMP, ['==', ['get', 'class'], 'service'],
+      ['in', ['get', 'service'], ['literal', ['parking_aisle', 'driveway', 'alley', 'crossover']]]],
+  },
+  {
+    id: 'service',
+    metres: 4,
+    filter: ['all', NOT_RAMP, ['==', ['get', 'class'], 'service'],
+      ['!', ['in', ['get', 'service'], ['literal', ['parking_aisle', 'driveway', 'alley', 'crossover']]]]],
+  },
+  { id: 'local', metres: 5.5, filter: ['all', NOT_RAMP, ['==', ['get', 'class'], 'minor']] },
+  { id: 'ramp', metres: 6.5, filter: ['==', ['get', 'ramp'], 1] },
+  {
+    id: 'arterial',
+    metres: 7.5,
+    filter: ['all', NOT_RAMP, ['in', ['get', 'class'], ['literal', ['secondary', 'tertiary']]]],
+  },
+  {
+    id: 'major',
+    metres: 9.5,
+    filter: ['all', NOT_RAMP, ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary']]]],
+  },
+] as const satisfies readonly { id: string; metres: number; filter: ExpressionSpecification }[];
+
+function roadCohortLayerId(baseId: string, cohortIndex: number) {
+  return cohortIndex === 0 ? baseId : `${baseId}-${ROAD_WIDTH_COHORTS[cohortIndex].id}`;
+}
+
+function roadCohortLayerIds(baseId: string) {
+  return ROAD_WIDTH_COHORTS.map((_, index) => roadCohortLayerId(baseId, index));
+}
+
+const ROAD_CASING_LAYER_BASE_IDS = [
+  'global-road-tunnel-portals',
+  'global-road-casing',
+  'global-road-bridge-shadow',
+  'global-road-bridge-casing',
+] as const;
+
+const ROAD_SURFACE_LAYER_BASE_IDS = ['global-roads', 'global-road-bridges'] as const;
+
+const AEROWAY_LINE_WIDTH_COHORTS = [
+  {
+    id: 'other',
+    metres: 6,
+    filter: ['!', ['in', ['get', 'class'], ['literal', ['runway', 'taxiway', 'apron']]]],
+  },
+  { id: 'apron', metres: 12, filter: ['==', ['get', 'class'], 'apron'] },
+  { id: 'taxiway', metres: 23, filter: ['==', ['get', 'class'], 'taxiway'] },
+] as const satisfies readonly { id: string; metres: number; filter: ExpressionSpecification }[];
+
+function aerowayCohortLayerId(cohortIndex: number) {
+  return cohortIndex === 0 ? 'global-aeroway-lines' : `global-aeroway-lines-${AEROWAY_LINE_WIDTH_COHORTS[cohortIndex].id}`;
+}
+
+export const GLOBAL_AEROWAY_NON_RUNWAY_LINE_LAYER_IDS = AEROWAY_LINE_WIDTH_COHORTS
+  .map((_, index) => aerowayCohortLayerId(index));
+
+export const GLOBAL_AEROWAY_LINE_LAYER_IDS = [
+  ...GLOBAL_AEROWAY_NON_RUNWAY_LINE_LAYER_IDS,
+  'global-aeroway-runways',
+] as const;
+
+const AEROWAY_TAXIWAY_CENTERLINE_LAYER_ID = 'global-aeroway-taxiway-centerlines';
+const AEROWAY_RUNWAY_CENTERLINE_LAYER_ID = 'global-aeroway-runway-centerlines';
 
 const ROAD_FILTER: ExpressionSpecification = [
   'all',
@@ -263,9 +334,9 @@ const BRIDGE_DECK_LAYER_IDS = new Set([
 ]);
 
 const BRIDGE_OVERLAY_LAYER_IDS = new Set([
-  'global-road-bridge-shadow',
-  'global-road-bridge-casing',
-  'global-road-bridges',
+  ...roadCohortLayerIds('global-road-bridge-shadow'),
+  ...roadCohortLayerIds('global-road-bridge-casing'),
+  ...roadCohortLayerIds('global-road-bridges'),
   'global-path-bridge-shadow',
   'global-path-bridge-edge',
   'global-bridge-deck-edge',
@@ -289,6 +360,23 @@ function orderBridgeLayers(layers: StyleSpecification['layers']): StyleSpecifica
     ...bridgeDeckLayers,
     ...bridgeOverlayLayers,
     ...layersWithoutBridgeGeometry.slice(railwayIndex + 1),
+  ];
+}
+
+function orderAerowayLinesAbovePaths(layers: StyleSpecification['layers']): StyleSpecification['layers'] {
+  const aerowayIds = new Set([
+    ...GLOBAL_AEROWAY_LINE_LAYER_IDS,
+    AEROWAY_TAXIWAY_CENTERLINE_LAYER_ID,
+    AEROWAY_RUNWAY_CENTERLINE_LAYER_ID,
+  ]);
+  const aerowayLayers = layers.filter((layer) => aerowayIds.has(layer.id));
+  const otherLayers = layers.filter((layer) => !aerowayIds.has(layer.id));
+  const lastPathIndex = otherLayers.findIndex((layer) => layer.id === 'global-paths-under-construction');
+  if (lastPathIndex === -1) return layers;
+  return [
+    ...otherLayers.slice(0, lastPathIndex + 1),
+    ...aerowayLayers,
+    ...otherLayers.slice(lastPathIndex + 1),
   ];
 }
 
@@ -355,9 +443,9 @@ const SURFACE_PATH_LAYER_FILTERS: Array<[string, FilterSpecification]> = [
 
 /** Draped bridge strokes replaced by the 3D deck layer. */
 export const GLOBAL_ELEVATED_BRIDGE_LINE_LAYER_IDS = [
-  'global-road-bridge-shadow',
-  'global-road-bridge-casing',
-  'global-road-bridges',
+  ...roadCohortLayerIds('global-road-bridge-shadow'),
+  ...roadCohortLayerIds('global-road-bridge-casing'),
+  ...roadCohortLayerIds('global-road-bridges'),
   'global-railway-bridge-shadow',
   'global-railway-bridge-casing',
   'global-railway-bridges',
@@ -458,16 +546,26 @@ export function removeBridgeFallback(map: MapLibreMap) {
 }
 
 export const GLOBAL_ROAD_CASING_LAYER_IDS = [
-  'global-road-tunnel-portals',
-  'global-road-casing',
-  'global-road-bridge-shadow',
-  'global-road-bridge-casing',
-];
+  ...ROAD_CASING_LAYER_BASE_IDS.flatMap(roadCohortLayerIds),
+] as const;
 
 export const GLOBAL_ROAD_LAYER_IDS = [
-  'global-roads',
-  'global-road-bridges',
-];
+  ...ROAD_SURFACE_LAYER_BASE_IDS.flatMap(roadCohortLayerIds),
+] as const;
+
+export const GLOBAL_ROAD_CASING_COLOR_LAYER_IDS = [
+  ...roadCohortLayerIds('global-road-casing'),
+  ...roadCohortLayerIds('global-road-bridge-casing'),
+  'global-overview-road-casing',
+  'global-overview-regional-road-casing',
+] as const;
+
+export const GLOBAL_ROAD_COLOR_LAYER_IDS = [
+  ...roadCohortLayerIds('global-roads'),
+  ...roadCohortLayerIds('global-road-bridges'),
+  'global-overview-roads',
+  'global-overview-regional-roads',
+] as const;
 
 export const GLOBAL_CYCLING_LAYER_IDS = [
   'global-cycling-path-casing',
@@ -677,42 +775,6 @@ const GLOBAL_BUILDING_UPPER_BASE: ExpressionSpecification = [
   GLOBAL_BUILDING_BASE,
 ] as ExpressionSpecification;
 
-const ESTIMATED_ROAD_WIDTH_METRES: ExpressionSpecification = [
-  'case',
-  ['==', ['get', 'ramp'], 1],
-  [
-    'match', ['get', 'class'],
-    'motorway', 7.5,
-    'trunk', 7,
-    'primary', 6.5,
-    'secondary', 6,
-    'tertiary', 5.5,
-    5,
-  ],
-  ['==', ['get', 'class'], 'service'],
-  [
-    'match', ['get', 'service'],
-    'parking_aisle', 3,
-    'driveway', 3.2,
-    'alley', 3.2,
-    'crossover', 3.5,
-    4,
-  ],
-  [
-    'match', ['get', 'class'],
-    // Divided highways are normally encoded as one centerline per
-    // carriageway, so using the full combined-road width overstates them at
-    // close zooms. Allow roughly two lanes plus shoulders per line instead.
-    'motorway', 10.5,
-    'trunk', 9.5,
-    'primary', 9,
-    'secondary', 8,
-    'tertiary', 7,
-    'minor', 5.5,
-    5,
-  ],
-] as ExpressionSpecification;
-
 function pixelsPerMetre(zoom: number, latitude: number) {
   const safeLatitude = Math.max(-80, Math.min(80, latitude));
   const groundCircumference = 40_075_016.686 * Math.cos(safeLatitude * Math.PI / 180);
@@ -725,50 +787,85 @@ export function roadWidthExpression(
   latitude: number,
   casing = false,
   maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM,
+  widthMetres = 9.5,
 ): ExpressionSpecification {
-  const widthMetres: ExpressionSpecification = casing
-    ? ['+', ESTIMATED_ROAD_WIDTH_METRES, 1]
-    : ESTIMATED_ROAD_WIDTH_METRES;
+  const renderedWidthMetres = widthMetres + (casing ? 1 : 0);
 
   const stops: Array<number | ExpressionSpecification> = [
-    6, ['max', casing ? 0.65 : 0.4, ['*', widthMetres, pixelsPerMetre(6, latitude)]],
-    10, ['max', casing ? 0.8 : 0.5, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
-    12, ['max', casing ? 1 : 0.6, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
-    14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
-    16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    ROAD_WIDTH_DEFAULT_MAX_ZOOM, ['*', widthMetres, pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude)],
+    6, Math.max(casing ? 0.65 : 0.4, renderedWidthMetres * pixelsPerMetre(6, latitude)),
+    10, Math.max(casing ? 0.8 : 0.5, renderedWidthMetres * pixelsPerMetre(10, latitude)),
+    12, Math.max(casing ? 1 : 0.6, renderedWidthMetres * pixelsPerMetre(12, latitude)),
+    14, renderedWidthMetres * pixelsPerMetre(14, latitude),
+    16, renderedWidthMetres * pixelsPerMetre(16, latitude),
+    ROAD_WIDTH_DEFAULT_MAX_ZOOM, renderedWidthMetres * pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude),
   ];
   // Flight mode lifts the camera max zoom above the default 18. Allow one
   // more exponential step so close-range roads stay in proportion, then hold
   // that width for every closer zoom so screen-space strokes do not balloon.
   if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
-    stops.push(maxZoom, ['*', widthMetres, pixelsPerMetre(maxZoom, latitude)]);
+    stops.push(maxZoom, renderedWidthMetres * pixelsPerMetre(maxZoom, latitude));
   }
   return ['interpolate', ['exponential', 2], ['zoom'], ...stops] as ExpressionSpecification;
+}
+
+function roadCohortLayers(layer: LineLayerSpecification, casing: boolean): LineLayerSpecification[] {
+  return ROAD_WIDTH_COHORTS.map((cohort, index) => ({
+    ...layer,
+    id: roadCohortLayerId(layer.id, index),
+    filter: ['all', layer.filter ?? true, cohort.filter] as FilterSpecification,
+    paint: {
+      ...layer.paint,
+      'line-width': roadWidthExpression(0, casing, ROAD_WIDTH_DEFAULT_MAX_ZOOM, cohort.metres),
+    },
+  }));
 }
 
 export function aerowayWidthExpression(
   latitude: number,
   maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM,
+  widthMetres = 45,
 ): ExpressionSpecification {
-  const widthMetres: ExpressionSpecification = [
-    'match', ['get', 'class'],
-    'runway', 45,
-    'taxiway', 23,
-    'apron', 12,
-    6,
-  ] as ExpressionSpecification;
-
   const stops: Array<number | ExpressionSpecification> = [
-    10, ['max', 1, ['*', widthMetres, pixelsPerMetre(10, latitude)]],
-    12, ['max', 1.5, ['*', widthMetres, pixelsPerMetre(12, latitude)]],
-    14, ['*', widthMetres, pixelsPerMetre(14, latitude)],
-    16, ['*', widthMetres, pixelsPerMetre(16, latitude)],
-    ROAD_WIDTH_DEFAULT_MAX_ZOOM, ['*', widthMetres, pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude)],
+    10, Math.max(1, widthMetres * pixelsPerMetre(10, latitude)),
+    12, Math.max(1.5, widthMetres * pixelsPerMetre(12, latitude)),
+    14, widthMetres * pixelsPerMetre(14, latitude),
+    16, widthMetres * pixelsPerMetre(16, latitude),
+    ROAD_WIDTH_DEFAULT_MAX_ZOOM, widthMetres * pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude),
   ];
   if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
-    stops.push(maxZoom, ['*', widthMetres, pixelsPerMetre(maxZoom, latitude)]);
+    stops.push(maxZoom, widthMetres * pixelsPerMetre(maxZoom, latitude));
   }
+  return ['interpolate', ['exponential', 2], ['zoom'], ...stops] as ExpressionSpecification;
+}
+
+function aerowayCohortLayers(layer: LineLayerSpecification): LineLayerSpecification[] {
+  return AEROWAY_LINE_WIDTH_COHORTS.map((cohort, index) => ({
+    ...layer,
+    id: aerowayCohortLayerId(index),
+    filter: ['all', layer.filter ?? true, cohort.filter] as FilterSpecification,
+    paint: {
+      ...layer.paint,
+      'line-width': aerowayWidthExpression(0, ROAD_WIDTH_DEFAULT_MAX_ZOOM, cohort.metres),
+    },
+  }));
+}
+
+function markingWidthExpression(
+  widthMetres: number,
+  latitude: number,
+  maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM,
+): ExpressionSpecification {
+  const widthAt = (zoom: number, minimum = 0) => Math.max(
+    minimum,
+    widthMetres * pixelsPerMetre(zoom, latitude),
+  );
+  const stops: Array<number | ExpressionSpecification> = [
+    12, widthAt(12, 0.4),
+    14, widthAt(14, 0.5),
+    16, widthAt(16, 0.6),
+    ROAD_WIDTH_DEFAULT_MAX_ZOOM, widthAt(ROAD_WIDTH_DEFAULT_MAX_ZOOM),
+  ];
+  if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) stops.push(maxZoom, widthAt(maxZoom));
   return ['interpolate', ['exponential', 2], ['zoom'], ...stops] as ExpressionSpecification;
 }
 
@@ -791,15 +888,36 @@ function pathWidthExpression(
   ] as ExpressionSpecification;
 }
 
+/** Use overlapping caps only while flight pitch makes source segmentation visible. */
+export function updatePhysicalLineCaps(map: MapLibreMap, flightActive: boolean) {
+  const cap = flightActive ? 'square' : 'round';
+  const layerIds = [
+    ...roadCohortLayerIds('global-road-casing'),
+    ...roadCohortLayerIds('global-roads'),
+    ...GLOBAL_AEROWAY_NON_RUNWAY_LINE_LAYER_IDS,
+  ];
+  layerIds.forEach((id) => {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'line-cap', cap);
+  });
+}
+
 /** Refresh every line whose pixel width represents a physical ground width. */
 export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number, maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
   const setWidth = (id: string, expression: ExpressionSpecification) => {
     if (map.getLayer(id)) map.setPaintProperty(id, 'line-width', expression);
   };
-  GLOBAL_ROAD_CASING_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude, true, maxZoom)));
-  GLOBAL_ROAD_LAYER_IDS.forEach((id) => setWidth(id, roadWidthExpression(latitude, false, maxZoom)));
-  ['global-aeroway-lines', 'global-aeroway-runways']
-    .forEach((id) => setWidth(id, aerowayWidthExpression(latitude, maxZoom)));
+  ROAD_CASING_LAYER_BASE_IDS.forEach((baseId) => ROAD_WIDTH_COHORTS.forEach((cohort, index) => {
+    setWidth(roadCohortLayerId(baseId, index), roadWidthExpression(latitude, true, maxZoom, cohort.metres));
+  }));
+  ROAD_SURFACE_LAYER_BASE_IDS.forEach((baseId) => ROAD_WIDTH_COHORTS.forEach((cohort, index) => {
+    setWidth(roadCohortLayerId(baseId, index), roadWidthExpression(latitude, false, maxZoom, cohort.metres));
+  }));
+  AEROWAY_LINE_WIDTH_COHORTS.forEach((cohort, index) => {
+    setWidth(aerowayCohortLayerId(index), aerowayWidthExpression(latitude, maxZoom, cohort.metres));
+  });
+  setWidth('global-aeroway-runways', aerowayWidthExpression(latitude, maxZoom, 45));
+  setWidth(AEROWAY_TAXIWAY_CENTERLINE_LAYER_ID, markingWidthExpression(0.18, latitude, maxZoom));
+  setWidth(AEROWAY_RUNWAY_CENTERLINE_LAYER_ID, markingWidthExpression(0.3, latitude, maxZoom));
   setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude));
 
   const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [
@@ -958,7 +1076,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       attribution: '<a href="https://mapterhorn.com/attribution/">© Mapterhorn terrain data</a>',
     },
   },
-  layers: orderBridgeLayers([
+  layers: orderBridgeLayers(orderAerowayLinesAbovePaths([
     {
       id: 'global-background',
       type: 'background',
@@ -1162,7 +1280,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'fill-opacity': 0.92,
       },
     },
-    {
+    ...aerowayCohortLayers({
       id: 'global-aeroway-lines',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1183,7 +1301,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
         'line-width': aerowayWidthExpression(0),
       },
-    },
+    }),
     {
       id: 'global-aeroway-runways',
       type: 'line',
@@ -1195,10 +1313,47 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ['==', ['geometry-type'], 'LineString'],
         ['==', ['get', 'class'], 'runway'],
       ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      layout: { 'line-cap': 'square', 'line-join': 'round' },
       paint: {
         'line-color': '#9ea29f',
-        'line-width': aerowayWidthExpression(0),
+        'line-width': aerowayWidthExpression(0, ROAD_WIDTH_DEFAULT_MAX_ZOOM, 45),
+      },
+    },
+    {
+      id: AEROWAY_TAXIWAY_CENTERLINE_LAYER_ID,
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'aeroway',
+      minzoom: 14,
+      filter: [
+        'all',
+        ['==', ['geometry-type'], 'LineString'],
+        ['==', ['get', 'class'], 'taxiway'],
+      ],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#e8bd3f',
+        'line-width': markingWidthExpression(0.18, 0),
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.96],
+      },
+    },
+    {
+      id: AEROWAY_RUNWAY_CENTERLINE_LAYER_ID,
+      type: 'line',
+      source: OPENFREEMAP_SOURCE_ID,
+      'source-layer': 'aeroway',
+      minzoom: 14,
+      filter: [
+        'all',
+        ['==', ['geometry-type'], 'LineString'],
+        ['==', ['get', 'class'], 'runway'],
+      ],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#f8f8f3',
+        'line-width': markingWidthExpression(0.3, 0),
+        'line-dasharray': [60, 40],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.96],
       },
     },
     {
@@ -1396,7 +1551,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'fill-opacity': 0.98,
       },
     },
-    {
+    ...roadCohortLayers({
       id: 'global-road-tunnel-portals',
       type: 'line',
       source: 'tunnel-portals',
@@ -1413,7 +1568,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': roadWidthExpression(0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.62],
       },
-    },
+    }, true),
     {
       id: 'global-overview-road-casing',
       type: 'line',
@@ -1518,7 +1673,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         ],
       },
     },
-    {
+    ...roadCohortLayers({
       id: 'global-road-casing',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1539,8 +1694,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': roadWidthExpression(0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.78],
       },
-    },
-    {
+    }, true),
+    ...roadCohortLayers({
       id: 'global-roads',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1557,8 +1712,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': roadWidthExpression(0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.98],
       },
-    },
-    {
+    }, false),
+    ...roadCohortLayers({
       id: 'global-road-bridge-shadow',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1578,8 +1733,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-blur': 1.4,
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.25],
       },
-    },
-    {
+    }, true),
+    ...roadCohortLayers({
       id: 'global-road-bridge-casing',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1602,8 +1757,8 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': roadWidthExpression(0, true),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 0.84],
       },
-    },
-    {
+    }, true),
+    ...roadCohortLayers({
       id: 'global-road-bridges',
       type: 'line',
       source: OPENFREEMAP_SOURCE_ID,
@@ -1620,7 +1775,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-width': roadWidthExpression(0),
         'line-opacity': ['interpolate', ['linear'], ['zoom'], 10.5, 0, 12, 1],
       },
-    },
+    }, false),
     {
       id: ROAD_CENTER_MARKINGS_LAYER_ID,
       type: 'line',
@@ -3020,7 +3175,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'text-opacity': ['interpolate', ['linear'], ['zoom'], 17, 0, 17.25, 0.9],
       },
     },
-  ]),
+  ])),
 };
 
 function createMountainPeakDot() {
@@ -3099,7 +3254,7 @@ export function applyMapTheme(
   ['global-landcover', 'global-landuse', 'global-landuse-overlays'].forEach((id) => set(id, 'fill-color', colors.land));
   ['global-protected-areas', 'global-parks', 'global-landcover-parks'].forEach((id) => set(id, 'fill-color', colors.park));
   set('global-aeroway-areas', 'fill-color', '#29465a');
-  set('global-aeroway-lines', 'line-color', '#7190a2');
+  GLOBAL_AEROWAY_NON_RUNWAY_LINE_LAYER_IDS.forEach((id) => set(id, 'line-color', '#7190a2'));
   set('global-aeroway-runways', 'line-color', '#617f92');
   set('terrain-hillshade', 'hillshade-shadow-color', '#020b14');
   set('terrain-hillshade', 'hillshade-highlight-color', '#173149');
@@ -3107,8 +3262,8 @@ export function applyMapTheme(
   ['global-water', 'global-waterway'].forEach((id) => set(id, id.endsWith('way') ? 'line-color' : 'fill-color', colors.water));
   set('global-water-edge-shade', 'fill-color', colors.waterEdge);
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => set(id, 'fill-color', colors.land));
-  ['global-road-casing', 'global-road-bridge-casing', 'global-overview-road-casing', 'global-overview-regional-road-casing'].forEach((id) => set(id, 'line-color', colors.roadCasing));
-  ['global-roads', 'global-road-bridges', 'global-overview-roads', 'global-overview-regional-roads'].forEach((id) => set(id, 'line-color', colors.road));
+  GLOBAL_ROAD_CASING_COLOR_LAYER_IDS.forEach((id) => set(id, 'line-color', colors.roadCasing));
+  GLOBAL_ROAD_COLOR_LAYER_IDS.forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);

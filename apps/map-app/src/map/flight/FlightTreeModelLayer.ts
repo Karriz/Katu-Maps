@@ -32,6 +32,7 @@ const FLIGHT_PENDING_TREE_LIMIT = 360;
 const FLIGHT_TREES_ADMIT_PER_FRAME = 6;
 const FLIGHT_TREE_GROWTH_DURATION_MS = 1_100;
 const FLIGHT_GROWTH_MESH_WRITE_MS = 50;
+const FLIGHT_ELEVATION_RETRIES_PER_UPDATE = 128;
 const FLIGHT_ORIGIN_REBASE_METERS = 4_000;
 const FLIGHT_UPDATE_MIN_INTERVAL_MS = 200;
 const FLIGHT_UPDATE_MOVE_METERS = 300;
@@ -108,6 +109,7 @@ type DisplayedTree = {
   east: number;
   north: number;
   up: number;
+  elevationProvisional: boolean;
   growthStart: number;
   growthDuration: number;
 };
@@ -915,6 +917,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   private lastOriginMercatorX?: number;
   private lastOriginMercatorY?: number;
   private lastGrowthMeshWrite = 0;
+  private elevationRetryOffset = 0;
   private candidateJob?: Generator<void, TreeInstance[]>;
   private completedCandidates?: TreeInstance[];
   private trunkMesh?: THREE.InstancedMesh;
@@ -942,6 +945,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     this.lastCandidateCheckTime = undefined;
     this.lastOriginMercatorX = undefined;
     this.lastOriginMercatorY = undefined;
+    this.elevationRetryOffset = 0;
   }
 
   private clearPendingFlightTrees() {
@@ -1042,6 +1046,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
   ): DisplayedTree {
     const location = new maplibregl.LngLat(tree.longitude, tree.latitude);
     let elevation: number;
+    let elevationProvisional = false;
     const elevationKey = `${terrainZoomBucket}:${tree.longitude.toFixed(5)}:${tree.latitude.toFixed(5)}`;
     const cached = this.cachedElevation(elevationKey);
     if (cached !== undefined) {
@@ -1053,6 +1058,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
         this.cacheElevation(elevationKey, elevation);
       } else {
         elevation = this.sceneOriginElevation;
+        elevationProvisional = true;
       }
     }
 
@@ -1065,6 +1071,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
       east: (treeMercator.x - originMercator.x) / mercatorUnitsPerMeter,
       north: (originMercator.y - treeMercator.y) / mercatorUnitsPerMeter,
       up: elevation - this.sceneOriginElevation,
+      elevationProvisional,
       growthStart,
       growthDuration,
     };
@@ -1454,22 +1461,49 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     const now = performance.now();
     const nextKeys = new Set<string>();
     let treesChanged = originChanged;
+    const retryStart = trees.length > 0 ? this.elevationRetryOffset % trees.length : 0;
+    let treeIndex = 0;
 
     for (const tree of trees) {
+      const retryDistance = trees.length > 0
+        ? (treeIndex - retryStart + trees.length) % trees.length
+        : 0;
+      treeIndex += 1;
       const key = displayedTreeKey(tree);
       nextKeys.add(key);
+      const wasDisplayed = this.displayedTrees.has(key);
       const previousTree = this.displayedTrees.get(key)
         ?? this.takeRetainedTree(key);
 
       if (previousTree !== undefined) {
-        if (!this.displayedTrees.has(key)) {
+        let elevationChanged = false;
+        if (!wasDisplayed) {
           // Restored trees should appear fully grown — they were already seen.
           previousTree.growthStart = now - previousTree.growthDuration;
           this.displayedTrees.set(key, previousTree);
           treesChanged = true;
         }
-        // Tree already known — only recompute position if scene origin changed.
-        if (originChanged) {
+        // Retry provisional DEM samples when terrain tiles arrive. Keep the
+        // identity and local position stable while correcting the height.
+        if (previousTree.elevationProvisional
+          && retryDistance < FLIGHT_ELEVATION_RETRIES_PER_UPDATE) {
+          const sampled = map.queryTerrainElevation(
+            new maplibregl.LngLat(previousTree.tree.longitude, previousTree.tree.latitude),
+          );
+          if (sampled != null) {
+            previousTree.elevation = sampled;
+            previousTree.elevationProvisional = false;
+            elevationChanged = true;
+            this.cacheElevation(
+              `${terrainZoomBucket}:${previousTree.tree.longitude.toFixed(5)}:${previousTree.tree.latitude.toFixed(5)}`,
+              sampled,
+            );
+            treesChanged = true;
+          }
+        }
+        // Recompute every restored tree's frame. Retained offsets may have
+        // been calculated before a scene-origin rebase.
+        if (originChanged || !wasDisplayed || elevationChanged) {
           previousTree.east = (previousTree.mercatorX - originMercator.x)
             / mercatorUnitsPerMeter;
           previousTree.north = (originMercator.y - previousTree.mercatorY)
@@ -1492,6 +1526,10 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
           : now,
         flightMode ? FLIGHT_TREE_GROWTH_DURATION_MS : TREE_GROWTH_DURATION_MS,
       ));
+    }
+    if (trees.length > 0) {
+      this.elevationRetryOffset = (retryStart + FLIGHT_ELEVATION_RETRIES_PER_UPDATE)
+        % trees.length;
     }
 
     // Prune keys that are no longer in the visible set. In flight mode keep
@@ -1666,6 +1704,7 @@ export class FlightTreeModelLayer implements CustomLayerInterface {
     this.lastCandidateCheckTime = undefined;
     this.lastOriginMercatorX = undefined;
     this.lastOriginMercatorY = undefined;
+    this.elevationRetryOffset = 0;
     this.growthAnimationActive = false;
     for (const mesh of [
       this.shadowMesh,

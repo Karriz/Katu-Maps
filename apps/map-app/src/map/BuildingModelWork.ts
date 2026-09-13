@@ -1,5 +1,6 @@
 import type { Map as MaplibreMap } from 'maplibre-gl';
 import * as THREE from 'three';
+import { flightGroundBounds } from './flight/FlightGroundCoverage';
 
 export type BuildingView = {
   west: number; south: number; east: number; north: number;
@@ -21,17 +22,9 @@ export function buildingView(map: MaplibreMap, padding = 0): BuildingView {
 /** A bounded flight footprint remains usable when screen corners cross the horizon. */
 export function flightBuildingView(map: MaplibreMap): BuildingView {
   const center = map.getCenter();
-  const heading = map.getBearing() * Math.PI / 180;
-  const metersPerDegree = Math.PI / 180 * 6_378_137;
-  const longitudeScale = Math.max(0.01, Math.cos(center.lat * Math.PI / 180));
-  const longitude = center.lng + Math.sin(heading) * 600 / (metersPerDegree * longitudeScale);
-  const latitude = center.lat + Math.cos(heading) * 600 / metersPerDegree;
-  const radius = 1200;
+  const bounds = flightGroundBounds(map, 1_200, 600);
   return {
-    west: longitude - radius / (metersPerDegree * longitudeScale),
-    east: longitude + radius / (metersPerDegree * longitudeScale),
-    south: latitude - radius / metersPerDegree,
-    north: latitude + radius / metersPerDegree,
+    ...bounds,
     zoom: Math.floor(map.getZoom()), latitude: center.lat,
   };
 }

@@ -11,6 +11,7 @@ import {
   GLOBAL_BASE_LABEL_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
   pastelBuildingColor,
+  updatePhysicalLineCaps,
   updateBridgeFallback,
   removeBridgeFallback,
   refreshMapRenderState,
@@ -76,6 +77,8 @@ describe('global map overlay styles', () => {
         if (mapCompiled.result !== 'success' || flightCompiled.result !== 'success') {
           throw new Error('Invalid road width expression');
         }
+        expect(JSON.stringify(roadWidthExpression(latitude, casing))).not.toContain('"get"');
+        expect(JSON.stringify(roadWidthExpression(latitude, casing, 19))).not.toContain('"get"');
         for (const properties of [{ class: 'motorway' }, { class: 'minor' }, { class: 'service', service: 'driveway' }]) {
           const evaluate = (compiled: typeof mapCompiled, zoom: number) =>
             compiled.value.evaluate({ zoom }, { properties } as any) as number;
@@ -98,6 +101,64 @@ describe('global map overlay styles', () => {
     }
   });
 
+  it('uses camera-only widths for every close-up road cohort', () => {
+    for (const baseId of [
+      'global-road-tunnel-portals',
+      'global-road-casing',
+      'global-roads',
+      'global-road-bridge-shadow',
+      'global-road-bridge-casing',
+      'global-road-bridges',
+    ]) {
+      const layers = GLOBAL_MAP_STYLE.layers.filter((layer) => (
+        layer.id === baseId || layer.id.startsWith(`${baseId}-`)
+      ));
+      expect(layers).toHaveLength(6);
+      const widths = layers.map((layer) => {
+        const expression = (layer.paint as any)['line-width'];
+        expect(JSON.stringify(expression)).not.toContain('"get"');
+        const compiled = createExpression(expression, `${layer.id}-width`);
+        if (compiled.result !== 'success') throw new Error(`Invalid width for ${layer.id}`);
+        return compiled.value.evaluate({ zoom: 18 }, { properties: {} } as any) as number;
+      });
+      expect(new Set(widths.map((width) => width.toFixed(6)))).toHaveLength(6);
+    }
+  });
+
+  it('defaults ground-level roads and taxiways to round caps while runways stay square', () => {
+    const wideSurfaceIds = GLOBAL_MAP_STYLE.layers
+      .map((layer) => layer.id)
+      .filter((id) => (
+        id === 'global-road-casing' || id.startsWith('global-road-casing-')
+        || id === 'global-roads' || id.startsWith('global-roads-')
+        || id === 'global-aeroway-lines' || id.startsWith('global-aeroway-lines-')
+        || id === 'global-aeroway-runways'
+      ));
+    expect(wideSurfaceIds).toHaveLength(16);
+    for (const id of wideSurfaceIds) {
+      const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === id) as any;
+      expect(layer.layout?.['line-cap']).toBe(id === 'global-aeroway-runways' ? 'square' : 'round');
+      expect(layer.layout?.['line-join']).toBe('round');
+    }
+  });
+
+  it('uses square physical-line caps only during flight', () => {
+    const updates: Array<[string, string]> = [];
+    const map = {
+      getLayer: () => ({}),
+      setLayoutProperty: (id: string, _property: string, value: string) => updates.push([id, value]),
+    };
+    updatePhysicalLineCaps(map as any, true);
+    expect(updates).toHaveLength(15);
+    expect(updates.every(([, cap]) => cap === 'square')).toBe(true);
+    expect(updates.some(([id]) => id === 'global-aeroway-runways')).toBe(false);
+
+    updates.length = 0;
+    updatePhysicalLineCaps(map as any, false);
+    expect(updates).toHaveLength(15);
+    expect(updates.every(([, cap]) => cap === 'round')).toBe(true);
+  });
+
   it('caps aeroway widths at z18 in map mode and z19 in flight mode', () => {
     const feature = { properties: { class: 'runway' } } as any;
     const evaluate = (expression: any, zoom: number, label: string) => {
@@ -108,6 +169,7 @@ describe('global map overlay styles', () => {
 
     // Map mode: aeroway widths plateau at z18.
     const mapRef = evaluate(aerowayWidthExpression(61.4981), 18, 'aeroway-map-width');
+    expect(JSON.stringify(aerowayWidthExpression(61.4981))).not.toContain('"get"');
     for (const zoom of [18.5, 19, 20, 21, 22]) {
       expect(evaluate(aerowayWidthExpression(61.4981), zoom, 'aeroway-map-width')).toBeCloseTo(mapRef, 6);
     }
@@ -325,18 +387,52 @@ describe('global map overlay styles', () => {
       .toBeGreaterThan(layerIds.indexOf('global-road-labels'));
   });
 
-  it('uses physical widths for runway and taxiway centerlines', () => {
-    const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-aeroway-lines');
-    const paint = (layer as { paint?: Record<string, unknown> } | undefined)?.paint;
-
-    expect(paint?.['line-width']).toEqual(aerowayWidthExpression(0));
+  it('uses camera-only physical widths for aeroway centerline cohorts', () => {
+    const expectedMetres = new Map([
+      ['global-aeroway-lines', 6],
+      ['global-aeroway-lines-apron', 12],
+      ['global-aeroway-lines-taxiway', 23],
+      ['global-aeroway-runways', 45],
+    ]);
+    for (const [id, metres] of expectedMetres) {
+      const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === id);
+      const width = (layer as { paint?: Record<string, unknown> } | undefined)?.paint?.['line-width'];
+      expect(width).toEqual(aerowayWidthExpression(0, 18, metres));
+      expect(JSON.stringify(width)).not.toContain('"get"');
+    }
   });
 
   it('draws runway centerlines above taxiways', () => {
     const layerIds = GLOBAL_MAP_STYLE.layers.map((layer) => layer.id);
 
+    expect(layerIds.indexOf('global-aeroway-lines'))
+      .toBeGreaterThan(layerIds.indexOf('global-paths-under-construction'));
     expect(layerIds.indexOf('global-aeroway-runways'))
-      .toBeGreaterThan(layerIds.indexOf('global-aeroway-lines'));
+      .toBeGreaterThan(layerIds.indexOf('global-aeroway-lines-taxiway'));
+  });
+
+  it('draws camera-only runway and taxiway markings above aeroway surfaces', () => {
+    const layerIds = GLOBAL_MAP_STYLE.layers.map((layer) => layer.id);
+    const markings = [
+      ['global-aeroway-taxiway-centerlines', 'taxiway'],
+      ['global-aeroway-runway-centerlines', 'runway'],
+    ] as const;
+
+    for (const [id, aerowayClass] of markings) {
+      const layer = GLOBAL_MAP_STYLE.layers.find((item) => item.id === id) as any;
+      expect(layer).toMatchObject({ type: 'line', 'source-layer': 'aeroway', minzoom: 14 });
+      expect(JSON.stringify(layer.filter)).toContain(`"${aerowayClass}"`);
+      expect(JSON.stringify(layer.paint['line-width'])).not.toContain('"get"');
+      const compiled = createExpression(layer.paint['line-width'], `${id}-width`);
+      if (compiled.result !== 'success') throw new Error(`Invalid width for ${id}`);
+      expect(compiled.value.evaluate({ zoom: 20 }, { properties: {} } as any))
+        .toBeCloseTo(compiled.value.evaluate({ zoom: 18 }, { properties: {} } as any), 6);
+      expect(layerIds.indexOf(id)).toBeGreaterThan(layerIds.indexOf('global-aeroway-runways'));
+    }
+    const runway = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-aeroway-runway-centerlines') as any;
+    const taxiway = GLOBAL_MAP_STYLE.layers.find((item) => item.id === 'global-aeroway-taxiway-centerlines') as any;
+    expect(runway.paint['line-dasharray']).toEqual([60, 40]);
+    expect(taxiway.paint).not.toHaveProperty('line-dasharray');
   });
 
   it('shows a plane icon for aerodrome labels', () => {

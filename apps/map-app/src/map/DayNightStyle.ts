@@ -6,7 +6,14 @@ import {
   CARTOON_SUN_COLOR,
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
-import { GLOBAL_MAP_STYLE, applyMapTheme, buildingColorPaint } from './GlobalMapStyle';
+import {
+  GLOBAL_MAP_STYLE,
+  GLOBAL_AEROWAY_LINE_LAYER_IDS,
+  GLOBAL_ROAD_CASING_COLOR_LAYER_IDS,
+  GLOBAL_ROAD_COLOR_LAYER_IDS,
+  applyMapTheme,
+  buildingColorPaint,
+} from './GlobalMapStyle';
 import type { DayNightAppearance, DayNightPalette } from './DayNightAppearance';
 import { localStyleMix, nightFactor } from './DayNightAppearance';
 import { Color } from 'three';
@@ -57,8 +64,7 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
     setPaint(map, id, 'fill-color', colors.park);
   });
   setPaint(map, 'global-aeroway-areas', 'fill-color', colors.aeroway);
-  setPaint(map, 'global-aeroway-lines', 'line-color', colors.boundary);
-  setPaint(map, 'global-aeroway-runways', 'line-color', colors.boundary);
+  GLOBAL_AEROWAY_LINE_LAYER_IDS.forEach((id) => setPaint(map, id, 'line-color', colors.boundary));
   setPaint(map, 'terrain-hillshade', 'hillshade-shadow-color', night > 0.45 ? '#020b14' : '#7d8e82');
   setPaint(map, 'terrain-hillshade', 'hillshade-highlight-color', night > 0.45 ? '#173149' : '#f7f2db');
   setPaint(map, 'terrain-hillshade', 'hillshade-accent-color', night > 0.45 ? '#0b2033' : '#b3c0b5');
@@ -69,14 +75,8 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
   ['global-pedestrian-areas', 'global-pier-areas', 'global-bridge-decks'].forEach((id) => {
     setPaint(map, id, 'fill-color', colors.land);
   });
-  [
-    'global-road-casing', 'global-road-bridge-casing',
-    'global-overview-road-casing', 'global-overview-regional-road-casing',
-  ].forEach((id) => setPaint(map, id, 'line-color', colors.roadCasing));
-  [
-    'global-roads', 'global-road-bridges',
-    'global-overview-roads', 'global-overview-regional-roads',
-  ].forEach((id) => setPaint(map, id, 'line-color', colors.road));
+  GLOBAL_ROAD_CASING_COLOR_LAYER_IDS.forEach((id) => setPaint(map, id, 'line-color', colors.roadCasing));
+  GLOBAL_ROAD_COLOR_LAYER_IDS.forEach((id) => setPaint(map, id, 'line-color', colors.road));
   [
     'global-path-casing', 'global-cycleway-casing', 'global-footways',
     'global-steps', 'global-other-paths',

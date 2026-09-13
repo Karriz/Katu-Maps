@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+  configureFlightTileLoading,
   flightInputForControlSources,
   flightSkyForTheme,
   setFlightControlSource,
   type FlightControlSources,
 } from './useFlightSimulator';
+
+describe('flight tile loading', () => {
+  it('retains pending parent tiles without rebuilding source LOD', () => {
+    const map = { cancelPendingTileRequestsWhileZooming: true };
+    const restore = configureFlightTileLoading(map as any);
+    expect(map.cancelPendingTileRequestsWhileZooming).toBe(false);
+    restore();
+    expect(map.cancelPendingTileRequestsWhileZooming).toBe(true);
+  });
+});
 
 describe('flight control sources', () => {
   it('keeps a control pressed until every physical source releases it', () => {

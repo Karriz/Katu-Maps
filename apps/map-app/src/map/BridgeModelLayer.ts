@@ -29,6 +29,7 @@ import {
   updateBridgeFallback,
   removeBridgeFallback,
 } from './GlobalMapStyle';
+import { flightGroundBounds } from './flight/FlightGroundCoverage';
 
 export const BRIDGE_MODEL_LAYER_ID = 'bridge-models-3d';
 
@@ -2680,6 +2681,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private lastUpdateSignature?: string;
   private terrainSignature?: string;
   private userEnabled = true;
+  private flightMode = false;
   private readonly bridgeResources = new Map<string, BridgeResources>();
   private pierOrigin = this.sceneOrigin;
   private pierOriginElevation = 0;
@@ -2940,6 +2942,13 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.updateBridges();
   }
 
+  setFlightMode(enabled: boolean) {
+    if (this.flightMode === enabled) return;
+    this.flightMode = enabled;
+    this.lastUpdateSignature = undefined;
+    this.map?.triggerRepaint();
+  }
+
   setDayNightLighting(lighting: {
     azimuth: number;
     polar: number;
@@ -3168,12 +3177,15 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   private currentView(map: MaplibreMap): BridgeViewState {
-    const bounds = map.getBounds();
+    const bounds = this.flightMode
+      ? flightGroundBounds(map, 1_800, 800)
+      : undefined;
+    const screenBounds = bounds ? undefined : map.getBounds();
     return {
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
+      west: bounds?.west ?? screenBounds!.getWest(),
+      south: bounds?.south ?? screenBounds!.getSouth(),
+      east: bounds?.east ?? screenBounds!.getEast(),
+      north: bounds?.north ?? screenBounds!.getNorth(),
       zoom: map.getZoom(),
       pitch: map.getPitch(),
       terrainEnabled: Boolean(map.getTerrain()),

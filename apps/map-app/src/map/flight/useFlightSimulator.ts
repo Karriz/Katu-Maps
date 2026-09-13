@@ -48,6 +48,17 @@ type FlightTransform = {
  * MapLibre otherwise pulls the far clip in to the look-at, which hides
  * distant ground before it reaches the fogged horizon. */
 const FLIGHT_MIN_FAR_CLIP_METERS = 1_000_000;
+export function configureFlightTileLoading(map: Pick<Map, 'cancelPendingTileRequestsWhileZooming'>) {
+  const previousCancel = map.cancelPendingTileRequestsWhileZooming;
+  // Retaining an already-requested parent tile gives MapLibre something
+  // coarse to draw while the closer flight view streams in. Avoid changing
+  // source LOD here: a smaller zoom-level spread keeps high-resolution tiles
+  // toward the horizon and can produce an unbounded burst at steep pitch.
+  map.cancelPendingTileRequestsWhileZooming = false;
+  return () => {
+    map.cancelPendingTileRequestsWhileZooming = previousCancel;
+  };
+}
 
 function mapCamera(map: Map): MapCameraWithTerrain | undefined {
   return (map as Map & { _camera?: MapCameraWithTerrain })._camera;
@@ -342,6 +353,7 @@ export function useFlightSimulator({
     const enabledHandlers = handlers.map((handler) => handler.isEnabled());
 
     map.stop();
+    const restoreTileLoading = configureFlightTileLoading(map);
     handlers.forEach((handler) => handler.disable());
     map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     map.setProjection({ type: 'mercator' });
@@ -515,6 +527,7 @@ export function useFlightSimulator({
       originalSkyRef.current = undefined;
       runIndependentRestoreSteps([
         { label: 'stop camera', run: () => map.stop() },
+        { label: 'tile loading', run: restoreTileLoading },
         { label: 'near/far clip', run: () => mapTransform(map)?.clearNearFarZOverride?.() },
         {
           label: 'terrain',
