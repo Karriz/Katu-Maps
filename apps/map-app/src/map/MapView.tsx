@@ -75,6 +75,9 @@ import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
 import { installFlightSceneScheduler } from './flight/FlightSceneScheduler';
 import { useFlightSimulator } from './flight/useFlightSimulator';
 import { useFlightModePresentation } from './flight/useFlightModePresentation';
+import { DriveControls } from './drive/DriveControls';
+import { useDriveSimulator } from './drive/useDriveSimulator';
+import { useDriveModePresentation } from './drive/useDriveModePresentation';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
 import type { TransitStopSelection } from './TransitStopsLayer';
 import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
@@ -158,6 +161,8 @@ import {
   OPENFREEMAP_SOURCE_ID,
   updatePhysicalLineCaps,
   updatePhysicalWidthPaint,
+  ROAD_WIDTH_DRIVE_MAX_ZOOM,
+  ROAD_WIDTH_FLIGHT_MAX_ZOOM,
   applyMapTheme,
   ensureMountainPeakIcon,
 } from './GlobalMapStyle';
@@ -675,7 +680,7 @@ function globalWaterPatternLayer(): FillLayerSpecification {
   };
 }
 
-export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: boolean) => void }) {
+export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (active: boolean) => void }) {
   const { preference: themePreference, resolvedTheme, setPreference: setThemePreference } = useTheme();
   const initialDeepLinkRef = useRef<MapDeepLink | null>(parseMapDeepLink(window.location.search));
   const containerRef = useRef<HTMLDivElement>(null);
@@ -696,7 +701,9 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
   const flightActiveRef = useRef(false);
+  const driveActiveRef = useRef(false);
   const flightWasActiveRef = useRef(false);
+  const driveWasActiveRef = useRef(false);
   const plannedVehicleTripRef = useRef<string | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(false);
@@ -916,7 +923,20 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     terrainSourceRef,
     terrainEnabledRef,
     resolvedTheme,
+    blockedRef: driveActiveRef,
   });
+  const drive = useDriveSimulator({
+    mapRef,
+    mapLoaded,
+    activeRef: driveActiveRef,
+    dayNightUtcMs: layerToggles.dayNight ? dayNightUtcMs : undefined,
+    terrainSourceRef,
+    terrainEnabledRef,
+    bridgeDeckSourceRef: bridgeLayerRef,
+    resolvedTheme,
+    blockedRef: flightActiveRef,
+  });
+  const immersiveActive = flight.active || drive.active;
   useMapLayerVisibility({
     mapRef,
     mapLoaded,
@@ -935,7 +955,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     terrainSourceRef,
     terrainEnabledRef,
     flightActiveRef,
-    flightActive: flight.active,
+    flightActive: immersiveActive,
     building3dLayerIds: BUILDING_3D_LAYER_IDS,
     buildingShadowLayerIds: BUILDING_SHADOW_LAYER_IDS,
     buildingTransitionFootprintLayerId: GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
@@ -953,7 +973,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     mapRef,
     mapLoaded,
     enabled: layerToggles.weather,
-    flightActive: flight.active,
+    flightActive: immersiveActive,
   });
   const dayNight = useDayNightCycle({
     mapRef,
@@ -962,7 +982,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     cloudsEnabled: layerToggles.clouds,
     buildingColorsEnabled: layerToggles.buildingColors,
     utcMs: dayNightUtcMs,
-    flightActive: flight.active,
+    flightActive: immersiveActive,
     resolvedTheme,
     treeLayerRef,
     bridgeLayerRef,
@@ -983,21 +1003,31 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     transitRouteOverlayRef,
     transitLinesVisible: layerToggles.transitLines,
   });
+  useDriveModePresentation({
+    mapRef,
+    mapLoaded,
+    active: drive.active,
+    transitRouteOverlayRef,
+    transitLinesVisible: layerToggles.transitLines,
+  });
   useEffect(() => {
-    onFlightModeChange?.(flight.active);
-    return () => onFlightModeChange?.(false);
-  }, [flight.active, onFlightModeChange]);
+    onImmersiveModeChange?.(immersiveActive);
+    return () => onImmersiveModeChange?.(false);
+  }, [immersiveActive, onImmersiveModeChange]);
   useEffect(() => {
     if (!mapLoaded) return;
     const map = mapRef.current;
     if (!map) return;
-    // Road width expressions cap at z18 in map mode and z19 in flight mode.
-    // The latitude-based cache in the main map effect would skip the first
-    // reapplication after a mode switch at the same latitude, so force it.
+    // Map mode plateaus at z18; flight extends to z19; drive (closer chase) to z21.
     const latitude = map.getCenter().lat;
-    updatePhysicalWidthPaint(map, latitude, flight.active ? 19 : 18);
-    updatePhysicalLineCaps(map, flight.active);
-  }, [flight.active, mapLoaded]);
+    const maxZoom = drive.active
+      ? ROAD_WIDTH_DRIVE_MAX_ZOOM
+      : flight.active
+        ? ROAD_WIDTH_FLIGHT_MAX_ZOOM
+        : 18;
+    updatePhysicalWidthPaint(map, latitude, maxZoom);
+    updatePhysicalLineCaps(map, immersiveActive);
+  }, [drive.active, flight.active, immersiveActive, mapLoaded]);
   useEffect(() => {
     if (flight.active) {
       flightWasActiveRef.current = true;
@@ -1008,6 +1038,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     const frame = window.requestAnimationFrame(() => mapRef.current?.getCanvas().focus());
     return () => window.cancelAnimationFrame(frame);
   }, [flight.active]);
+  useEffect(() => {
+    if (drive.active) {
+      driveWasActiveRef.current = true;
+      return;
+    }
+    if (!driveWasActiveRef.current) return;
+    driveWasActiveRef.current = false;
+    const frame = window.requestAnimationFrame(() => mapRef.current?.getCanvas().focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [drive.active]);
   useEffect(() => {
     const map = mapRef.current;
     if (!flight.active || !mapLoaded || !layerToggles.trees || !map) return;
@@ -1074,6 +1114,36 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       facadeLayer?.setFlightMode(false);
     };
   }, [flight.active, layerToggles.trees, mapLoaded]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!drive.active || !mapLoaded || !map) return;
+    const roofLayer = roofLayerRef.current;
+    const facadeLayer = facadeLayerRef.current;
+    const bridgeLayer = bridgeLayerRef.current;
+    const treeLayer = treeLayerRef.current;
+    // Same continuous-camera refresh path as flight: normal moveend/idle
+    // updates are skipped while jumpTo runs every frame.
+    bridgeLayer?.setFlightMode(true);
+    roofLayer?.setFlightMode(true);
+    facadeLayer?.setFlightMode(true);
+    treeLayer?.setDriveCoverage(true);
+    const stopRefresh = installFlightSceneScheduler(map, OPENFREEMAP_SOURCE_ID, [
+      () => {
+        if (layerToggles.trees) treeLayerRef.current?.updateTrees();
+      },
+      () => bridgeLayer?.updateBridges(),
+      () => roofLayer?.requestFlightRefresh(),
+      () => facadeLayer?.requestFlightRefresh(),
+    ], { moveMeters: 60, turnDegrees: 10 });
+    return () => {
+      stopRefresh();
+      bridgeLayer?.setFlightMode(false);
+      roofLayer?.setFlightMode(false);
+      facadeLayer?.setFlightMode(false);
+      treeLayer?.setDriveCoverage(false);
+      if (layerToggles.trees) treeRefreshRef.current?.();
+    };
+  }, [drive.active, layerToggles.trees, mapLoaded]);
 
   useEffect(() => {
     if (!flight.active) return;
@@ -1378,6 +1448,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     : undefined;
 
   const navigationView = flight.active ? 'flight'
+    : drive.active ? 'drive'
     : measurement ? 'measurement'
     : transitDepartureDetailOpen ? 'transit-trip'
     : selectedTransitStop ? 'departures'
@@ -1398,6 +1469,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
 
   useInAppNavigation(navigationView, (parentView) => {
     if (flight.active) { flight.stop(); return; }
+    if (drive.active) { drive.stop(); return; }
     if (measurement) { stopMeasurement(); return; }
     if (transitDepartureDetailOpen) {
       setTransitNavigationBackSignal((value) => value + 1);
@@ -2029,7 +2101,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
       setVehiclePositionStatus(pose?.status ?? 'unavailable');
-      if (!pose || !vehicleFollowEnabledRef.current || flightActiveRef.current) return;
+      if (!pose || !vehicleFollowEnabledRef.current || (flightActiveRef.current || driveActiveRef.current)) return;
       if (Date.now() - lastUserInteractionRef.current < 400) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
       // Keep camera tracking independent of style loading/animation state.
@@ -2069,6 +2141,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     let chargingStationsTimer: number | undefined;
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
+    let roadWidthMaxZoom: number | undefined;
     let globalLabelDensitySignature: string | undefined;
     let previousOrientationChanged = false;
     let modelDataRevision = 0;
@@ -2077,9 +2150,21 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
 
     const updateGlobalPhysicalWidths = () => {
       const latitude = map.getCenter().lat;
-      if (roadWidthLatitude !== undefined && Math.abs(latitude - roadWidthLatitude) < 0.25) return;
+      const immersive = flightActiveRef.current || driveActiveRef.current;
+      const maxZoom = driveActiveRef.current
+        ? ROAD_WIDTH_DRIVE_MAX_ZOOM
+        : flightActiveRef.current
+          ? ROAD_WIDTH_FLIGHT_MAX_ZOOM
+          : 18;
+      if (
+        roadWidthLatitude !== undefined
+        && Math.abs(latitude - roadWidthLatitude) < 0.25
+        && roadWidthMaxZoom === maxZoom
+      ) return;
       roadWidthLatitude = latitude;
-      updatePhysicalWidthPaint(map, latitude, flightActiveRef.current ? 19 : 18);
+      roadWidthMaxZoom = maxZoom;
+      updatePhysicalWidthPaint(map, latitude, maxZoom);
+      updatePhysicalLineCaps(map, immersive);
     };
     const updateGlobalLabelDensity = () => {
       if (!map.isStyleLoaded()) return;
@@ -2136,7 +2221,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const updateTreeModels = () => {
       treeUpdateTimer = undefined;
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (map.isMoving()) {
         scheduleTreeUpdate();
         return;
@@ -2208,7 +2293,13 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
         return;
       }
       if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
-      bridgeLayer.invalidateSource();
+      if (flightActiveRef.current || driveActiveRef.current) {
+        // Immersive chase cameras stream tiles continuously; hard invalidation
+        // wipes bridge mesh caches and commits partial stitch topologies.
+        bridgeLayer.markSourceDirty();
+      } else {
+        bridgeLayer.invalidateSource();
+      }
       treeLayer.cancelTreeJobs();
       roofLayer.invalidateSource();
       facadeLayer.invalidateSource();
@@ -2219,7 +2310,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     treeRefreshRef.current = invalidateAndScheduleModels;
     const handleLocationClick = (event: { point: Point }) => {
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (measurementControllerRef.current) return;
       setNearbyPlaces(null);
       setRouteContextMenu(null);
@@ -2344,7 +2435,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       });
     };
     const handleMapKeyDown = (event: KeyboardEvent) => {
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (event.altKey || event.ctrlKey || event.metaKey || event.target !== map.getCanvas()) return;
       const pan: Record<string, [number, number]> = {
         ArrowLeft: [-100, 0], ArrowRight: [100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100],
@@ -2366,7 +2457,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     };
     const handleMapContextMenu = (event: MapMouseEvent) => {
       event.originalEvent.preventDefault();
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (measurementControllerRef.current) return;
       // Touch and pen long-presses are handled explicitly below. MapLibre/browser
       // contextmenu events can also arrive during a pinch, so never turn a
@@ -2377,7 +2468,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       showRouteContextMenu(event.point, [event.lngLat.lng, event.lngLat.lat]);
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       // Let manual map gestures take ownership from vehicle following.
       lastUserInteractionRef.current = Date.now();
       vehicleFollowEnabledRef.current = false;
@@ -2409,7 +2500,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       }, 600);
     };
     const handleWheel = () => {
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       cancelLongPressTimer();
       lastUserInteractionRef.current = Date.now();
       vehicleFollowEnabledRef.current = false;
@@ -2420,7 +2511,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     // terrain elevation plane (which causes hyperspeed pans after zoom-out).
     let cancelTerrainCameraEase = () => {};
     const clearTerrainGestureBeforePan = () => {
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       clearStaleTerrainGesture(map);
       // Stop elevation easing without snapping to the DEM target.
       cancelTerrainCameraEase();
@@ -2441,7 +2532,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       }
     };
     const handleMapGestureStart = () => {
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       cancelLongPressTimer();
       lastUserInteractionRef.current = Date.now();
     };
@@ -2925,11 +3016,11 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       } catch { /* local storage can be disabled */ }
     };
     const terrainCameraFollower = installTerrainCameraFollower(map, {
-      isPaused: () => flightActiveRef.current,
+      isPaused: () => (flightActiveRef.current || driveActiveRef.current),
     });
     cancelTerrainCameraEase = () => terrainCameraFollower.cancel();
     const handleMoveEnd = (event?: unknown) => {
-      if (flightActiveRef.current || isTerrainCameraFollowEvent(event)) return;
+      if ((flightActiveRef.current || driveActiveRef.current) || isTerrainCameraFollowEvent(event)) return;
       persistCamera();
       updateGlobalPhysicalWidths();
       scheduleTreeUpdate();
@@ -2951,7 +3042,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
       reload: () => window.location.reload(),
     });
     const handleCameraMove = (event?: unknown) => {
-      if (flightActiveRef.current) {
+      if ((flightActiveRef.current || driveActiveRef.current)) {
         updateGlobalPhysicalWidths();
         return;
       }
@@ -2984,7 +3075,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     const handleIdleTreeUpdate = () => {
       if (roofLayer.updateRoofs()) map.triggerRepaint();
       if (facadeLayer.updateFacades()) map.triggerRepaint();
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       scheduleTreeUpdate();
     };
     map.on('idle', handleIdleTreeUpdate);
@@ -3443,7 +3534,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     let previousRouteLayout: string | undefined;
     const updatePadding = () => {
       frame = undefined;
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (routeOpen && routeResult) {
         const padding = panelViewportPadding(map, 48, 24);
         const layout = [
@@ -3519,7 +3610,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
     let previousRouteLayout: string | undefined;
     const updatePadding = () => {
       frame = undefined;
-      if (flightActiveRef.current) return;
+      if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (routeOpen && routeResult) {
         const padding = panelViewportPadding(map, 48, 24);
         const layout = [
@@ -3670,7 +3761,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
   };
 
   return (
-    <div className={`map-view${flight.active ? ' flight-mode' : ''}`}>
+    <div className={`map-view${flight.active ? ' flight-mode' : ''}${drive.active ? ' drive-mode' : ''}`}>
       <div ref={containerRef} className="map-canvas" aria-label="Interactive map. Use arrow keys to pan and plus or minus to zoom." />
       {!mapLoaded && !mapError && (
         <div className="map-status map-splash" role="status">
@@ -3693,9 +3784,16 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
           onExit={flight.stop}
         />
       )}
+      {mapLoaded && !mapError && drive.active && (
+        <DriveControls
+          telemetry={drive.telemetry}
+          onControlChange={drive.setControl}
+          onExit={drive.stop}
+        />
+      )}
       {mapLoaded && !mapError && (
         <>
-          {!flight.active && <MapControls
+          {!immersiveActive && <MapControls
             query={searchQuery}
             searchOpen={searchOpen}
             searchLoading={searchLoading}
@@ -3800,7 +3898,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
             themePreference={themePreference}
             onThemeChange={setThemePreference}
           />}
-          {!flight.active && layerToggles.weather && !routeOpen && !layersOpen && viewedWeather.viewUsable && (
+          {!immersiveActive && layerToggles.weather && !routeOpen && !layersOpen && viewedWeather.viewUsable && (
             <WeatherChip
               weather={viewedWeather.weather}
               loading={viewedWeather.loading}
@@ -3848,7 +3946,7 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
               onClose={viewedWeather.closeOverlay}
             />
           )}
-          {!flight.active && layerToggles.dayNight && !routeOpen && !layersOpen && (
+          {!immersiveActive && layerToggles.dayNight && !routeOpen && !layersOpen && (
             <DayNightTimeSlider
               appearance={dayNight.appearance}
               timeZone={dayNight.timeZone}
@@ -3896,6 +3994,24 @@ export function MapView({ onFlightModeChange }: { onFlightModeChange?: (active: 
                 setVehicleFollowing(false);
                 if (measurementControllerRef.current) stopMeasurement();
                 flight.start(coordinates);
+              }}
+              onDriveFromHere={() => {
+                const coordinates: [number, number] = [...routeContextMenu.coordinates];
+                setLayersOpen(false);
+                setSearchOpen(false);
+                setFavoritesOpen(false);
+                setRouteSearchTarget(null);
+                setRouteContextMenu(null);
+                setContextMenuMarker(null);
+                setPositionInformation(null);
+                setNearbyPlaces(null);
+                viewedWeather.closeWeatherUi();
+                pendingSearchCameraRef.current = null;
+                routeCameraRequestRef.current += 1;
+                vehicleFollowEnabledRef.current = false;
+                setVehicleFollowing(false);
+                if (measurementControllerRef.current) stopMeasurement();
+                drive.start(coordinates);
               }}
               onRouteToHere={() => {
                 const selection: LocationSelection = {

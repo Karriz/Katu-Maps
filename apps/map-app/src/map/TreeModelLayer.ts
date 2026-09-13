@@ -35,6 +35,9 @@ const MAPPED_TREE_CLEARANCE_METERS = 9;
 const TRUNK_CANOPY_OVERLAP_METERS = 0.25;
 const TREE_GROWTH_DURATION_MS = 600;
 const MAX_GRID_CELLS_PER_POLYGON = 100_000;
+/** Street-level drive chase: keep a forward corridor populated past the near frustum. */
+const DRIVE_TREE_RADIUS_METERS = 1_200;
+const DRIVE_TREE_LOOK_AHEAD_METERS = 700;
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
@@ -282,6 +285,24 @@ function visibleMetricBounds(
   };
 }
 
+function metricBoundsAroundPoint(center: MetricPoint, radiusMeters: number): MetricBounds {
+  const horizontalRadius = radiusMeters / longitudeScaleAtMetricY(center[1]);
+  return {
+    minX: center[0] - horizontalRadius,
+    minY: center[1] - radiusMeters,
+    maxX: center[0] + horizontalRadius,
+    maxY: center[1] + radiusMeters,
+  };
+}
+
+/** Fixed forward corridor for drive mode — screen bounds shrink under steep chase pitch. */
+export function driveTreeBounds(center: MetricPoint, heading: number): MetricBounds {
+  return metricBoundsAroundPoint([
+    center[0] + Math.sin(heading) * DRIVE_TREE_LOOK_AHEAD_METERS / longitudeScaleAtMetricY(center[1]),
+    center[1] + Math.cos(heading) * DRIVE_TREE_LOOK_AHEAD_METERS,
+  ], DRIVE_TREE_RADIUS_METERS);
+}
+
 function displayedTreeKey(tree: TreeInstance) {
   // Identity is geographic, not visual. A vector-tile refresh can classify
   // the same procedural point as broadleaf/conifer (or shrub) when overlapping
@@ -325,18 +346,26 @@ export function shouldRenderTreesForViewport(
   return viewportSpanMeters(bounds) <= TREE_MAX_VIEWPORT_METERS;
 }
 
-function* visibleTrees(map: MaplibreMap, sources: TreeSourceConfig): Generator<void, TreeInstance[]> {
+function* visibleTrees(
+  map: MaplibreMap,
+  sources: TreeSourceConfig,
+  boundsOverride?: MetricBounds,
+): Generator<void, TreeInstance[]> {
   const zoom = map.getZoom();
-  const bounds = map.getBounds();
-  if (!shouldRenderTreesForViewport({
-    west: bounds.getWest(),
-    south: bounds.getSouth(),
-    east: bounds.getEast(),
-    north: bounds.getNorth(),
-  }, zoom)) return [];
+  if (!boundsOverride) {
+    const bounds = map.getBounds();
+    if (!shouldRenderTreesForViewport({
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    }, zoom)) return [];
+  } else if (zoom < TREE_MIN_ZOOM) {
+    return [];
+  }
   const budget = MAX_TREE_COUNT;
   const biome = visibleBiome(map, sources.biomeLayer);
-  const samplingBounds = visibleMetricBounds(map);
+  const samplingBounds = boundsOverride ?? visibleMetricBounds(map);
   const waterFeatures = yield* sourceFeatures(map, sources.sourceId, sources.waterLayers);
   const waterPolygons = yield* collectMetricPolygons(waterFeatures);
   const mappedTreeFeatures = sources.mappedTreeLayer
@@ -758,8 +787,17 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowOffsetEast = 0;
   private shadowOffsetNorth = 0;
   private nightMix = 0;
+  private driveCoverageEnabled = false;
 
   constructor(private readonly sources: TreeSourceConfig) {}
+
+  /** Use a fixed forward corridor instead of screen bounds (drive chase camera). */
+  setDriveCoverage(enabled: boolean) {
+    if (this.driveCoverageEnabled === enabled) return;
+    this.driveCoverageEnabled = enabled;
+    this.cancelTreeJobs();
+    this.map?.triggerRepaint();
+  }
 
   invalidateTerrain() {
     this.cancelTreeJobs();
@@ -773,10 +811,41 @@ export class TreeModelLayer implements CustomLayerInterface {
 
   private currentViewSignature() {
     const map = this.map!;
+    if (this.driveCoverageEnabled) {
+      const center = map.getCenter();
+      const headingBucket = Math.round(map.getBearing() / 8) * 8;
+      return [
+        'drive',
+        center.lng.toFixed(4),
+        center.lat.toFixed(4),
+        headingBucket,
+        Math.floor(map.getZoom() + 1e-6),
+        this.sources.sourceId,
+      ].join(':');
+    }
     const bounds = map.getBounds();
     return treeViewportSignature({ west: bounds.getWest(), south: bounds.getSouth(),
       east: bounds.getEast(), north: bounds.getNorth() }, map.getZoom(), map.getPitch(),
     this.sources.sourceId, true, Math.floor(map.getZoom() + 1e-6));
+  }
+
+  private driveSamplingBounds(map: MaplibreMap): MetricBounds | undefined {
+    if (!this.driveCoverageEnabled) return undefined;
+    const center = toMetricPoint([map.getCenter().lng, map.getCenter().lat]);
+    if (!center) return undefined;
+    return driveTreeBounds(center, map.getBearing() * DEGREES_TO_RADIANS);
+  }
+
+  private treesAllowedForView(map: MaplibreMap) {
+    if (map.getZoom() < TREE_MIN_ZOOM) return false;
+    if (this.driveCoverageEnabled) return true;
+    const bounds = map.getBounds();
+    return shouldRenderTreesForViewport({
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    }, map.getZoom());
   }
 
   private meshes(): TreeMeshes | undefined {
@@ -985,9 +1054,7 @@ export class TreeModelLayer implements CustomLayerInterface {
   updateTrees(onComplete?: () => void) {
     const map = this.map;
     if (!map || !this.meshes()) return;
-    const bounds = map.getBounds();
-    if (!shouldRenderTreesForViewport({ west: bounds.getWest(), south: bounds.getSouth(),
-      east: bounds.getEast(), north: bounds.getNorth() }, map.getZoom())) {
+    if (!this.treesAllowedForView(map)) {
       this.cancelTreeJobs();
       const hadTrees = this.displayedTrees.size > 0;
       this.clearDisplayedTrees();
@@ -1005,13 +1072,7 @@ export class TreeModelLayer implements CustomLayerInterface {
 
   private *buildTrees(onComplete?: () => void): Generator<void, void> {
     const map = this.map!;
-    const bounds = map.getBounds();
-    if (!shouldRenderTreesForViewport({
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
-    }, map.getZoom())) {
+    if (!this.treesAllowedForView(map)) {
       this.clearDisplayedTrees();
       onComplete?.();
       return;
@@ -1027,9 +1088,10 @@ export class TreeModelLayer implements CustomLayerInterface {
     // on steep terrain and make a tree appear to vanish. Keep cached samples
     // separated by terrain LOD; the bounded LRU still caps total memory.
     const terrainZoomBucket = Math.floor(zoom + 1e-6);
-    const generatedTrees = yield* visibleTrees(map, this.sources);
+    const coverageBounds = this.driveSamplingBounds(map);
+    const generatedTrees = yield* visibleTrees(map, this.sources, coverageBounds);
     const budget = MAX_TREE_COUNT;
-    const visibleBounds = visibleMetricBounds(map);
+    const visibleBounds = coverageBounds ?? visibleMetricBounds(map);
     const trees: TreeInstance[] = [];
     const selectedKeys = new Set<string>();
 
@@ -1320,13 +1382,7 @@ export class TreeModelLayer implements CustomLayerInterface {
     const renderer = this.renderer;
     if (!map || !renderer) return;
 
-    const bounds = map.getBounds();
-    const viewportAllowed = shouldRenderTreesForViewport({
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
-    }, map.getZoom());
+    const viewportAllowed = this.treesAllowedForView(map);
     if (!viewportAllowed) {
       this.cancelTreeJobs();
       this.clearDisplayedTrees();

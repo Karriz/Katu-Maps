@@ -2,13 +2,25 @@ import type { Map as MaplibreMap, MapSourceDataEvent } from 'maplibre-gl';
 
 export type FlightSceneView = { longitude: number; latitude: number; heading: number };
 
-export function flightSceneNeedsRefresh(previous: FlightSceneView, current: FlightSceneView) {
+export type FlightSceneSchedulerOptions = {
+  /** Metres of ground travel before a movement refresh. Default 90. */
+  moveMeters?: number;
+  /** Degrees of heading change before a movement refresh. Default 12. */
+  turnDegrees?: number;
+};
+
+export function flightSceneNeedsRefresh(
+  previous: FlightSceneView,
+  current: FlightSceneView,
+  moveMeters = 90,
+  turnDegrees = 12,
+) {
   const longitudeDelta = ((current.longitude - previous.longitude + 540) % 360) - 180;
   const east = longitudeDelta * Math.PI / 180 * 6_378_137
     * Math.cos((current.latitude + previous.latitude) / 2 * Math.PI / 180);
   const north = (current.latitude - previous.latitude) * Math.PI / 180 * 6_378_137;
   const turn = Math.abs(((current.heading - previous.heading + 540) % 360) - 180);
-  return Math.hypot(east, north) >= 90 || turn >= 12;
+  return Math.hypot(east, north) >= moveMeters || turn >= turnDegrees;
 }
 
 /** Coalesce streaming/movement requests; run each layer on a separate frame. */
@@ -16,7 +28,10 @@ export function installFlightSceneScheduler(
   map: Pick<MaplibreMap, 'on' | 'off' | 'getCenter' | 'getBearing' | 'getTerrain'>,
   sourceId: string,
   jobs: (() => void)[],
+  options: FlightSceneSchedulerOptions = {},
 ) {
+  const moveMeters = options.moveMeters ?? 90;
+  const turnDegrees = options.turnDegrees ?? 12;
   let disposed = false;
   let frame: number | undefined;
   let sourceDirty = true;
@@ -31,7 +46,7 @@ export function installFlightSceneScheduler(
     const now = performance.now();
     const current = readView();
     if (now - lastRefresh < 750) return;
-    if (previous && !sourceDirty && !flightSceneNeedsRefresh(previous, current)
+    if (previous && !sourceDirty && !flightSceneNeedsRefresh(previous, current, moveMeters, turnDegrees)
       && now - lastRefresh < 3000) return;
     previous = current;
     lastRefresh = now;

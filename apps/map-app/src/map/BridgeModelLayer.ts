@@ -145,6 +145,99 @@ export type BridgeViewState = {
   terrainEnabled: boolean;
 };
 
+/** Bucket immersive coverage so tiny chase-camera moves do not restart sampling. */
+export function quantizeBridgeView(view: BridgeViewState, meters = 80): BridgeViewState {
+  const midLat = (view.south + view.north) * 0.5;
+  const latitudeScale = Math.max(0.01, Math.cos(midLat * DEGREES_TO_RADIANS));
+  const longitudeStep = meters / (EARTH_RADIUS_METERS * latitudeScale) * (180 / Math.PI);
+  const latitudeStep = meters / EARTH_RADIUS_METERS * (180 / Math.PI);
+  const quantize = (value: number, step: number) => Math.round(value / step) * step;
+  return {
+    west: quantize(view.west, longitudeStep),
+    east: quantize(view.east, longitudeStep),
+    south: quantize(view.south, latitudeStep),
+    north: quantize(view.north, latitudeStep),
+    zoom: Math.round(view.zoom * 4) / 4,
+    pitch: Math.round(view.pitch / 5) * 5,
+    terrainEnabled: view.terrainEnabled,
+  };
+}
+
+type BridgeSampleIdentity = {
+  sourceKeys?: string[];
+  spanLength: number;
+};
+
+function bridgeTopologySignature(bridges: BridgeSampleIdentity[]) {
+  return bridges
+    .map((bridge) => [...(bridge.sourceKeys ?? [])].sort().join('+'))
+    .sort()
+    .join('|');
+}
+
+function bridgeSampleStats(bridges: BridgeSampleIdentity[]) {
+  const keys = new Set(bridges.flatMap((bridge) => bridge.sourceKeys ?? []));
+  const span = bridges.reduce((sum, bridge) => sum + bridge.spanLength, 0);
+  const largest = bridges.length === 0 ? 0 : Math.max(...bridges.map((bridge) => bridge.spanLength));
+  return { keys, span, largest, count: bridges.length };
+}
+
+/**
+ * Keep the last immersive bridge scene when a refresh would regress topology
+ * (missing span, mid-bridge splits, or tile-only churn without improvement).
+ */
+export function shouldRejectImmersiveBridgeSample(
+  previous: BridgeSampleIdentity[],
+  next: BridgeSampleIdentity[],
+  options: { sourceLoaded: boolean; viewChanged: boolean },
+): boolean {
+  if (previous.length === 0) return false;
+  if (next.length === 0) return !options.viewChanged || !options.sourceLoaded;
+
+  const before = bridgeSampleStats(previous);
+  const after = bridgeSampleStats(next);
+  const retention = before.keys.size === 0
+    ? 1
+    : [...before.keys].filter((key) => after.keys.has(key)).length / before.keys.size;
+  const split = after.count > before.count && after.largest < before.largest * 0.6;
+  const regresses = retention < 0.55
+    || after.span < before.span * 0.55
+    || (split && retention < 0.9);
+
+  if (regresses) return true;
+
+  // Tile arrivals while the camera is steady often reshuffle stitch groups
+  // without adding coverage. Hold the current meshes unless the sample improves.
+  if (!options.viewChanged) {
+    const previousTopology = bridgeTopologySignature(previous);
+    const nextTopology = bridgeTopologySignature(next);
+    if (previousTopology === nextTopology) return false;
+    const improves = after.span >= before.span * 0.98
+      && after.largest >= before.largest * 0.95
+      && retention >= 0.9
+      && after.keys.size >= before.keys.size
+      && !split;
+    return !improves;
+  }
+
+  if (!options.sourceLoaded && (retention < 0.75 || after.span < before.span * 0.75)) {
+    return true;
+  }
+  return false;
+}
+
+/** @deprecated Use shouldRejectImmersiveBridgeSample. */
+export function isIncompleteImmersiveBridgeSample(
+  previous: BridgeSampleIdentity[],
+  next: BridgeSampleIdentity[],
+  sourceLoaded: boolean,
+): boolean {
+  return shouldRejectImmersiveBridgeSample(previous, next, {
+    sourceLoaded,
+    viewChanged: true,
+  });
+}
+
 export type BridgeLineProperties = {
   className: string;
   subclass?: string;
@@ -2682,6 +2775,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private terrainSignature?: string;
   private userEnabled = true;
   private flightMode = false;
+  /** Soft dirty from tile streaming — resample without treating it as a camera move. */
+  private sourceContentDirty = false;
+  /** Whether the in-flight sample was started by a camera/view change. */
+  private pendingCommitViewChanged = false;
   private readonly bridgeResources = new Map<string, BridgeResources>();
   private pierOrigin = this.sceneOrigin;
   private pierOriginElevation = 0;
@@ -2733,14 +2830,19 @@ export class BridgeModelLayer implements CustomLayerInterface {
    * centerline when the cluster has no line parts) and require the traveller
    * heading to follow that local tangent.
    */
-  deckPlacementAt(lng: number, lat: number, heading: number): number | null {
+  deckPlacementAt(
+    lng: number,
+    lat: number,
+    heading: number,
+    maxHeadingDiffRadians = MAX_DECK_HEADING_DIFF_RADIANS,
+  ): number | null {
     if (this.sampledBridges.length === 0) return null;
     const pad = 0.0006;
     let best: { bridge: SampledBridge; distance: number } | null = null;
     for (const bridge of this.sampledBridges) {
       const b = this.lngLatBounds(bridge);
       if (lng < b.minLng - pad || lng > b.maxLng + pad || lat < b.minLat - pad || lat > b.maxLat + pad) continue;
-      const hit = this.roadwayHit(bridge, lng, lat, heading);
+      const hit = this.roadwayHit(bridge, lng, lat, heading, maxHeadingDiffRadians);
       if (!hit) continue;
       if (!best || hit.distance < best.distance) best = { bridge, distance: hit.distance };
     }
@@ -2748,7 +2850,13 @@ export class BridgeModelLayer implements CustomLayerInterface {
     return this.interpolateDeckElevation(best.bridge, lng, lat);
   }
 
-  private roadwayHit(bridge: SampledBridge, lng: number, lat: number, heading: number): { distance: number } | null {
+  private roadwayHit(
+    bridge: SampledBridge,
+    lng: number,
+    lat: number,
+    heading: number,
+    maxHeadingDiffRadians = MAX_DECK_HEADING_DIFF_RADIANS,
+  ): { distance: number } | null {
     const origin = this.planOriginOf(bridge);
     if (!origin) return null;
     const point = lngLatsToPlan([[lng, lat]], origin)[0];
@@ -2759,7 +2867,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
         const hit = nearestPlanSegment(point, part.plan);
         if (!hit) continue;
         if (hit.distance > part.width / 2 + DECK_CENTERLINE_SLACK_METRES) continue;
-        if (smallestHeadingDelta(heading, hit.heading) > MAX_DECK_HEADING_DIFF_RADIANS) continue;
+        if (smallestHeadingDelta(heading, hit.heading) > maxHeadingDiffRadians) continue;
         if (!best || hit.distance < best.distance) best = { distance: hit.distance };
       }
       return best;
@@ -2772,7 +2880,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const northSpan = bridge.bounds.maxNorth - bridge.bounds.minNorth;
     const width = Math.min(DECK_SYNTHETIC_WIDTH_CAP_METRES, Math.max(6, Math.min(eastSpan, northSpan)));
     if (hit.distance > width / 2 + DECK_CENTERLINE_SLACK_METRES) return null;
-    if (smallestHeadingDelta(heading, hit.heading) > MAX_DECK_HEADING_DIFF_RADIANS) return null;
+    if (smallestHeadingDelta(heading, hit.heading) > maxHeadingDiffRadians) return null;
     return { distance: hit.distance };
   }
 
@@ -2883,6 +2991,13 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.cancelBridgeJobs();
     this.clearCpuCaches();
     this.lastUpdateSignature = undefined;
+    this.sourceContentDirty = false;
+  }
+
+  /** Soft invalidation for immersive modes: resample without wiping mesh caches. */
+  markSourceDirty() {
+    this.samplingJob = undefined;
+    this.sourceContentDirty = true;
   }
 
   private cancelBridgeJobs() {
@@ -3028,11 +3143,17 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const view = this.currentView(map);
     const visible = shouldRenderBridgesForView(view);
     const signature = visible ? JSON.stringify(view) : 'hidden';
+    const viewChanged = signature !== this.lastUpdateSignature;
     const now = performance.now();
-    if (signature === this.lastUpdateSignature && !this.samplingJob && !this.meshWrite) {
+    if (
+      !viewChanged
+      && !this.sourceContentDirty
+      && !this.samplingJob
+      && !this.meshWrite
+    ) {
       if (!this.pendingElevation || now - this.jobStarted < PENDING_RETRY_MS) return;
     }
-    if (signature === this.lastUpdateSignature && !this.samplingJob && this.meshWrite) {
+    if (!viewChanged && !this.sourceContentDirty && !this.samplingJob && this.meshWrite) {
       this.writeMeshes();
       this.recordJobDuration();
       map.triggerRepaint();
@@ -3041,6 +3162,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (!visible) {
       this.cancelBridgeJobs();
       this.lastUpdateSignature = signature;
+      this.sourceContentDirty = false;
       this.jobStarted = now;
       const waitingForTerrain = !view.terrainEnabled
         && view.zoom >= BRIDGE_MIN_ZOOM
@@ -3071,7 +3193,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
       map.triggerRepaint();
       return;
     }
-    if (!this.samplingJob) this.beginPerformanceJob();
+    if (!this.samplingJob) {
+      this.pendingCommitViewChanged = viewChanged;
+      this.beginPerformanceJob();
+    }
     const sampled = this.sampleVisibleBridges(map, view);
     if (sampled.building) {
       this.recordJobDuration();
@@ -3085,7 +3210,30 @@ export class BridgeModelLayer implements CustomLayerInterface {
       map.triggerRepaint();
       return;
     }
+    const commitViewChanged = this.pendingCommitViewChanged || viewChanged;
+    if (
+      this.flightMode
+      && shouldRejectImmersiveBridgeSample(
+        this.sampledBridges,
+        sampled.bridges,
+        {
+          sourceLoaded: typeof map.isSourceLoaded === 'function'
+            ? map.isSourceLoaded(this.sourceId)
+            : true,
+          viewChanged: commitViewChanged,
+        },
+      )
+    ) {
+      // Keep the last complete scene; wait for a better tile set or camera move.
+      this.sourceContentDirty = false;
+      this.pendingCommitViewChanged = false;
+      this.recordJobDuration();
+      map.triggerRepaint();
+      return;
+    }
     this.pendingElevation = false;
+    this.sourceContentDirty = false;
+    this.pendingCommitViewChanged = false;
     this.sampledBridges = sampled.bridges;
     this.fallbackFeatures = ('fallbackFeatures' in sampled ? sampled.fallbackFeatures : undefined) ?? new Map();
     this.fallbackSignature = '';
@@ -3181,7 +3329,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       ? flightGroundBounds(map, 1_800, 800)
       : undefined;
     const screenBounds = bounds ? undefined : map.getBounds();
-    return {
+    const view = {
       west: bounds?.west ?? screenBounds!.getWest(),
       south: bounds?.south ?? screenBounds!.getSouth(),
       east: bounds?.east ?? screenBounds!.getEast(),
@@ -3190,6 +3338,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       pitch: map.getPitch(),
       terrainEnabled: Boolean(map.getTerrain()),
     };
+    return this.flightMode ? quantizeBridgeView(view) : view;
   }
 
   private terrainElevationReady(map: MaplibreMap) {
@@ -3232,6 +3381,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const viewKey = JSON.stringify(view);
     if (this.samplingJob && this.samplingJob.view !== viewKey) {
       this.samplingJob = undefined;
+      this.pendingCommitViewChanged = true;
       this.beginPerformanceJob();
     }
     if (!this.samplingJob) {

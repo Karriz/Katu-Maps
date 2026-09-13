@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { LngLat } from 'maplibre-gl';
-import { TreeModelLayer, shouldRenderTreesForViewport, treeViewportSignature } from './TreeModelLayer';
+import {
+  TreeModelLayer,
+  driveTreeBounds,
+  shouldRenderTreesForViewport,
+  treeViewportSignature,
+} from './TreeModelLayer';
 
 describe('treeViewportSignature', () => {
   it('ignores minor map drift while preserving meaningful zoom and terrain changes', () => {
@@ -68,6 +73,17 @@ describe('treeViewportSignature', () => {
       east: 23.8600,
       north: 61.6200,
     }, 12.5)).toBe(false);
+  });
+});
+
+describe('driveTreeBounds', () => {
+  it('shifts the sampling corridor ahead of the car heading', () => {
+    const center: [number, number] = [0, 0];
+    const north = driveTreeBounds(center, 0);
+    const east = driveTreeBounds(center, Math.PI / 2);
+    expect(north.minY + north.maxY).toBeGreaterThan(0);
+    expect(east.minX + east.maxX).toBeGreaterThan(0);
+    expect(north.maxY - north.minY).toBeCloseTo(east.maxX - east.minX, 5);
   });
 });
 

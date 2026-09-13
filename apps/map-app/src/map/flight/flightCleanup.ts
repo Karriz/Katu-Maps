@@ -10,7 +10,7 @@ export function runIndependentRestoreSteps(steps: RestoreStep[]) {
     try {
       step.run();
     } catch (error) {
-      console.error(`Flight mode restore failed (${step.label}).`, error);
+      console.error(`Immersive mode restore failed (${step.label}).`, error);
     }
   });
 }

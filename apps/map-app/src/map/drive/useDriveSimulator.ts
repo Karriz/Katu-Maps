@@ -3,24 +3,32 @@ import { LngLat, type Map, type SkySpecification } from 'maplibre-gl';
 import { dayNightAppearance, paletteForElevation, nightFactor } from '../DayNightAppearance';
 import { sunPosition } from '../DayNightSun';
 import type { ResolvedTheme } from '../../theme';
-import { runIndependentRestoreSteps } from './flightCleanup';
-import { FlightModelLayer } from './FlightModelLayer';
+import { runIndependentRestoreSteps } from '../flight/flightCleanup';
+import type { BridgeDeckSource } from '../TransitVehicleModelLayer';
+import { DriveModelLayer } from './DriveModelLayer';
 import {
-  advanceFlight,
-  createInitialFlightState,
+  advanceDrive,
+  createInitialDriveState,
   degreesToRadians,
-  flightCameraPose,
+  driveCameraPose,
+  driveTravelHeading,
   radiansToDegrees,
-  smoothFlightCameraRig,
-  FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
-  FLIGHT_MIN_CLEARANCE_METERS,
-  FLIGHT_SKID_CONTACT_OFFSET_METERS,
-  type FlightCameraRig,
-  type FlightInput,
-  type FlightState,
-} from './FlightDynamics';
+  smoothDriveCameraRig,
+  DRIVE_DECK_MAX_HEADING_DIFF_RADIANS,
+  DRIVE_DECK_MOUNT_CONFIRM_SECONDS,
+  DRIVE_MIN_CLEARANCE_METERS,
+  DRIVE_PITCH_SAMPLE_DISTANCE_METERS,
+  DRIVE_ROLL_SAMPLE_DISTANCE_METERS,
+  DRIVE_WHEEL_CONTACT_OFFSET_METERS,
+  offsetCoordinate,
+  type DriveCameraRig,
+  type DriveGroundSample,
+  type DriveInput,
+  type DriveState,
+} from './DriveDynamics';
 
 const EARTH_RADIUS_METERS = 6_378_137;
+const MAX_PITCH_RADIANS = degreesToRadians(18);
 
 function haversineMeters(a: [number, number], b: [number, number]) {
   const lat1 = degreesToRadians(a[1]);
@@ -35,53 +43,8 @@ function haversineMeters(a: [number, number], b: [number, number]) {
 
 type MapCameraWithTerrain = { terrain: unknown };
 
-type FlightTransform = {
-  nearZ: number;
-  farZ: number;
-  cameraToCenterDistance: number;
-  pixelsPerMeter: number;
-  overrideNearFarZ?: (nearZ: number, farZ: number) => void;
-  clearNearFarZOverride?: () => void;
-};
-
-/** Keep terrain ~this far ahead drawable from high-altitude chase views.
- * MapLibre otherwise pulls the far clip in to the look-at, which hides
- * distant ground before it reaches the fogged horizon. */
-const FLIGHT_MIN_FAR_CLIP_METERS = 1_000_000;
-export function configureFlightTileLoading(map: Pick<Map, 'cancelPendingTileRequestsWhileZooming'>) {
-  const previousCancel = map.cancelPendingTileRequestsWhileZooming;
-  // Retaining an already-requested parent tile gives MapLibre something
-  // coarse to draw while the closer flight view streams in. Avoid changing
-  // source LOD here: a smaller zoom-level spread keeps high-resolution tiles
-  // toward the horizon and can produce an unbounded burst at steep pitch.
-  map.cancelPendingTileRequestsWhileZooming = false;
-  return () => {
-    map.cancelPendingTileRequestsWhileZooming = previousCancel;
-  };
-}
-
 function mapCamera(map: Map): MapCameraWithTerrain | undefined {
   return (map as Map & { _camera?: MapCameraWithTerrain })._camera;
-}
-
-function mapTransform(map: Map): FlightTransform | undefined {
-  const withTransform = map as Map & {
-    transform?: FlightTransform;
-    _camera?: { transform?: FlightTransform };
-  };
-  return withTransform.transform ?? withTransform._camera?.transform;
-}
-
-function keepDistantTerrainVisible(map: Map) {
-  const transform = mapTransform(map);
-  if (!transform?.overrideNearFarZ) return;
-  const near = Math.max(0.1, transform.cameraToCenterDistance * 0.01);
-  const far = Math.max(
-    transform.farZ,
-    transform.cameraToCenterDistance * 8,
-    transform.pixelsPerMeter * FLIGHT_MIN_FAR_CLIP_METERS,
-  );
-  transform.overrideNearFarZ(near, far);
 }
 
 function queryElevationSafe(map: Map, coordinate: [number, number], fallback: number) {
@@ -92,49 +55,178 @@ function queryElevationSafe(map: Map, coordinate: [number, number], fallback: nu
   }
 }
 
-/** jumpTo samples DEM at the destination zoom. From globe/space that zoom is
- * far above loaded terrain tiles, so the bilinear lookup throws and kills
- * the chase loop. We already pass elevation, so skip the sample. */
-function jumpToFlightCamera(map: Map, options: Parameters<Map['jumpTo']>[0]) {
+function sampleGroundElevation(
+  map: Map,
+  longitude: number,
+  latitude: number,
+  heading: number,
+  bridgeDeckSource: BridgeDeckSource | null | undefined,
+  fallback: number,
+  options?: {
+    allowDeck?: boolean;
+    maxHeadingDiffRadians?: number;
+  },
+) {
+  if (options?.allowDeck !== false) {
+    const deck = bridgeDeckSource?.deckPlacementAt(
+      longitude,
+      latitude,
+      heading,
+      options?.maxHeadingDiffRadians ?? DRIVE_DECK_MAX_HEADING_DIFF_RADIANS,
+    );
+    if (deck != null) return deck;
+  }
+  return queryElevationSafe(map, [longitude, latitude], fallback);
+}
+
+function sampleDriveSupportElevation(
+  map: Map,
+  longitude: number,
+  latitude: number,
+  heading: number,
+  bridgeDeckSource: BridgeDeckSource | null | undefined,
+  fallback: number,
+  options: {
+    onDeck: boolean;
+    deckElevation: number;
+    allowDeck: boolean;
+    maxHeadingDiffRadians: number;
+  },
+) {
+  if (options.allowDeck) {
+    const deck = bridgeDeckSource?.deckPlacementAt(
+      longitude, latitude, heading, options.maxHeadingDiffRadians,
+    );
+    if (deck != null) return deck;
+    // While on a bridge, pitch/roll arms must not fall through to the riverbed
+    // just because the sample left the painted centerline.
+    if (options.onDeck) return options.deckElevation;
+  }
+  return queryElevationSafe(map, [longitude, latitude], fallback);
+}
+
+export function sampleDriveGround(
+  map: Map,
+  longitude: number,
+  latitude: number,
+  heading: number,
+  bridgeDeckSource: BridgeDeckSource | null | undefined,
+  fallback: number,
+  options?: {
+    allowDeck?: boolean;
+    maxHeadingDiffRadians?: number;
+  },
+): DriveGroundSample {
+  const allowDeck = options?.allowDeck !== false;
+  const maxHeadingDiffRadians = options?.maxHeadingDiffRadians ?? DRIVE_DECK_MAX_HEADING_DIFF_RADIANS;
+  const terrainElevation = queryElevationSafe(map, [longitude, latitude], fallback);
+  const deckElevation = allowDeck
+    ? (bridgeDeckSource?.deckPlacementAt(
+      longitude, latitude, heading, maxHeadingDiffRadians,
+    ) ?? null)
+    : null;
+  const onDeck = deckElevation != null;
+  const elevation = onDeck ? deckElevation : terrainElevation;
+  // Longer baseline than the car itself so DEM texel noise averages out.
+  const pitchDistance = DRIVE_PITCH_SAMPLE_DISTANCE_METERS;
+  const rollDistance = DRIVE_ROLL_SAMPLE_DISTANCE_METERS;
+  const sinHeading = Math.sin(heading);
+  const cosHeading = Math.cos(heading);
+  const ahead = offsetCoordinate(
+    [longitude, latitude],
+    sinHeading * pitchDistance,
+    cosHeading * pitchDistance,
+  );
+  const behind = offsetCoordinate(
+    [longitude, latitude],
+    -sinHeading * pitchDistance,
+    -cosHeading * pitchDistance,
+  );
+  // Body-right is +east when heading north: (cos, -sin).
+  const right = offsetCoordinate(
+    [longitude, latitude],
+    cosHeading * rollDistance,
+    -sinHeading * rollDistance,
+  );
+  const left = offsetCoordinate(
+    [longitude, latitude],
+    -cosHeading * rollDistance,
+    sinHeading * rollDistance,
+  );
+  const support = {
+    onDeck,
+    deckElevation: elevation,
+    allowDeck,
+    maxHeadingDiffRadians,
+  };
+  const elevAhead = sampleDriveSupportElevation(
+    map, ahead[0], ahead[1], heading, bridgeDeckSource, elevation, support,
+  );
+  const elevBehind = sampleDriveSupportElevation(
+    map, behind[0], behind[1], heading, bridgeDeckSource, elevation, support,
+  );
+  const elevRight = sampleDriveSupportElevation(
+    map, right[0], right[1], heading, bridgeDeckSource, elevation, support,
+  );
+  const elevLeft = sampleDriveSupportElevation(
+    map, left[0], left[1], heading, bridgeDeckSource, elevation, support,
+  );
+  // Positive pitch = nose up (flight convention). DriveModelLayer applies -pitch
+  // on rotation.x, matching the aircraft layer.
+  const pitch = Math.max(-MAX_PITCH_RADIANS, Math.min(MAX_PITCH_RADIANS,
+    Math.atan2(elevAhead - elevBehind, pitchDistance * 2)));
+  // Higher ground on the right lifts the right side (negative roll / lean left),
+  // matching DriveModelLayer's -roll on Z with positive = lean right.
+  const roll = Math.max(-MAX_PITCH_RADIANS, Math.min(MAX_PITCH_RADIANS,
+    Math.atan2(elevLeft - elevRight, rollDistance * 2)));
+  return { elevation, pitch, roll, onDeck, terrainElevation };
+}
+
+function jumpToDriveCamera(map: Map, options: Parameters<Map['jumpTo']>[0]) {
   const camera = mapCamera(map);
   if (!camera) {
-    map.jumpTo(options, { flightMode: true });
+    map.jumpTo(options, { driveMode: true });
     return;
   }
   const terrain = camera.terrain;
   camera.terrain = null;
   try {
-    map.jumpTo(options, { flightMode: true });
+    map.jumpTo(options, { driveMode: true });
   } finally {
     camera.terrain = terrain;
   }
 }
 
-export type FlightControl = 'pitchUp' | 'pitchDown' | 'rollLeft' | 'rollRight' | 'throttleUp' | 'throttleDown';
+export type DriveControl =
+  | 'steerLeft'
+  | 'steerRight'
+  | 'throttleUp'
+  | 'throttleDown'
+  | 'handbrake';
 
-export type FlightTelemetry = {
-  altitude: number;
-  heading: number;
-  pitch: number;
-  roll: number;
+export type DriveTelemetry = {
   speed: number;
   throttle: number;
-  isStalling: boolean;
+  heading: number;
+  altitude: number;
+  drift: number;
+  handbrake: boolean;
 };
 
-type FlightSimulatorOptions = {
+type DriveSimulatorOptions = {
   mapRef: RefObject<Map | null>;
   mapLoaded: boolean;
   activeRef: RefObject<boolean>;
   terrainSourceRef: RefObject<string>;
   terrainEnabledRef: RefObject<boolean>;
+  bridgeDeckSourceRef: RefObject<BridgeDeckSource | null>;
   resolvedTheme: ResolvedTheme;
   dayNightUtcMs?: number;
   /** When another immersive mode is active, refuse to start. */
   blockedRef?: RefObject<boolean>;
 };
 
-export function flightSkyForTheme(theme: ResolvedTheme, elevation?: number): SkySpecification {
+export function driveSkyForTheme(theme: ResolvedTheme, elevation?: number): SkySpecification {
   if (elevation !== undefined) {
     const palette = paletteForElevation(elevation);
     const night = nightFactor(elevation);
@@ -159,8 +251,6 @@ export function flightSkyForTheme(theme: ResolvedTheme, elevation?: number): Sky
       'atmosphere-blend': 0,
     };
   }
-  // Do not spread a previous sky here. Dark mode writes sky-color and
-  // atmosphere-blend; a partial daylight update leaves those night values.
   return {
     'sky-color': '#7ec8ea',
     'horizon-color': '#f3f8fb',
@@ -172,30 +262,26 @@ export function flightSkyForTheme(theme: ResolvedTheme, elevation?: number): Sky
   };
 }
 
-function applyFlightSky(map: Map, theme: ResolvedTheme) {
-  map.setSky(flightSkyForTheme(theme));
-}
-
 type ToggleableHandler = {
   disable: () => void;
   enable: () => void;
   isEnabled: () => boolean;
 };
 
-export type FlightControlSources = globalThis.Map<FlightControl, Set<string>>;
+export type DriveControlSources = globalThis.Map<DriveControl, Set<string>>;
 
-export function flightInputForControlSources(controls: FlightControlSources): FlightInput {
-  const pressed = (control: FlightControl) => (controls.get(control)?.size ?? 0) > 0;
+export function driveInputForControlSources(controls: DriveControlSources): DriveInput {
+  const pressed = (control: DriveControl) => (controls.get(control)?.size ?? 0) > 0;
   return {
-    pitch: Number(pressed('pitchUp')) - Number(pressed('pitchDown')),
-    roll: Number(pressed('rollRight')) - Number(pressed('rollLeft')),
+    steer: Number(pressed('steerRight')) - Number(pressed('steerLeft')),
     throttle: Number(pressed('throttleUp')) - Number(pressed('throttleDown')),
+    handbrake: Number(pressed('handbrake')),
   };
 }
 
-export function setFlightControlSource(
-  controls: FlightControlSources,
-  control: FlightControl,
+export function setDriveControlSource(
+  controls: DriveControlSources,
+  control: DriveControl,
   source: string,
   pressed: boolean,
 ) {
@@ -211,69 +297,73 @@ export function setFlightControlSource(
   if (sources.size === 0) controls.delete(control);
 }
 
-function telemetryForState(state: FlightState, terrainElevation: number): FlightTelemetry {
+function telemetryForState(
+  state: DriveState,
+  terrainElevation: number,
+  handbrake: boolean,
+): DriveTelemetry {
   return {
-    altitude: Math.max(0, state.altitude - terrainElevation - FLIGHT_SKID_CONTACT_OFFSET_METERS),
-    heading: (radiansToDegrees(state.heading) + 360) % 360,
-    pitch: radiansToDegrees(state.pitch),
-    roll: radiansToDegrees(state.roll),
     speed: state.speed,
     throttle: state.throttle,
-    isStalling: state.isStalling,
+    heading: (radiansToDegrees(state.heading) + 360) % 360,
+    altitude: Math.max(0, state.altitude - terrainElevation - DRIVE_WHEEL_CONTACT_OFFSET_METERS),
+    drift: state.drift,
+    handbrake,
   };
 }
 
-function controlForCode(code: string, key?: string): FlightControl | undefined {
+function controlForCode(code: string, key?: string): DriveControl | undefined {
   const k = key?.toLowerCase();
-  if (code === 'KeyS' || code === 'ArrowDown' || k === 's') return 'pitchUp';
-  if (code === 'KeyW' || code === 'ArrowUp' || k === 'w') return 'pitchDown';
-  if (code === 'KeyA' || code === 'ArrowLeft' || k === 'a') return 'rollLeft';
-  if (code === 'KeyD' || code === 'ArrowRight' || k === 'd') return 'rollRight';
-  if (code === 'KeyR' || code === 'ShiftLeft' || code === 'ShiftRight' || k === 'r') return 'throttleUp';
-  if (code === 'KeyF' || code === 'ControlLeft' || code === 'ControlRight' || k === 'f') return 'throttleDown';
+  if (code === 'KeyW' || code === 'ArrowUp' || k === 'w') return 'throttleUp';
+  if (code === 'KeyS' || code === 'ArrowDown' || k === 's') return 'throttleDown';
+  if (code === 'KeyA' || code === 'ArrowLeft' || k === 'a') return 'steerLeft';
+  if (code === 'KeyD' || code === 'ArrowRight' || k === 'd') return 'steerRight';
+  if (code === 'Space' || code === 'ShiftLeft' || code === 'ShiftRight' || k === ' ') {
+    return 'handbrake';
+  }
   return undefined;
 }
 
-export function useFlightSimulator({
+export function useDriveSimulator({
   mapRef,
   mapLoaded,
   activeRef,
   terrainSourceRef,
   terrainEnabledRef,
+  bridgeDeckSourceRef,
   resolvedTheme,
   dayNightUtcMs,
   blockedRef,
-}: FlightSimulatorOptions) {
+}: DriveSimulatorOptions) {
   const [active, setActive] = useState(false);
-  const [telemetry, setTelemetry] = useState<FlightTelemetry>({
-    altitude: 180,
+  const [telemetry, setTelemetry] = useState<DriveTelemetry>({
+    speed: 0,
+    throttle: 0,
     heading: 0,
-    pitch: 0,
-    roll: 0,
-    speed: FLIGHT_CRUISE_SPEED_METERS_PER_SECOND,
-    throttle: 0.75,
-    isStalling: false,
+    altitude: 0,
+    drift: 0,
+    handbrake: false,
   });
-  const flightStateRef = useRef<FlightState | null>(null);
-  const modelLayerRef = useRef<FlightModelLayer | null>(null);
-  const pressedControlsRef = useRef<FlightControlSources>(new globalThis.Map());
+  const driveStateRef = useRef<DriveState | null>(null);
+  const modelLayerRef = useRef<DriveModelLayer | null>(null);
+  const pressedControlsRef = useRef<DriveControlSources>(new globalThis.Map());
   const originalSkyRef = useRef<SkySpecification | undefined>(undefined);
   const sessionCleanupRef = useRef(false);
 
-  const disposeAircraftLayer = useCallback(() => {
+  const disposeCarLayer = useCallback(() => {
     const map = mapRef.current;
     const modelLayer = modelLayerRef.current;
     if (!modelLayer) return;
     try {
       modelLayer.setPose(null);
     } catch (error) {
-      console.error('Flight mode restore failed (aircraft pose).', error);
+      console.error('Drive mode restore failed (car pose).', error);
     }
     if (map?.getLayer(modelLayer.id)) {
       try {
         map.removeLayer(modelLayer.id);
       } catch (error) {
-        console.error('Flight mode restore failed (aircraft layer).', error);
+        console.error('Drive mode restore failed (car layer).', error);
       }
     }
     modelLayerRef.current = null;
@@ -282,17 +372,15 @@ export function useFlightSimulator({
   const stop = useCallback(() => {
     activeRef.current = false;
     pressedControlsRef.current.clear();
-    flightStateRef.current = null;
-    // The session effect removes the aircraft on the way out. If start() never
-    // reached that effect, drop the layer here so map mode is not left with it.
-    if (!sessionCleanupRef.current) disposeAircraftLayer();
+    driveStateRef.current = null;
+    if (!sessionCleanupRef.current) disposeCarLayer();
     setActive(false);
-  }, [activeRef, disposeAircraftLayer]);
+  }, [activeRef, disposeCarLayer]);
 
   const start = useCallback((coordinates?: [number, number]) => {
     const map = mapRef.current;
     if (!map || !mapLoaded || activeRef.current || blockedRef?.current) return;
-    const modelLayer = new FlightModelLayer();
+    const modelLayer = new DriveModelLayer();
     modelLayer.setTheme(resolvedTheme === 'dark');
     map.addLayer(
       modelLayer,
@@ -301,28 +389,29 @@ export function useFlightSimulator({
     modelLayerRef.current = modelLayer;
     const center = map.getCenter();
     const spawn: [number, number] = coordinates ?? [center.lng, center.lat];
-    const terrainElevation = queryElevationSafe(map, spawn, 0);
-    const state = createInitialFlightState(
-      spawn,
-      terrainElevation,
-      map.getBearing(),
+    const heading = degreesToRadians(map.getBearing());
+    const ground = sampleDriveGround(
+      map, spawn[0], spawn[1], heading, bridgeDeckSourceRef.current, 0,
     );
-    flightStateRef.current = state;
+    const state = createInitialDriveState(spawn, ground.elevation, map.getBearing());
+    state.pitch = ground.pitch;
+    state.roll = ground.roll;
+    driveStateRef.current = state;
     pressedControlsRef.current.clear();
-    setTelemetry(telemetryForState(state, terrainElevation));
+    setTelemetry(telemetryForState(state, ground.elevation, false));
     activeRef.current = true;
     setActive(true);
-  }, [activeRef, blockedRef, mapLoaded, mapRef, resolvedTheme]);
+  }, [activeRef, blockedRef, bridgeDeckSourceRef, mapLoaded, mapRef, resolvedTheme]);
 
-  const setControl = useCallback((control: FlightControl, pressed: boolean, source = 'control') => {
-    setFlightControlSource(pressedControlsRef.current, control, source, pressed);
+  const setControl = useCallback((control: DriveControl, pressed: boolean, source = 'control') => {
+    setDriveControlSource(pressedControlsRef.current, control, source, pressed);
   }, []);
 
   useEffect(() => {
     if (!active || !mapLoaded) return;
     const map = mapRef.current;
     const modelLayer = modelLayerRef.current;
-    const initialState = flightStateRef.current;
+    const initialState = driveStateRef.current;
     if (!map || !modelLayer || !initialState) {
       stop();
       return;
@@ -356,47 +445,40 @@ export function useFlightSimulator({
     const enabledHandlers = handlers.map((handler) => handler.isEnabled());
 
     map.stop();
-    const restoreTileLoading = configureFlightTileLoading(map);
     handlers.forEach((handler) => handler.disable());
     map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
     map.setProjection({ type: 'mercator' });
-    applyFlightSky(map, resolvedTheme);
+    map.setSky(driveSkyForTheme(resolvedTheme));
     if (map.getSource(terrainSourceRef.current)) {
       terrainEnabledRef.current = true;
       map.setTerrain({ source: terrainSourceRef.current, exaggeration: 1 });
     }
-    // Pitch > 90 (above horizon) needs an elevated look-at center from
-    // calculateCameraOptionsFromTo (elevation on jumpTo). Keep
-    // centerClampedToGround false or the camera drops underground.
-    map.setMaxPitch(180);
+    map.setMaxPitch(85);
     map.setMaxZoom(22);
     map.setCenterClampedToGround(false);
 
     let frame: number | undefined;
     let previousTime = performance.now();
     let previousTelemetryTime = 0;
-    let cameraRig: FlightCameraRig | null = null;
-    let lastTerrainElevation = queryElevationSafe(map, [
+    let cameraRig: DriveCameraRig | null = null;
+    let lastTerrainElevation = sampleDriveGround(
+      map,
       initialState.longitude,
       initialState.latitude,
-    ], 0);
+      initialState.heading,
+      bridgeDeckSourceRef.current,
+      0,
+      { maxHeadingDiffRadians: DRIVE_DECK_MAX_HEADING_DIFF_RADIANS },
+    ).terrainElevation;
     modelLayer.setPose(initialState, lastTerrainElevation);
-    // MapLibre's terrain-aware camera math (calculateCameraOptionsFromTo)
-    // samples DEM elevation for the current position. While flying into
-    // freshly-streamed terrain that sample can transiently fall back to sea
-    // level for a single frame, which briefly computes a wildly different
-    // zoom/pitch and flashes as a duplicate scene from another perspective.
-    // Reject single-frame jumps that are far larger than normal flight
-    // motion instead of applying them, but give up after a few frames in a
-    // row so the camera cannot get stuck if the aircraft genuinely needs a
-    // large adjustment (e.g. right after entering flight mode).
+
     let previousCameraOptions: { zoom: number; pitch: number; center: [number, number] } | null = null;
     let consecutiveRejectedFrames = 0;
-    const MAX_ZOOM_CHANGE_PER_FRAME = 0.4;
-    // Loops swing map pitch through the horizon quickly; allow larger steps
-    // than ground mode so legitimate climb/look-up motion is not rejected.
-    const MAX_PITCH_CHANGE_PER_FRAME_DEGREES = 25;
-    const MAX_CENTER_JUMP_METERS = 250;
+    let deckMountSeconds = 0;
+    let deckLatched = false;
+    const MAX_ZOOM_CHANGE_PER_FRAME = 0.35;
+    const MAX_PITCH_CHANGE_PER_FRAME_DEGREES = 12;
+    const MAX_CENTER_JUMP_METERS = 80;
     const MAX_CONSECUTIVE_REJECTIONS = 4;
 
     const clearControls = () => pressedControlsRef.current.clear();
@@ -415,14 +497,14 @@ export function useFlightSimulator({
       if (!control) return;
       event.preventDefault();
       event.stopPropagation();
-      setFlightControlSource(pressedControlsRef.current, control, `keyboard:${event.code}`, true);
+      setDriveControlSource(pressedControlsRef.current, control, `keyboard:${event.code}`, true);
     };
     const handleKeyUp = (event: KeyboardEvent) => {
       const control = controlForCode(event.code, event.key);
       if (!control) return;
       event.preventDefault();
       event.stopPropagation();
-      setFlightControlSource(pressedControlsRef.current, control, `keyboard:${event.code}`, false);
+      setDriveControlSource(pressedControlsRef.current, control, `keyboard:${event.code}`, false);
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -433,42 +515,74 @@ export function useFlightSimulator({
     const update = (now: number) => {
       if (!activeRef.current) return;
       try {
-        const current = flightStateRef.current;
+        const current = driveStateRef.current;
         if (!current) return;
-        lastTerrainElevation = queryElevationSafe(
+        const travelHeading = driveTravelHeading(current);
+        const probe = sampleDriveGround(
           map,
-          [current.longitude, current.latitude],
+          current.longitude,
+          current.latitude,
+          travelHeading,
+          bridgeDeckSourceRef.current,
           lastTerrainElevation,
+          {
+            allowDeck: true,
+            maxHeadingDiffRadians: DRIVE_DECK_MAX_HEADING_DIFF_RADIANS,
+          },
         );
         const elapsedSeconds = (now - previousTime) / 1_000;
-        const next = advanceFlight(
+        if (probe.onDeck) {
+          deckMountSeconds += elapsedSeconds;
+          if (deckMountSeconds >= DRIVE_DECK_MOUNT_CONFIRM_SECONDS) deckLatched = true;
+        } else {
+          deckMountSeconds = 0;
+          deckLatched = false;
+        }
+        const ground = deckLatched
+          ? probe
+          : (probe.onDeck
+            ? sampleDriveGround(
+              map,
+              current.longitude,
+              current.latitude,
+              travelHeading,
+              bridgeDeckSourceRef.current,
+              lastTerrainElevation,
+              {
+                allowDeck: false,
+                maxHeadingDiffRadians: DRIVE_DECK_MAX_HEADING_DIFF_RADIANS,
+              },
+            )
+            : probe);
+        lastTerrainElevation = ground.terrainElevation ?? ground.elevation;
+        const next = advanceDrive(
           current,
-          flightInputForControlSources(pressedControlsRef.current),
+          driveInputForControlSources(pressedControlsRef.current),
           elapsedSeconds,
-          lastTerrainElevation,
+          ground,
         );
         previousTime = now;
-        flightStateRef.current = next;
+        driveStateRef.current = next;
         modelLayer.setPose(next, lastTerrainElevation);
 
-        cameraRig = smoothFlightCameraRig(cameraRig, next, elapsedSeconds);
-        const camera = flightCameraPose(cameraRig);
-        // The chase camera trails behind the aircraft, so terrain or a
-        // building under that offset point can rise above the aircraft's own
-        // ground clearance. Without this the camera ends up inside solid
-        // geometry, causing near-plane clipping that looks like a flickering
-        // duplicate scene from a slightly different perspective.
-        const cameraGroundElevation = queryElevationSafe(map, camera.from, lastTerrainElevation);
+        cameraRig = smoothDriveCameraRig(cameraRig, next, elapsedSeconds);
+        const camera = driveCameraPose(cameraRig);
+        const cameraGroundElevation = sampleGroundElevation(
+          map,
+          camera.from[0],
+          camera.from[1],
+          driveTravelHeading(next),
+          bridgeDeckSourceRef.current,
+          lastTerrainElevation,
+          {
+            allowDeck: deckLatched,
+            maxHeadingDiffRadians: DRIVE_DECK_MAX_HEADING_DIFF_RADIANS,
+          },
+        );
         const fromAltitude = Math.max(
           camera.fromAltitude,
-          cameraGroundElevation + FLIGHT_MIN_CLEARANCE_METERS,
+          cameraGroundElevation + DRIVE_MIN_CLEARANCE_METERS,
         );
-        // FromTo returns the geometric look pitch (including > 90 when the
-        // target is above the camera) and an elevated look-at. Passing that
-        // elevation through jumpTo with centerClampedToGround false is what
-        // keeps ground visible above the horizon — do not recompute the
-        // center via FromCameraLngLatAltRotation, which aims from the current
-        // terrain elevation and pulls the chase view off the aircraft.
         const cameraOptions = map.calculateCameraOptionsFromTo(
           new LngLat(camera.from[0], camera.from[1]),
           fromAltitude,
@@ -495,20 +609,20 @@ export function useFlightSimulator({
         } else {
           consecutiveRejectedFrames = 0;
           previousCameraOptions = { zoom: nextZoom, pitch: nextPitch, center: nextCenter };
-          jumpToFlightCamera(map, {
+          jumpToDriveCamera(map, {
             ...cameraOptions,
-            zoom: Math.max(nextZoom, 14),
+            zoom: Math.max(nextZoom, 16.5),
             roll: camera.roll,
           });
-          keepDistantTerrainVisible(map);
         }
 
         if (now - previousTelemetryTime >= 150) {
           previousTelemetryTime = now;
-          setTelemetry(telemetryForState(next, lastTerrainElevation));
+          const input = driveInputForControlSources(pressedControlsRef.current);
+          setTelemetry(telemetryForState(next, lastTerrainElevation, input.handbrake > 0.5));
         }
       } catch (error) {
-        console.error('Flight mode stopped after a rendering failure.', error);
+        console.error('Drive mode stopped after a rendering failure.', error);
         stop();
       }
       if (activeRef.current) frame = window.requestAnimationFrame(update);
@@ -524,14 +638,12 @@ export function useFlightSimulator({
       window.removeEventListener('blur', clearControls);
       document.removeEventListener('visibilitychange', handleVisibility);
       pressedControlsRef.current.clear();
-      flightStateRef.current = null;
-      disposeAircraftLayer();
+      driveStateRef.current = null;
+      disposeCarLayer();
       const skyToRestore = originalSkyRef.current;
       originalSkyRef.current = undefined;
       runIndependentRestoreSteps([
         { label: 'stop camera', run: () => map.stop() },
-        { label: 'tile loading', run: restoreTileLoading },
-        { label: 'near/far clip', run: () => mapTransform(map)?.clearNearFarZOverride?.() },
         {
           label: 'terrain',
           run: () => {
@@ -544,7 +656,7 @@ export function useFlightSimulator({
         { label: 'max pitch', run: () => map.setMaxPitch(originalMaxPitch) },
         { label: 'max zoom', run: () => map.setMaxZoom(originalMaxZoom) },
         { label: 'ground clamp', run: () => map.setCenterClampedToGround(originalCenterClampedToGround) },
-        { label: 'camera', run: () => map.jumpTo(originalCamera, { flightModeRestore: true }) },
+        { label: 'camera', run: () => map.jumpTo(originalCamera, { driveModeRestore: true }) },
         ...handlers.map((handler, index) => ({
           label: `interaction handler ${index}`,
           run: () => {
@@ -553,7 +665,18 @@ export function useFlightSimulator({
         })),
       ]);
     };
-  }, [active, activeRef, disposeAircraftLayer, mapLoaded, mapRef, stop, terrainEnabledRef, terrainSourceRef]);
+  }, [
+    active,
+    activeRef,
+    bridgeDeckSourceRef,
+    disposeCarLayer,
+    mapLoaded,
+    mapRef,
+    resolvedTheme,
+    stop,
+    terrainEnabledRef,
+    terrainSourceRef,
+  ]);
 
   useEffect(() => {
     if (!active || !mapLoaded) return;
@@ -566,11 +689,10 @@ export function useFlightSimulator({
       const center = map.getCenter();
       const elevation = dayNightUtcMs === undefined ? undefined
         : sunPosition(new Date(dayNightUtcMs), center.lat, center.lng).elevation;
-      // Quantize tiny position changes to avoid rebuilding sky state every flight frame.
-      const sky = flightSkyForTheme(resolvedTheme,
+      const sky = driveSkyForTheme(resolvedTheme,
         elevation === undefined ? undefined : Math.round(elevation * 10) / 10);
       const appearance = dayNightUtcMs === undefined ? null
-        : dayNightAppearance(new Date(dayNightUtcMs), center.lat, center.lng, 14);
+        : dayNightAppearance(new Date(dayNightUtcMs), center.lat, center.lng, 16);
       const lightingKey = appearance
         ? `${Math.round(appearance.azimuth * 10)}:${Math.round(appearance.polar * 10)}:${Math.round(appearance.treeNightMix * 1000)}:${appearance.palette.sun}`
         : 'theme';
@@ -586,7 +708,7 @@ export function useFlightSimulator({
     updateSky();
     map.on('move', updateSky);
     return () => { map.off('move', updateSky); };
-  }, [active, mapLoaded, mapRef, resolvedTheme, dayNightUtcMs]);
+  }, [active, dayNightUtcMs, mapLoaded, mapRef, resolvedTheme]);
 
   useEffect(() => {
     activeRef.current = active;

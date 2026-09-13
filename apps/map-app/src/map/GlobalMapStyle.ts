@@ -782,6 +782,10 @@ function pixelsPerMetre(zoom: number, latitude: number) {
 }
 
 const ROAD_WIDTH_DEFAULT_MAX_ZOOM = 18;
+/** Flight chase stays near this zoom; one extra physical step past map mode. */
+export const ROAD_WIDTH_FLIGHT_MAX_ZOOM = 19;
+/** Drive chase sits closer to the ground than flight, so roads keep scaling further. */
+export const ROAD_WIDTH_DRIVE_MAX_ZOOM = 21;
 
 export function roadWidthExpression(
   latitude: number,
@@ -799,9 +803,8 @@ export function roadWidthExpression(
     16, renderedWidthMetres * pixelsPerMetre(16, latitude),
     ROAD_WIDTH_DEFAULT_MAX_ZOOM, renderedWidthMetres * pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude),
   ];
-  // Flight mode lifts the camera max zoom above the default 18. Allow one
-  // more exponential step so close-range roads stay in proportion, then hold
-  // that width for every closer zoom so screen-space strokes do not balloon.
+  // Immersive modes lift the camera past the default z18 plateau. Extend
+  // physical scaling to maxZoom, then hold that width so strokes do not balloon.
   if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
     stops.push(maxZoom, renderedWidthMetres * pixelsPerMetre(maxZoom, latitude));
   }

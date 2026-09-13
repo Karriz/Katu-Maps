@@ -27,6 +27,9 @@ import {
   bridgeSurfaceStrip,
   bridgeWidthMetres,
   clusterBridgeDrawables,
+  isIncompleteImmersiveBridgeSample,
+  shouldRejectImmersiveBridgeSample,
+  quantizeBridgeView,
   BRIDGE_SHADOW_HOVER_METRES,
   BRIDGE_SHADOW_OPACITY,
   inflatePlanPoints,
@@ -63,6 +66,86 @@ import {
   type BridgeDrawable,
 } from './BridgeModelLayer';
 import { setDrapedElevatedBridgeLayersVisible } from './GlobalMapStyle';
+
+describe('quantizeBridgeView', () => {
+  it('buckets zoom and pitch, and collapses tiny bound drift', () => {
+    const view = {
+      west: 23.75,
+      south: 61.49,
+      east: 23.78,
+      north: 61.51,
+      zoom: 16.12,
+      pitch: 62.4,
+      terrainEnabled: true,
+    };
+    const quantized = quantizeBridgeView(view);
+    expect(quantized.zoom).toBe(16);
+    expect(quantized.pitch).toBe(60);
+    const signatures = new Set(
+      Array.from({ length: 20 }, (_, index) => JSON.stringify(quantizeBridgeView({
+        ...view,
+        west: view.west + index * 1e-6,
+        east: view.east + index * 1e-6,
+      }))),
+    );
+    expect(signatures.size).toBeLessThan(20);
+    expect(quantizeBridgeView({ ...view, zoom: 16.4, pitch: 70 })).not.toEqual(quantized);
+  });
+});
+
+describe('isIncompleteImmersiveBridgeSample', () => {
+  it('rejects sparse or split samples while tiles are still streaming', () => {
+    expect(isIncompleteImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b', 'c'], spanLength: 180 }],
+      [{ sourceKeys: ['a'], spanLength: 40 }],
+      false,
+    )).toBe(true);
+
+    expect(isIncompleteImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b', 'c'], spanLength: 180 }],
+      [
+        { sourceKeys: ['a'], spanLength: 50 },
+        { sourceKeys: ['c'], spanLength: 55 },
+      ],
+      false,
+    )).toBe(true);
+  });
+
+  it('keeps a stable complete sample while keys are retained', () => {
+    expect(isIncompleteImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b'], spanLength: 100 }],
+      [{ sourceKeys: ['a', 'b'], spanLength: 100 }],
+      false,
+    )).toBe(false);
+  });
+});
+
+describe('shouldRejectImmersiveBridgeSample', () => {
+  it('rejects regressions even after the source reports loaded', () => {
+    expect(shouldRejectImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b', 'c'], spanLength: 180 }],
+      [
+        { sourceKeys: ['a'], spanLength: 50 },
+        { sourceKeys: ['c'], spanLength: 55 },
+      ],
+      { sourceLoaded: true, viewChanged: true },
+    )).toBe(true);
+  });
+
+  it('holds tile-only topology churn unless the sample improves', () => {
+    expect(shouldRejectImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b'], spanLength: 120 }],
+      [{ sourceKeys: ['a', 'b', 'x'], spanLength: 80 }],
+      { sourceLoaded: true, viewChanged: false },
+    )).toBe(true);
+
+    expect(shouldRejectImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b'], spanLength: 120 }],
+      [{ sourceKeys: ['a', 'b', 'c'], spanLength: 140 }],
+      { sourceLoaded: true, viewChanged: false },
+    )).toBe(false);
+  });
+});
 
 describe('shouldRenderBridgesForView', () => {
   const city = { west: 23.75, south: 61.49, east: 23.78, north: 61.51 };
@@ -1312,6 +1395,48 @@ describe('BridgeModelLayer', () => {
     expect((layer as any).sampledBridges).toEqual([previous]);
     expect(setDrapedVisible).not.toHaveBeenCalled();
     expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+  });
+
+  it('keeps mesh caches on soft dirty and rejects incomplete immersive commits', () => {
+    const layer = new BridgeModelLayer();
+    const previous = {
+      sourceKeys: ['a', 'b', 'c'],
+      spanLength: 160,
+      surfaces: [],
+      surface: [],
+      indices: [],
+      parts: [],
+      bounds: { minEast: 0, minNorth: 0, maxEast: 1, maxNorth: 1 },
+    };
+    const map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      getBearing: () => 0,
+      isSourceLoaded: () => true,
+      queryTerrainElevation: () => 0,
+    };
+    (layer as any).map = map;
+    (layer as any).flightMode = true;
+    (layer as any).sampledBridges = [previous];
+    (layer as any).geometryCache.set('keep', {});
+    (layer as any).lastUpdateSignature = JSON.stringify((layer as any).currentView(map));
+    (layer as any).samplingJob = { generator: null, view: 'old' };
+    (layer as any).writeMeshes = vi.fn();
+    (layer as any).sampleVisibleBridges = vi.fn(() => ({
+      bridges: [{ sourceKeys: ['a'], spanLength: 40 }],
+      pending: false,
+    }));
+
+    layer.markSourceDirty();
+    expect((layer as any).geometryCache.has('keep')).toBe(true);
+    expect((layer as any).samplingJob).toBeUndefined();
+    expect((layer as any).sourceContentDirty).toBe(true);
+    expect((layer as any).lastUpdateSignature).toBeTruthy();
+
+    layer.updateBridges();
+    expect((layer as any).sampledBridges).toEqual([previous]);
+    expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+    expect((layer as any).sourceContentDirty).toBe(false);
   });
 
   it('updates lighting without replacing bridge resources and skips unchanged lighting', () => {

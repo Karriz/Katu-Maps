@@ -24,8 +24,15 @@ export type BridgeDeckSource = {
    * Deck elevation when the traveller is on a sampled bridge roadway at this
    * heading, or null when they are beside or under the deck. Heading is
    * atan2(east, north), with opposite directions treated as equal.
+   * Optional `maxHeadingDiffRadians` tightens the on-vs-under heading gate
+   * (defaults to the bridge layer's standard threshold).
    */
-  deckPlacementAt(lng: number, lat: number, heading: number): number | null;
+  deckPlacementAt(
+    lng: number,
+    lat: number,
+    heading: number,
+    maxHeadingDiffRadians?: number,
+  ): number | null;
 };
 
 const MODEL_MIN_ZOOM = 12;

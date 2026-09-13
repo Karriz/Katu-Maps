@@ -1,7 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 import type { Map as MaplibreMap, StyleLayer } from 'maplibre-gl';
 import type { TransitRouteOverlay } from '../TransitRouteOverlay';
-import { runIndependentRestoreSteps } from './flightCleanup';
+import { runIndependentRestoreSteps } from '../flight/flightCleanup';
 
 const APPLICATION_OVERLAY_PREFIXES = [
   'context-menu-location',
@@ -26,10 +26,10 @@ const OPTIONAL_OVERLAY_PREFIXES = [
   'day-night-',
 ];
 
-type FlightTransitOverlay = Pick<TransitRouteOverlay, 'setVisibility' | 'update'>;
+type DriveTransitOverlay = Pick<TransitRouteOverlay, 'setVisibility' | 'update'>;
 
-export function restoreTransitOverlay(
-  overlay: FlightTransitOverlay | null,
+function restoreTransitOverlay(
+  overlay: DriveTransitOverlay | null,
   map: Pick<MaplibreMap, 'getBounds' | 'getZoom'>,
   visible: boolean,
 ) {
@@ -37,15 +37,10 @@ export function restoreTransitOverlay(
   if (visible) void overlay?.update(map.getBounds(), map.getZoom());
 }
 
-type FlightPresentationMap = Pick<
-  MaplibreMap,
-  'getLayer' | 'setLayoutProperty' | 'triggerRepaint' | 'getBounds' | 'getZoom'
->;
-
-export function restoreFlightPresentation(
-  map: FlightPresentationMap,
+function restoreDrivePresentation(
+  map: Pick<MaplibreMap, 'getLayer' | 'setLayoutProperty' | 'triggerRepaint' | 'getBounds' | 'getZoom'>,
   visibility: Map<string, boolean>,
-  overlay: FlightTransitOverlay | null,
+  overlay: DriveTransitOverlay | null,
   transitLinesVisible: boolean,
 ) {
   runIndependentRestoreSteps([
@@ -65,8 +60,8 @@ export function restoreFlightPresentation(
   ]);
 }
 
-export function shouldHideLayerInFlight(layer: Pick<StyleLayer, 'id' | 'type'>) {
-  if (layer.id === 'flight-aircraft-model-3d') return false;
+export function shouldHideLayerInDrive(layer: Pick<StyleLayer, 'id' | 'type'>) {
+  if (layer.id === 'drive-car-model-3d') return false;
   if (OPTIONAL_OVERLAY_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) return true;
   if (APPLICATION_OVERLAY_PREFIXES.some((prefix) => layer.id.startsWith(prefix))) return true;
   return layer.type === 'symbol'
@@ -76,7 +71,7 @@ export function shouldHideLayerInFlight(layer: Pick<StyleLayer, 'id' | 'type'>) 
       || layer.id.includes('road-label'));
 }
 
-export function useFlightModePresentation({
+export function useDriveModePresentation({
   mapRef,
   mapLoaded,
   active,
@@ -92,7 +87,7 @@ export function useFlightModePresentation({
   useEffect(() => {
     const map = mapRef.current;
     if (!active || !mapLoaded || !map) return;
-    const layers = (map.getStyle().layers ?? []).filter(shouldHideLayerInFlight);
+    const layers = (map.getStyle().layers ?? []).filter(shouldHideLayerInDrive);
     const visibility = new Map<string, boolean>();
     layers.forEach((layer) => {
       visibility.set(layer.id, map.getLayoutProperty(layer.id, 'visibility') !== 'none');
@@ -102,7 +97,7 @@ export function useFlightModePresentation({
     map.triggerRepaint();
 
     return () => {
-      restoreFlightPresentation(
+      restoreDrivePresentation(
         map,
         visibility,
         transitRouteOverlayRef.current,

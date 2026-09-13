@@ -67,18 +67,24 @@ describe('global map overlay styles', () => {
     expect(buildingColorPaint('#fffdf8', false)).toBe('#fffdf8');
   });
 
-  it('caps road widths at z18 in map mode and z19 in flight mode', () => {
+  it('caps road widths at z18 in map mode, z19 in flight, and z21 in drive', () => {
     for (const latitude of [0, 61.4981]) {
       for (const casing of [false, true]) {
         const compile = (maxZoom?: number) =>
           createExpression(roadWidthExpression(latitude, casing, maxZoom), 'flight-road-width');
         const mapCompiled = compile();
         const flightCompiled = compile(19);
-        if (mapCompiled.result !== 'success' || flightCompiled.result !== 'success') {
+        const driveCompiled = compile(21);
+        if (
+          mapCompiled.result !== 'success'
+          || flightCompiled.result !== 'success'
+          || driveCompiled.result !== 'success'
+        ) {
           throw new Error('Invalid road width expression');
         }
         expect(JSON.stringify(roadWidthExpression(latitude, casing))).not.toContain('"get"');
         expect(JSON.stringify(roadWidthExpression(latitude, casing, 19))).not.toContain('"get"');
+        expect(JSON.stringify(roadWidthExpression(latitude, casing, 21))).not.toContain('"get"');
         for (const properties of [{ class: 'motorway' }, { class: 'minor' }, { class: 'service', service: 'driveway' }]) {
           const evaluate = (compiled: typeof mapCompiled, zoom: number) =>
             compiled.value.evaluate({ zoom }, { properties } as any) as number;
@@ -95,6 +101,16 @@ describe('global map overlay styles', () => {
           const flightRef19 = evaluate(flightCompiled, 19);
           for (const zoom of [19.5, 20, 21, 22]) {
             expect(evaluate(flightCompiled, zoom)).toBeCloseTo(flightRef19, 6);
+          }
+
+          // Drive mode: keep scaling through z21 for the closer chase camera.
+          const driveRef18 = evaluate(driveCompiled, 18);
+          expect(evaluate(driveCompiled, 19)).toBeCloseTo(driveRef18 * 2, 6);
+          expect(evaluate(driveCompiled, 20)).toBeCloseTo(driveRef18 * 4, 6);
+          expect(evaluate(driveCompiled, 21)).toBeCloseTo(driveRef18 * 8, 6);
+          const driveRef21 = evaluate(driveCompiled, 21);
+          for (const zoom of [21.5, 22]) {
+            expect(evaluate(driveCompiled, zoom)).toBeCloseTo(driveRef21, 6);
           }
         }
       }
