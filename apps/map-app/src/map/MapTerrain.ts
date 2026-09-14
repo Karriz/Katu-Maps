@@ -7,8 +7,10 @@ export const TERRAIN_3D_DISABLE_ZOOM = 11.75;
 
 /** Exponential follow rate (1/s). Higher catches terrain faster; lower is softer. */
 export const TERRAIN_ELEVATION_FOLLOW_RATE = 4;
-/** Ignore post-gesture elevation corrections smaller than this (flat / rolling ground). */
-export const TERRAIN_ELEVATION_FOLLOW_MIN_METERS = 40;
+/** Ignore only sub-metre DEM noise; larger changes should start correcting promptly. */
+export const TERRAIN_ELEVATION_FOLLOW_MIN_METERS = 1;
+/** Smooth changes in the sampled DEM target when a more detailed tile arrives. */
+export const TERRAIN_TARGET_FOLLOW_RATE = 2;
 const TERRAIN_ELEVATION_SETTLE_METERS = 0.5;
 const TERRAIN_ELEVATION_APPLY_METERS = 0.05;
 const TERRAIN_FOLLOW_EVENT = 'terrainCameraFollow';
@@ -127,6 +129,15 @@ export function stepTerrainElevation(
   return current + (target - current) * alpha;
 }
 
+/** Keep terrain LOD changes from instantly replacing the elevation target. */
+export function stepTerrainTarget(
+  current: number,
+  sampled: number,
+  deltaSeconds: number,
+): number {
+  return stepTerrainElevation(current, sampled, deltaSeconds, TERRAIN_TARGET_FOLLOW_RATE);
+}
+
 export function shouldFollowTerrainElevation(
   current: number,
   target: number,
@@ -172,8 +183,9 @@ export function isTerrainCameraFollowEvent(event: unknown): boolean {
  * MapLibre freezes elevation during gestures, then snaps via
  * `recalculateZoomAndCenter` on moveend when `centerClampedToGround` is true.
  * That snap is what feels jumpy over mountains. We disable the clamp and ease
- * elevation toward the DEM only when the height change is large enough to
- * matter — small moves on flat ground stay put.
+ * elevation toward a filtered DEM target while ignoring only sub-metre noise.
+ * When the mesh turns off, the residual elevation is eased back to zero before
+ * normal ground clamping resumes.
  */
 export function installTerrainCameraFollower(
   map: TerrainCameraFollowMap,
@@ -190,7 +202,9 @@ export function installTerrainCameraFollower(
   let frame = 0;
   let lastTime = 0;
   let smoothedElevation: number | null = null;
+  let smoothedTarget: number | null = null;
   let following = false;
+  let resetting = false;
 
   const meshEnabled = () => Boolean(map.getTerrain());
 
@@ -213,36 +227,51 @@ export function installTerrainCameraFollower(
     stopFrame();
     if (following) {
       smoothedElevation = map.getCenterElevation();
+      // A gesture can move to unrelated ground; do not pull the next camera
+      // correction toward the previous location's filtered target.
+      smoothedTarget = null;
     }
   };
 
   const disableFollowing = () => {
-    following = false;
+    // setTerrain(null) leaves elevation untouched while the center is not
+    // clamped. Ease that residual height back to zero before restoring the
+    // clamp, otherwise mountainous views visibly jump at the zoom threshold.
+    resetting = true;
     stopFrame();
-    smoothedElevation = null;
-    if (!map.getCenterClampedToGround()) {
-      map.setCenterClampedToGround(true);
-    }
-    applyElevationQuietly(map, 0);
+    smoothedElevation = map.getCenterElevation();
+    smoothedTarget = 0;
+    requestFrameIfNeeded();
   };
 
   const enableFollowing = () => {
     following = true;
+    resetting = false;
     if (map.getCenterClampedToGround()) {
       map.setCenterClampedToGround(false);
     }
     smoothedElevation = map.getCenterElevation();
+    smoothedTarget = null;
+  };
+
+  const finishReset = () => {
+    applyElevationQuietly(map, 0);
+    resetting = false;
+    following = false;
+    smoothedElevation = null;
+    smoothedTarget = null;
+    if (!map.getCenterClampedToGround()) map.setCenterClampedToGround(true);
   };
 
   const tick = (time: number) => {
     frame = 0;
-    if (!following || isPaused() || map.isMoving() || !meshEnabled()) {
+    if ((!following && !resetting) || isPaused() || map.isMoving()) {
       lastTime = 0;
       return;
     }
 
-    const target = sampleTarget();
-    if (target == null) {
+    const sampledTarget = resetting ? 0 : sampleTarget();
+    if (sampledTarget == null) {
       lastTime = 0;
       return;
     }
@@ -253,30 +282,40 @@ export function installTerrainCameraFollower(
 
     const deltaSeconds = lastTime ? (time - lastTime) / 1000 : 1 / 60;
     lastTime = time;
-    smoothedElevation = stepTerrainElevation(smoothedElevation, target, deltaSeconds);
+    smoothedTarget = smoothedTarget == null
+      ? sampledTarget
+      : stepTerrainTarget(smoothedTarget, sampledTarget, deltaSeconds);
+    smoothedElevation = stepTerrainElevation(smoothedElevation, smoothedTarget, deltaSeconds);
     applyElevationQuietly(map, smoothedElevation);
 
-    if (Math.abs(target - smoothedElevation) > TERRAIN_ELEVATION_SETTLE_METERS) {
+    if (Math.abs(sampledTarget - smoothedElevation) > TERRAIN_ELEVATION_SETTLE_METERS
+      || Math.abs(sampledTarget - smoothedTarget) > TERRAIN_ELEVATION_SETTLE_METERS) {
       frame = requestFrame(tick);
     } else {
       lastTime = 0;
-      if (Math.abs(map.getCenterElevation() - target) > TERRAIN_ELEVATION_APPLY_METERS) {
-        smoothedElevation = target;
-        applyElevationQuietly(map, target);
+      if (resetting) {
+        finishReset();
+      } else if (Math.abs(map.getCenterElevation() - sampledTarget) > TERRAIN_ELEVATION_APPLY_METERS) {
+        smoothedElevation = sampledTarget;
+        smoothedTarget = sampledTarget;
+        applyElevationQuietly(map, sampledTarget);
       }
     }
   };
 
-  const request = () => {
-    if (!following || isPaused() || map.isMoving() || !meshEnabled() || frame) return;
+  function requestFrameIfNeeded() {
+    if ((!following && !resetting) || isPaused() || map.isMoving() || frame) return;
     const current = smoothedElevation ?? map.getCenterElevation();
-    const target = sampleTarget();
+    const target = resetting ? 0 : sampleTarget();
     if (target == null || !shouldFollowTerrainElevation(current, target)) {
       if (target != null) smoothedElevation = current;
+      if (resetting && target != null) finishReset();
       return;
     }
     frame = requestFrame(tick);
-  };
+  }
+
+  const request = requestFrameIfNeeded;
 
   const syncFromTerrain = () => {
     if (isPaused()) return;
@@ -289,14 +328,26 @@ export function installTerrainCameraFollower(
 
   const handleMoveEnd = () => {
     if (isPaused()) return;
+    if (resetting) {
+      smoothedElevation = map.getCenterElevation();
+      request();
+      return;
+    }
     if (meshEnabled()) {
       if (!following) enableFollowing();
       smoothedElevation = map.getCenterElevation();
+      // A completed camera move establishes a new target immediately. Target
+      // filtering is reserved for later DEM tile/LOD updates at this center.
+      smoothedTarget = sampleTarget();
       request();
     }
   };
   const handleIdle = () => {
     if (isPaused()) return;
+    if (resetting) {
+      request();
+      return;
+    }
     if (meshEnabled() && !following) enableFollowing();
     request();
   };

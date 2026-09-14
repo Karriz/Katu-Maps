@@ -6,6 +6,7 @@ import {
   shouldEnableTerrain3d,
   shouldFollowTerrainElevation,
   stepTerrainElevation,
+  stepTerrainTarget,
   syncTerrain3d,
   TERRAIN_3D_DISABLE_ZOOM,
   TERRAIN_3D_ENABLE_ZOOM,
@@ -82,9 +83,17 @@ describe('terrain elevation smoothing', () => {
     expect(stepTerrainElevation(40, 80, 0)).toBe(40);
   });
 
-  it('skips follow for small flat-terrain elevation changes', () => {
-    expect(shouldFollowTerrainElevation(12, 18)).toBe(false);
+  it('skips sub-metre DEM noise but follows gradual terrain changes', () => {
+    expect(shouldFollowTerrainElevation(12, 12.5)).toBe(false);
+    expect(shouldFollowTerrainElevation(12, 18)).toBe(true);
     expect(shouldFollowTerrainElevation(12, 12 + TERRAIN_ELEVATION_FOLLOW_MIN_METERS)).toBe(true);
+  });
+
+  it('filters sudden target changes more slowly than the camera follows them', () => {
+    const filtered = stepTerrainTarget(20, 220, 0.05);
+    const camera = stepTerrainElevation(20, 220, 0.05);
+    expect(filtered).toBeGreaterThan(20);
+    expect(filtered).toBeLessThan(camera);
   });
 
   it('recognizes quiet follow events from the public elevation fallback', () => {
@@ -176,11 +185,23 @@ describe('terrain elevation smoothing', () => {
     elevation = 50;
     map.queryTerrainElevation = () => 55;
     listeners.get('moveend')?.forEach((listener) => listener());
-    expect(frames).toHaveLength(0);
+    expect(frames).toHaveLength(1);
     expect(elevation).toBe(50);
+
+    follower.cancel();
 
     terrain = null;
     listeners.get('terrain')?.forEach((listener) => listener());
+    expect(clamped).toBe(false);
+    expect(elevation).toBe(50);
+    expect(frames).toHaveLength(1);
+
+    let time = 16;
+    while (frames.length && time < 10_000) {
+      frames.shift()?.(time);
+      time += 50;
+    }
+    expect(frames).toHaveLength(0);
     expect(clamped).toBe(true);
     expect(elevation).toBe(0);
 
