@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AUTOMATIC_RELOAD_GUARD_MS,
-  BACKGROUND_RECOVERY_DELAY_MS,
+  CONTEXT_RESTORE_TIMEOUT_MS,
   installForegroundRecovery,
 } from './ForegroundRecovery';
 
@@ -59,11 +59,13 @@ function setup(storage = memoryStorage()) {
 }
 
 describe('installForegroundRecovery', () => {
+  vi.useFakeTimers();
+
   it('resizes and repaints without reloading after a short background period', () => {
     const recovery = setup();
 
     recovery.document.setHidden(true);
-    recovery.advance(BACKGROUND_RECOVERY_DELAY_MS - 1);
+    recovery.advance(14_999);
     recovery.document.setHidden(false);
 
     expect(recovery.map.resize).toHaveBeenCalledOnce();
@@ -71,39 +73,41 @@ describe('installForegroundRecovery', () => {
     expect(recovery.reload).not.toHaveBeenCalled();
   });
 
-  it('reloads immediately when the WebGL context is lost', () => {
+  it('waits for restoration when the WebGL context is lost', () => {
     const recovery = setup();
     const event = new Event('webglcontextlost', { cancelable: true });
 
     recovery.canvas.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
+    expect(recovery.reload).not.toHaveBeenCalled();
+
+    recovery.canvas.dispatchEvent(new Event('webglcontextrestored'));
+
     expect(recovery.beforeReload).toHaveBeenCalledOnce();
     expect(recovery.reload).toHaveBeenCalledOnce();
   });
 
-  it('reloads after fifteen seconds in the background despite a recent context loss', () => {
-    const storage = memoryStorage();
-    const previousPage = setup(storage);
-    previousPage.canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
-    previousPage.remove();
-    const recovery = setup(storage);
-
-    recovery.document.setHidden(true);
-    recovery.advance(BACKGROUND_RECOVERY_DELAY_MS);
-    recovery.document.setHidden(false);
-
-    expect(recovery.reload).toHaveBeenCalledOnce();
-  });
-
-  it('does not reload twice when visibilitychange and pageshow both fire', () => {
+  it('does not reload a healthy map after a long background period', () => {
     const recovery = setup();
 
     recovery.document.setHidden(true);
-    recovery.advance(BACKGROUND_RECOVERY_DELAY_MS);
+    recovery.advance(60_000);
     recovery.document.setHidden(false);
-    recovery.lifecycle.dispatchEvent(new Event('pageshow'));
+
+    expect(recovery.map.resize).toHaveBeenCalledOnce();
+    expect(recovery.map.triggerRepaint).toHaveBeenCalledOnce();
+    expect(recovery.reload).not.toHaveBeenCalled();
+  });
+
+  it('falls back to reloading when the context is not restored', () => {
+    const recovery = setup();
+
     recovery.canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    vi.advanceTimersByTime(CONTEXT_RESTORE_TIMEOUT_MS - 1);
+    expect(recovery.reload).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
 
     expect(recovery.reload).toHaveBeenCalledOnce();
     expect(recovery.beforeReload).toHaveBeenCalledOnce();
@@ -113,16 +117,29 @@ describe('installForegroundRecovery', () => {
     const storage = memoryStorage();
     const firstPage = setup(storage);
     firstPage.canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    firstPage.canvas.dispatchEvent(new Event('webglcontextrestored'));
     firstPage.remove();
 
     const reloadedPage = setup(storage);
     reloadedPage.canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    reloadedPage.canvas.dispatchEvent(new Event('webglcontextrestored'));
 
     expect(firstPage.reload).toHaveBeenCalledOnce();
     expect(reloadedPage.reload).not.toHaveBeenCalled();
 
     reloadedPage.advance(AUTOMATIC_RELOAD_GUARD_MS);
     reloadedPage.canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    reloadedPage.canvas.dispatchEvent(new Event('webglcontextrestored'));
     expect(reloadedPage.reload).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending fallback when removed', () => {
+    const recovery = setup();
+
+    recovery.canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    recovery.remove();
+    vi.advanceTimersByTime(CONTEXT_RESTORE_TIMEOUT_MS);
+
+    expect(recovery.reload).not.toHaveBeenCalled();
   });
 });
