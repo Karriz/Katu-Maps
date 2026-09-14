@@ -63,7 +63,7 @@ import { BridgeModelLayer } from './BridgeModelLayer';
 import { installTunnelPortals } from './TunnelPortals';
 import { RoofModelLayer } from './RoofModelLayer';
 import { FacadeModelLayer } from './FacadeModelLayer';
-import { MapControls, defaultMapLayerState, is3dModeEnabled, toggle3dModeLayers, type MapLayerState } from './MapControls';
+import { MapControls, defaultMapLayerState, is3dModeEnabled, set2dModeLayers, set3dStyleLayers, type Map3dStyle, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
 import type { TransitVehicleTripSelection } from './TransitStopsLayer';
@@ -180,6 +180,7 @@ const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-contact-shadow',
 ];
 const LAYER_STORAGE_KEY = deploymentStorageKey('tampere-map-layer-options');
+const THREE_D_STYLE_STORAGE_KEY = deploymentStorageKey('tampere-map-3d-style');
 const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider, .day-night-time-slider';
 
 function closeRangeCameraOffset(): [number, number] {
@@ -883,7 +884,15 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       return saved ? { ...defaults, ...saved } : defaults;
     } catch { return defaults; }
   });
+  const [threeDStyle, setThreeDStyle] = useState<Map3dStyle>(() => {
+    const desktopDefault: Map3dStyle = typeof window !== 'undefined' && window.innerWidth > 760 ? 'detailed' : 'simple';
+    try {
+      const saved = window.localStorage.getItem(THREE_D_STYLE_STORAGE_KEY);
+      return saved === 'simple' || saved === 'detailed' ? saved : desktopDefault;
+    } catch { return desktopDefault; }
+  });
   const is3dMode = is3dModeEnabled(layerToggles);
+  const selectedMapStyle: '2d' | Map3dStyle = is3dMode ? threeDStyle : '2d';
   const handleTransitDisabled = useCallback(() => {
     transitStopsLayerRef.current?.clearSelection();
     setSelectedTransitStop(null);
@@ -3526,6 +3535,10 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   }, [layerToggles]);
 
   useEffect(() => {
+    try { window.localStorage.setItem(THREE_D_STYLE_STORAGE_KEY, threeDStyle); } catch { /* storage can be disabled */ }
+  }, [threeDStyle]);
+
+  useEffect(() => {
     if (!routeOpen || !routeResult) return;
     scheduleRouteFit(routeResult);
   }, [mapLoaded, routeOpen, routeResult]);
@@ -3892,7 +3905,19 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
               }
             }}
             is3dMode={is3dMode}
-            onToggle3dMode={() => setLayerToggles(toggle3dModeLayers)}
+            onToggle3dMode={() => setLayerToggles((current) => {
+              if (is3dModeEnabled(current)) return set2dModeLayers(current);
+              return set3dStyleLayers(current, threeDStyle);
+            })}
+            selectedMapStyle={selectedMapStyle}
+            onMapStyleChange={(style) => {
+              if (style === '2d') {
+                setLayerToggles(set2dModeLayers);
+                return;
+              }
+              setThreeDStyle(style);
+              setLayerToggles((current) => set3dStyleLayers(current, style));
+            }}
             onLocate={locateUser}
             onResetOrientation={resetMapOrientation}
             onZoomIn={zoomIn}

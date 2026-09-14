@@ -775,8 +775,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   font: inherit;
   gap: 12px;
   margin: 0;
-  min-height: 68px;
-  padding: 9px 8px;
+  min-height: 52px;
+  padding: 6px 8px;
   position: relative;
   text-align: left;
   touch-action: manipulation;
@@ -786,9 +786,8 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .layer-toggle + .layer-toggle { border-top: 1px solid #e8ecf0; }
 .layer-toggle-icon { align-items: center; color: #27425e; display: flex; flex: 0 0 auto; justify-content: center; width: 32px; }
 .layer-toggle-icon svg { height: 23px; stroke-width: 1.8; width: 23px; }
-.layer-toggle-copy { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
+.layer-toggle-copy { display: flex; flex: 1 1 auto; min-width: 0; }
 .layer-toggle-copy strong { font-size: 0.84rem; font-weight: 700; }
-.layer-toggle-copy small { color: var(--color-muted); font-size: 0.7rem; }
 .layer-switch { background: #d6dde5; border-radius: 999px; flex: 0 0 auto; height: 22px; padding: 2px; transition: background 160ms ease; width: 39px; }
 .layer-switch span { background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgb(37 52 70 / 24%); display: block; height: 18px; transition: transform 160ms ease; width: 18px; }
 .layer-toggle[aria-checked='true'] .layer-switch { background: var(--color-accent); }
@@ -1317,7 +1316,7 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   .flight-stick-grid button { height: 42px; width: 42px; }
   .map-tool-dock button { height: 48px; width: 48px; }
   .map-tool-dock svg { height: 21px; width: 21px; }
-  .layer-toggle { min-height: 62px; }
+  .layer-toggle { min-height: 52px; }
   .transit-departure-card { min-height: 60px; }
   .route-selection-banner { align-items: flex-start; flex-wrap: wrap; }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultMapLayerState, is3dModeEnabled, toggle3dModeLayers } from './MapControls';
+import { defaultMapLayerState, is3dModeEnabled, set2dModeLayers, set3dStyleLayers, toggle3dModeLayers } from './MapControls';
 
 describe('map layer 3D mode', () => {
   it('enables building colors and procedural details by default on desktop', () => {
@@ -28,5 +28,24 @@ describe('map layer 3D mode', () => {
     expect(disabled.buildingColors).toBe(false);
     expect(disabled.proceduralBuildingDetails).toBe(false);
     expect(is3dModeEnabled(disabled)).toBe(false);
+  });
+
+  it('supports simple and detailed 3D presets', () => {
+    const simple = set3dStyleLayers(defaultMapLayerState(true), 'simple');
+    expect(is3dModeEnabled(simple)).toBe(true);
+    expect(simple.buildingColors).toBe(false);
+    expect(simple.proceduralBuildingDetails).toBe(false);
+
+    const detailed = set3dStyleLayers(simple, 'detailed');
+    expect(detailed.buildingColors).toBe(true);
+    expect(detailed.proceduralBuildingDetails).toBe(true);
+  });
+
+  it('disables all 3D layers for the 2D preset', () => {
+    const layers = set2dModeLayers(defaultMapLayerState(false));
+    expect(is3dModeEnabled(layers)).toBe(false);
+    expect(layers.buildings).toBe(false);
+    expect(layers.terrain).toBe(false);
+    expect(layers.proceduralBuildingDetails).toBe(false);
   });
 });

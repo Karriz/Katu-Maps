@@ -65,6 +65,15 @@ export type MapLayerKey =
   | 'labels';
 
 export type MapLayerState = Record<MapLayerKey, boolean>;
+export type Map3dStyle = 'simple' | 'detailed';
+
+const MAP_3D_CORE_LAYER_KEYS = [
+  'terrain',
+  'buildings',
+  'bridges',
+  'trees',
+  'transitModels',
+] as const satisfies readonly MapLayerKey[];
 
 export const MAP_3D_LAYER_KEYS = [
   'terrain',
@@ -103,13 +112,27 @@ export function defaultMapLayerState(mobileDefault2d: boolean): MapLayerState {
 }
 
 export function is3dModeEnabled(layers: MapLayerState): boolean {
-  return MAP_3D_LAYER_KEYS.every((key) => layers[key]);
+  return MAP_3D_CORE_LAYER_KEYS.every((key) => layers[key]);
 }
 
 export function toggle3dModeLayers(current: MapLayerState): MapLayerState {
   const enabled = !is3dModeEnabled(current);
   const next: MapLayerState = { ...current, transit: true };
   for (const key of MAP_3D_LAYER_KEYS) next[key] = enabled;
+  return next;
+}
+
+export function set2dModeLayers(current: MapLayerState): MapLayerState {
+  const next: MapLayerState = { ...current, transit: true };
+  for (const key of MAP_3D_LAYER_KEYS) next[key] = false;
+  return next;
+}
+
+export function set3dStyleLayers(current: MapLayerState, style: Map3dStyle): MapLayerState {
+  const next: MapLayerState = { ...current, transit: true };
+  for (const key of MAP_3D_CORE_LAYER_KEYS) next[key] = true;
+  next.buildingColors = style === 'detailed';
+  next.proceduralBuildingDetails = style === 'detailed';
   return next;
 }
 
@@ -216,7 +239,6 @@ function LayerRow({
       <span className="layer-toggle-icon" aria-hidden="true"><Icon /></span>
       <span className="layer-toggle-copy">
         <strong>{definition.label}</strong>
-        <small>{definition.description}</small>
       </span>
       <span className="layer-switch" aria-hidden="true"><span /></span>
     </button>
@@ -251,6 +273,8 @@ export function MapControls({
   contentPanelOpen,
   is3dMode,
   onToggle3dMode,
+  selectedMapStyle,
+  onMapStyleChange,
   orientationChanged,
   notice,
   themePreference,
@@ -283,6 +307,8 @@ export function MapControls({
   contentPanelOpen: boolean;
   is3dMode: boolean;
   onToggle3dMode: () => void;
+  selectedMapStyle: '2d' | Map3dStyle;
+  onMapStyleChange: (style: '2d' | Map3dStyle) => void;
   orientationChanged: boolean;
   notice: string | null;
   themePreference: ThemePreference;
@@ -295,7 +321,7 @@ export function MapControls({
   onSearchFocusRef.current = onSearchFocus;
   const [helpOpen, setHelpOpen] = useState(false);
   const [openLayerGroups, setOpenLayerGroups] = useState<Record<string, boolean>>(() => (
-    Object.fromEntries(layerGroups.map((group) => [group.id, group.defaultOpen !== false]))
+    Object.fromEntries(layerGroups.map((group) => [group.id, group.id === 'map' && group.defaultOpen !== false]))
   ));
   const layerSheet = useMobileBottomSheet('half');
   const shortcutModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
@@ -560,6 +586,20 @@ export function MapControls({
               </button>
             </div>
             <div className="layer-panel-content" tabIndex={0}>
+              <div className="theme-setting map-style-setting">
+                <span className="theme-setting-label">Map style</span>
+                <div className="theme-options" role="group" aria-label="Map style">
+                  {([['2d', '2D'], ['simple', 'Simple 3D'], ['detailed', 'Detailed 3D']] as const).map(([value, label]) => (
+                    <button
+                      className={selectedMapStyle === value ? 'selected' : ''}
+                      key={value}
+                      type="button"
+                      aria-pressed={selectedMapStyle === value}
+                      onClick={() => onMapStyleChange(value)}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
               <div className="theme-setting">
                 <span className="theme-setting-label">Appearance</span>
                 <div className="theme-options" role="group" aria-label="Appearance">
