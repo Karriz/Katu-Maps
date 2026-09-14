@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flightSceneNeedsRefresh, installFlightSceneScheduler } from './FlightSceneScheduler';
+import { flightSceneNeedsRefresh, installFlightSceneScheduler, scheduleSceneJobs } from './FlightSceneScheduler';
 
 function fixture() {
   vi.useFakeTimers();
+  vi.stubGlobal('requestIdleCallback', undefined);
+  vi.stubGlobal('cancelIdleCallback', undefined);
   vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
   vi.stubGlobal('cancelAnimationFrame', clearTimeout);
   const listeners = new Map<string, (...args: any[]) => void>();
@@ -34,6 +36,26 @@ afterEach(() => {
 });
 
 describe('flight scene scheduler', () => {
+  it('uses browser idle periods and waits for enough frame budget', () => {
+    const callbacks: Array<(deadline: { didTimeout: boolean; timeRemaining: () => number }) => void> = [];
+    vi.stubGlobal('requestIdleCallback', vi.fn((callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    }));
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    const first = vi.fn();
+    const second = vi.fn();
+    scheduleSceneJobs([first, second]);
+
+    callbacks.shift()?.({ didTimeout: false, timeRemaining: () => 1 });
+    expect(first).not.toHaveBeenCalled();
+    callbacks.shift()?.({ didTimeout: false, timeRemaining: () => 5 });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    callbacks.shift()?.({ didTimeout: true, timeRemaining: () => 0 });
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
   it('runs layers on separate frames and coalesces tile bursts until the cooldown', () => {
     const f = fixture();
     vi.advanceTimersByTime(16);

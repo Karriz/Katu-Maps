@@ -9,6 +9,55 @@ export type FlightSceneSchedulerOptions = {
   turnDegrees?: number;
 };
 
+type IdleDeadlineLike = { didTimeout: boolean; timeRemaining: () => number };
+
+/**
+ * Keep synchronous map-source queries out of the animation-frame callback that
+ * drives the camera. Native idle callbacks run after paint; the rAF fallback
+ * still spreads work across frames on browsers without requestIdleCallback.
+ */
+export function scheduleSceneJobs(jobs: (() => void)[], onComplete?: () => void) {
+  let cancelled = false;
+  let index = 0;
+  let handle: number | undefined;
+  const idleApi = globalThis as unknown as {
+    requestIdleCallback?: (callback: (deadline: IdleDeadlineLike) => void, options?: { timeout: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  const requestIdle = idleApi.requestIdleCallback?.bind(globalThis);
+  const cancelIdle = idleApi.cancelIdleCallback?.bind(globalThis);
+
+  const run = (idleDeadline?: IdleDeadlineLike) => {
+    if (cancelled) return;
+    const deadline = idleDeadline ?? { didTimeout: true, timeRemaining: () => 0 };
+    // Avoid beginning a potentially expensive query in the scraps of an idle
+    // period. The timeout guarantees progress while flight/drive paints
+    // continuously and therefore offers few genuinely idle frames.
+    if (!deadline.didTimeout && deadline.timeRemaining() < 2) {
+      schedule();
+      return;
+    }
+    jobs[index++]?.();
+    if (index < jobs.length) schedule();
+    else onComplete?.();
+  };
+  const schedule = () => {
+    if (requestIdle) {
+      handle = requestIdle(run, { timeout: 250 });
+    } else {
+      handle = requestAnimationFrame(() => run({ didTimeout: true, timeRemaining: () => 0 }));
+    }
+  };
+  if (jobs.length > 0) schedule();
+  else onComplete?.();
+  return () => {
+    cancelled = true;
+    if (handle === undefined) return;
+    if (requestIdle) cancelIdle?.(handle);
+    else cancelAnimationFrame(handle);
+  };
+}
+
 export function flightSceneNeedsRefresh(
   previous: FlightSceneView,
   current: FlightSceneView,
@@ -33,7 +82,7 @@ export function installFlightSceneScheduler(
   const moveMeters = options.moveMeters ?? 90;
   const turnDegrees = options.turnDegrees ?? 12;
   let disposed = false;
-  let frame: number | undefined;
+  let cancelJobs: (() => void) | undefined;
   let sourceDirty = true;
   let previous: FlightSceneView | undefined;
   let lastRefresh = -Infinity;
@@ -42,7 +91,7 @@ export function installFlightSceneScheduler(
     return { longitude: center.lng, latitude: center.lat, heading: map.getBearing() };
   };
   const check = () => {
-    if (disposed || frame !== undefined) return;
+    if (disposed || cancelJobs !== undefined) return;
     const now = performance.now();
     const current = readView();
     if (now - lastRefresh < 750) return;
@@ -51,13 +100,7 @@ export function installFlightSceneScheduler(
     previous = current;
     lastRefresh = now;
     sourceDirty = false;
-    let index = 0;
-    const run = () => {
-      if (disposed) return;
-      jobs[index++]?.();
-      frame = index < jobs.length ? requestAnimationFrame(run) : undefined;
-    };
-    frame = requestAnimationFrame(run);
+    cancelJobs = scheduleSceneJobs(jobs, () => { cancelJobs = undefined; });
   };
   const onSource = (event: MapSourceDataEvent) => {
     if (event.sourceDataType !== 'content') return;
@@ -73,7 +116,7 @@ export function installFlightSceneScheduler(
   return () => {
     disposed = true;
     clearInterval(timer);
-    if (frame !== undefined) cancelAnimationFrame(frame);
+    cancelJobs?.();
     map.off('move', check);
     map.off('sourcedata', onSource);
   };
