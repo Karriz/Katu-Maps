@@ -594,7 +594,18 @@ const scenarios: Scenario[] = [
     viewport: 'phone',
     setup: async page => {
       await page.locator('.map-canvas').click({ button: 'right', position: { x: 180, y: 350 } });
-      await expect(page.locator('.map-context-menu')).toContainText('Position information');
+      const menu = page.locator('.map-context-menu');
+      await expect(menu.getByRole('menuitem')).toHaveText([
+        'Position information',
+        'Nearby',
+        'Measure distance',
+        'Save as favourite',
+        'Route to here',
+        'Route from here',
+        'Fly from here',
+        'Drive from here',
+      ]);
+      await expect(menu.getByRole('separator')).toHaveCount(2);
     },
     state: 'context menu open',
   },
@@ -923,11 +934,20 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.mobile-sheet-close')).toBeVisible();
       await expect(panel.locator('.layer-panel-close')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
+      await expect(panel.getByRole('group', { name: 'Map style' })).toBeVisible();
+      await expect(panel.getByRole('button', { name: '2D' })).toHaveAttribute('aria-pressed', 'true');
+      await expect(panel.getByRole('button', { name: 'Simple 3D' })).toHaveAttribute('aria-pressed', 'false');
+      await expect(panel.getByRole('button', { name: 'Detailed 3D' })).toHaveAttribute('aria-pressed', 'false');
       await expect(panel.getByRole('heading', { name: 'Map' })).toBeVisible();
       await expect(panel.getByRole('heading', { name: 'Transit' })).toBeVisible();
       await expect(panel.getByRole('heading', { name: 'Driving' })).toBeVisible();
       await expect(panel.getByRole('heading', { name: 'Bike & walk' })).toBeVisible();
       await expect(panel.getByRole('heading', { name: 'Environment' })).toBeVisible();
+      await expect(panel.locator('details.layer-group').filter({ hasText: 'Map' })).toHaveAttribute('open', '');
+      for (const groupName of ['Transit', 'Driving', 'Bike & walk', 'Environment']) {
+        await expect(panel.locator('details.layer-group').filter({ hasText: groupName })).not.toHaveAttribute('open');
+      }
+      await expect(panel.getByRole('switch')).toHaveCount(5);
       await expect(panel.getByRole('switch', { name: /3D bridges/i })).toBeVisible();
       const locationIcons = panel.getByRole('switch', { name: /Location icons/i });
       const mapLabels = panel.getByRole('switch', { name: /Map labels/i });
@@ -935,13 +955,6 @@ const scenarios: Scenario[] = [
       await expect(locationIcons).toHaveAttribute('aria-checked', 'true');
       await expect(mapLabels).toBeVisible();
       await expect(mapLabels).toHaveAttribute('aria-checked', 'true');
-      await expect(panel.getByRole('switch', { name: /Traffic.*congestion/i })).toBeVisible();
-      await expect(panel.getByRole('switch', { name: /^Road weather/i })).toBeVisible();
-      await expect(panel.getByRole('switch', { name: /Charging stations/i })).toBeVisible();
-      await expect(panel.getByRole('switch', { name: /Day & night/i })).toBeVisible();
-      await expect(panel.getByRole('switch', { name: /^Clouds/ })).toBeVisible();
-      await expect(panel.getByRole('switch', { name: /^Weather/ })).toBeVisible();
-      await expect(panel.getByRole('switch')).toHaveCount(16);
       await expectLayerToggleDoesNotInflateSheet(page);
     },
     state: 'layers open',
@@ -957,6 +970,14 @@ const scenarios: Scenario[] = [
       await expect(panel.locator('.layer-panel-close')).toBeVisible();
       await expect(panel.locator('.mobile-sheet-handle')).toBeHidden();
       await expect(panel.getByRole('button', { name: 'Close map layers' })).toHaveCount(1);
+      await expect(panel.getByRole('group', { name: 'Map style' })).toBeVisible();
+      await expect(panel.getByRole('button', { name: '2D' })).toHaveAttribute('aria-pressed', 'true');
+      await expect(panel.getByRole('button', { name: 'Simple 3D' })).toHaveAttribute('aria-pressed', 'false');
+      await expect(panel.getByRole('button', { name: 'Detailed 3D' })).toHaveAttribute('aria-pressed', 'false');
+      await expect(panel.locator('details.layer-group').filter({ hasText: 'Map' })).toHaveAttribute('open', '');
+      for (const groupName of ['Transit', 'Driving', 'Bike & walk', 'Environment']) {
+        await expect(panel.locator('details.layer-group').filter({ hasText: groupName })).not.toHaveAttribute('open');
+      }
     },
     state: 'layers open',
   },
