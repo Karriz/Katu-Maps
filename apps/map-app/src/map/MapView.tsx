@@ -1,18 +1,14 @@
 import { deploymentStorageKey } from '../lib/Deployment';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import {
   type ExpressionSpecification,
   type FillLayerSpecification,
   type FilterSpecification,
   type Map,
-  type MapGeoJSONFeature,
-  type MapMouseEvent,
-  type MapSourceDataEvent,
   type Point,
 } from 'maplibre-gl';
 import {
-  ArrowRight,
   Beer,
   CircleDollarSign,
   BookOpen,
@@ -33,7 +29,6 @@ import {
   Plane,
   Shield,
   Star,
-  X,
   Droplets,
   Dumbbell,
   Flag,
@@ -58,7 +53,7 @@ import {
 } from 'lucide-react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { TreeModelLayer, treeViewportSignature } from './TreeModelLayer';
+import { TreeModelLayer } from './TreeModelLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
 import { installTunnelPortals } from './TunnelPortals';
 import { RoofModelLayer } from './RoofModelLayer';
@@ -72,7 +67,7 @@ import { TransitRouteOverlay } from './TransitRouteOverlay';
 import { RouteLineDeckLayer, type RouteLineFeature } from './RouteLineDeckLayer';
 import { FlightControls } from './flight/FlightControls';
 import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
-import { installFlightSceneScheduler, scheduleSceneJobs } from './flight/FlightSceneScheduler';
+import { installFlightSceneScheduler } from './flight/FlightSceneScheduler';
 import { useFlightSimulator } from './flight/useFlightSimulator';
 import { useFlightModePresentation } from './flight/useFlightModePresentation';
 import { DriveControls } from './drive/DriveControls';
@@ -85,8 +80,6 @@ import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import {
   isWalkingTransitMode,
 } from './TransitRouteOptions';
-const TransitJourneyDetails = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyDetails })));
-const TransitJourneyHeader = lazy(() => import('./TransitJourneyDetails').then((module) => ({ default: module.TransitJourneyHeader })));
 import { MapContextMenu } from './MapContextMenu';
 import { NearbyPlacesPanel } from './NearbyPlacesPanel';
 import { rankNearbyPlaces, type NearbyPlace } from './NearbyPlaces';
@@ -96,20 +89,13 @@ import {
   sportFacilityIconId,
 } from './PoiClasses';
 import { MapCameraActions } from './MapCameraActions';
-import { RoutePlannerControls } from './RoutePlannerControls';
 import { PositionInformationPanel } from './PositionInformationPanel';
 import { LocationInformationPanel } from './LocationInformationPanel';
-import { TrafficCameraPanel } from './TrafficCameraPanel';
 import { TrafficCamerasLayer, trafficCameraFeatureAt } from './TrafficCamerasLayer';
-import { RoadWeatherPanel } from './RoadWeatherPanel';
 import { RoadWeatherLayer, roadWeatherFeatureAt } from './RoadWeatherLayer';
-import { RoadTrafficPanel } from './RoadTrafficPanel';
-import { RoadTrafficMessagePanel } from './RoadTrafficMessagePanel';
 import { RoadTrafficLayer, roadTrafficFeatureAt } from './RoadTrafficLayer';
-import { ChargingStationPanel } from './ChargingStationPanel';
 import { ChargingStationsLayer, chargingStationFeatureAt } from './ChargingStationsLayer';
 import { ChargingStationsConfigError } from './ChargingStations';
-import { parseLocationMetadata, safeHttpUrl } from './LocationMedia';
 import { InfoActionRow } from '../components/InfoActionRow';
 import { localDateTimeValue, useRoutePlanning, type LocationSelection } from './useRoutePlanning';
 import {
@@ -118,9 +104,9 @@ import {
   resolveJourneyVehicleLegs,
   type TransitProviderId,
 } from './transit';
-import { coordinateBounds, panelPaddingForRects, removeIsolatedCoordinateOutliers } from './RouteCamera';
-import { defaultPositionName, elevationResult, formatCoordinates, formatNominatimAddress, queryTerrainElevation } from './PositionInformation';
-import { useInfoPanelState, type PositionInformationState } from './useInfoPanelState';
+import { coordinateBounds, removeIsolatedCoordinateOutliers } from './RouteCamera';
+import { elevationResult, formatCoordinates, formatNominatimAddress, queryTerrainElevation } from './PositionInformation';
+import { useInfoPanelState } from './useInfoPanelState';
 import { useTransitVehicleFollow } from './useTransitVehicleFollow';
 import { useRouteVehicleRestore } from './useRouteVehicleRestore';
 import { useMapSearch, type PhotonFeature } from './useMapSearch';
@@ -137,12 +123,11 @@ import { DayNightTimeSlider } from './DayNightTimeSlider';
 import { useDayNightCycle } from './useDayNightCycle';
 import { DistanceMeasurementController, formatDistance, type Measurement } from './DistanceMeasurement';
 import { availableGpsEndpoint, isMeaningfullyBetterLocation, locationZoomForAccuracy, markerFeatureCollection, normalizedLocationAccuracy } from './LocationMarkers';
-import { installPersistedMapViewFlush, loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
+import { installPersistedMapViewFlush } from './PersistedMapView';
 import { useInAppNavigation } from '../lib/useInAppNavigation';
 import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { installForegroundRecovery } from '../lib/ForegroundRecovery';
-import { MobileSheetHandle } from '../components/MobileSheetHandle';
-import { createMapDeepLink, parseMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
+import { createMapDeepLink, shareMapDeepLink, type MapDeepLink } from '../lib/DeepLink';
 import { useTheme } from '../theme';
 import { fetchWithTimeout } from './ApiRequest';
 import { serviceConfig } from './ServiceConfig';
@@ -157,7 +142,6 @@ import {
   GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
-  GLOBAL_MAP_STYLE,
   OPENFREEMAP_SOURCE_ID,
   updatePhysicalLineCaps,
   updatePhysicalWidthPaint,
@@ -173,7 +157,43 @@ import {
 } from './GroundPatterns';
 import { WATER_PATTERN_ID } from './WaterPattern';
 import { installMapPatterns } from './MapPatterns';
-const TAMPERE: [number, number] = [23.7609, 61.4981];
+import {
+  closeRangeCameraOffset,
+  followCameraCenter,
+  panelViewportPadding,
+  searchViewportPadding,
+} from './MapViewportLayout';
+import {
+  isValidCoordinate,
+  mapRouteColor,
+  routeColorForFeature,
+} from './RoutePresentation';
+import {
+  locationCategory,
+  locationDetails,
+  locationIconId,
+  locationSelectionFromFeature,
+  photonResultLabel,
+  positionInformationState,
+  suggestedFavoriteName,
+  type PendingFavorite,
+} from './LocationFeature';
+import { useMapCameraCoordinator } from './useMapCameraCoordinator';
+import { RoutePlannerPanel } from './RoutePlannerPanel';
+import { FavoriteDialog } from './FavoriteDialog';
+import { InfrastructurePanels } from './InfrastructurePanels';
+import { persistRuntimeCamera } from './MapRuntime';
+import {
+  assignMapLayerRuntimeRefs,
+  createMapLayerRuntime,
+  disposeMapLayerRuntime,
+  releaseMapLayerRuntimeRefs,
+  type MapLayerRuntimeRefs,
+} from './MapLayerRuntime';
+import { useMapRuntime, type MapRuntimeControls } from './useMapRuntime';
+import { installMapInteractions } from './installMapInteractions';
+import { installModelRefresh } from './installModelRefresh';
+import { installAppSources } from './installAppSources';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
 const BUILDING_SHADOW_LAYER_IDS = [
   'global-building-shadow',
@@ -181,237 +201,6 @@ const BUILDING_SHADOW_LAYER_IDS = [
 ];
 const LAYER_STORAGE_KEY = deploymentStorageKey('tampere-map-layer-options');
 const THREE_D_STYLE_STORAGE_KEY = deploymentStorageKey('tampere-map-3d-style');
-const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider, .day-night-time-slider';
-
-function closeRangeCameraOffset(): [number, number] {
-  if (window.innerWidth > 760) return [0, 0];
-  return [0, -Math.min(140, window.innerHeight * 0.18)];
-}
-
-function followCameraCenter(map: Map, coordinates: [number, number]): [number, number] {
-  const [targetX, targetY] = visibleMapTargetPoint(map);
-  const currentCenter = map.getCenter();
-  const vehicleCoordinateAtTarget = map.unproject([targetX, targetY]);
-  // Shift the map center by the geographic difference between where the
-  // vehicle is and the coordinate currently under the desired screen point.
-  return [
-    currentCenter.lng + coordinates[0] - vehicleCoordinateAtTarget.lng,
-    currentCenter.lat + coordinates[1] - vehicleCoordinateAtTarget.lat,
-  ];
-}
-
-function visibleMapTargetPoint(map: Map): [number, number] {
-  const mapRect = map.getContainer().getBoundingClientRect();
-  let left = 0;
-  let right = mapRect.width;
-  let top = 0;
-  let bottom = mapRect.height;
-  document.querySelectorAll<HTMLElement>(CONTENT_PANEL_SELECTOR).forEach((panel) => {
-    const panelRect = panel.getBoundingClientRect();
-    const overlaps = panelRect.right > mapRect.left
-      && panelRect.left < mapRect.right
-      && panelRect.bottom > mapRect.top
-      && panelRect.top < mapRect.bottom;
-    if (!overlaps) return;
-    const relative = {
-      left: panelRect.left - mapRect.left,
-      right: panelRect.right - mapRect.left,
-      top: panelRect.top - mapRect.top,
-      bottom: panelRect.bottom - mapRect.top,
-    };
-    if (relative.bottom >= mapRect.height - 2) bottom = Math.min(bottom, relative.top);
-    else if (relative.top <= 2) top = Math.max(top, relative.bottom);
-    else if (relative.left <= mapRect.width / 2) left = Math.max(left, relative.right);
-    else right = Math.min(right, relative.left);
-  });
-  if (right <= left || bottom <= top) return [mapRect.width / 2, mapRect.height / 2];
-  return [(left + right) / 2, (top + bottom) / 2];
-}
-
-function selectionCameraOffset(map: Map): [number, number] {
-  const mapRect = map.getContainer().getBoundingClientRect();
-  const [targetX, targetY] = visibleMapTargetPoint(map);
-  return [targetX - mapRect.width / 2, targetY - mapRect.height / 2];
-}
-
-function panelViewportPadding(map: Map, base = 0, gap = 0) {
-  const mapRect = map.getContainer().getBoundingClientRect();
-  const panelRects = [...document.querySelectorAll<HTMLElement>(CONTENT_PANEL_SELECTOR)]
-    .map((panel) => panel.getBoundingClientRect());
-  return panelPaddingForRects(mapRect, panelRects, base, gap);
-}
-
-function searchViewportPadding(map: Map) {
-  const mapRect = map.getContainer().getBoundingClientRect();
-  const obscuringRects = [...document.querySelectorAll<HTMLElement>(
-    '.location-search-form, .route-panel, .transit-departures-panel, .location-info-panel',
-  )].map((element) => element.getBoundingClientRect());
-  // Leave room for marker labels and for mobile browser safe areas. The
-  // search box is included even though it closes as the camera animation
-  // starts, so results never finish underneath its persistent input.
-  return panelPaddingForRects(mapRect, obscuringRects, window.innerWidth <= 760 ? 28 : 44, 16);
-}
-
-function routeCoordinates(result: RouteResult): [number, number][] {
-  const geometries = [
-    result.geometry,
-    ...(result.transitLegs?.flatMap((leg) => leg.geometry ? [leg.geometry] : []) ?? []),
-  ];
-  return geometries.flatMap((geometry) => removeIsolatedCoordinateOutliers(
-    geometry.coordinates.filter(isValidCoordinate),
-  ));
-}
-
-/** Normalize provider route colors before passing them to a MapLibre paint expression. */
-function mapRouteColor(value?: string) {
-  if (!value) return undefined;
-  const color = value.trim().replace(/^#/, '');
-  return /^(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color) ? `#${color}` : undefined;
-}
-
-/** Replicate the selected-route line-color expression for the 3D deck layer. */
-function routeColorForFeature(mode: string | undefined, routeColor?: string): string {
-  const m = (mode ?? '').toUpperCase();
-  if (m === 'WALK' || m === 'FOOT' || m === 'PEDESTRIAN') return '#64748b';
-  if (m === 'BICYCLE' || m === 'BIKE' || m === 'CYCLING') return '#16834b';
-  if (m === 'CAR' || m === 'DRIVING') return '#2563eb';
-  if (routeColor) return routeColor;
-  if (m === 'TRAM') return '#8b5cf6';
-  if (m === 'BUS') return '#1769e8';
-  if (m === 'SUBWAY') return '#f97316';
-  if (m === 'RAIL' || m === 'REGIONAL_RAIL') return '#16a34a';
-  return '#0ea5e9';
-}
-
-function isValidCoordinate(coordinate: unknown): coordinate is [number, number] {
-  return Array.isArray(coordinate)
-    && coordinate.length >= 2
-    && Number.isFinite(coordinate[0])
-    && Number.isFinite(coordinate[1])
-    && coordinate[0] >= -180
-    && coordinate[0] <= 180
-    && coordinate[1] >= -90
-    && coordinate[1] <= 90;
-}
-
-type PendingFavorite = {
-  editingFavoriteId?: string;
-  selection: LocationSelection;
-  provider?: string;
-  providerId?: string;
-  kind: FavoriteKind;
-  name: string;
-  nameWasEdited: boolean;
-  addressLoading: boolean;
-};
-
-function positionInformationState(
-  coordinates: [number, number],
-  address?: string,
-  favoriteId?: string,
-): PositionInformationState {
-  return {
-    coordinates,
-    elevation: { status: 'loading' },
-    address: address ? { status: 'available', address } : { status: 'loading' },
-    favoriteId,
-  };
-}
-
-function suggestedFavoriteName(selection: LocationSelection) {
-  if (selection.name !== 'Map point') return selection.name;
-  return defaultPositionName(selection.coordinates, selection.address);
-}
-
-function photonResultLabel(feature: PhotonFeature) {
-  if (feature.properties.coordinateResult) {
-    return {
-      primary: `Go to ${formatCoordinates(feature.geometry.coordinates)}`,
-      secondary: 'Coordinates · Open position information',
-    };
-  }
-  const { name, housenumber, street, city, state, country } = feature.properties;
-  if (feature.properties.transitStopId) {
-    return {
-      primary: name || 'Transit stop',
-      secondary: `Transit stop${feature.properties.transitMode ? ` · ${feature.properties.transitMode}` : ''}`,
-    };
-  }
-  const address = [housenumber, street].filter(Boolean).join(' ');
-  const primary = name || address || city || state || country || 'Unnamed place';
-  const secondary = [
-    name && address,
-    city,
-    state,
-    country,
-  ].filter(Boolean).join(', ');
-  return { primary, secondary };
-}
-
-function locationCategory(properties: Record<string, unknown>) {
-  const value = String(properties.class ?? properties.osm_value ?? properties.subclass ?? 'place').replaceAll('_', ' ');
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function locationIconId(properties: Record<string, unknown>) {
-  return String(properties.class ?? properties.osm_value ?? properties.subclass ?? 'shop');
-}
-
-function locationName(properties: Record<string, unknown>) {
-  return String(properties.name ?? properties['name:en'] ?? 'Interesting place');
-}
-
-function locationAddress(properties: Record<string, unknown>) {
-  return [properties.housenumber, properties.street, properties.city]
-    .filter(Boolean)
-    .join(' ')
-    .trim() || undefined;
-}
-
-function locationProperty(properties: Record<string, unknown>, ...keys: string[]) {
-  for (const key of keys) {
-    const value = properties[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function locationDetails(properties: Record<string, unknown>) {
-  const extra = properties.extra && typeof properties.extra === 'object'
-    ? properties.extra as Record<string, unknown>
-    : properties.extratags && typeof properties.extratags === 'object'
-      ? properties.extratags as Record<string, unknown>
-      : {};
-  const detailProperties = { ...properties, ...extra };
-  const website = locationProperty(detailProperties, 'website', 'contact:website', 'contact_website');
-  return {
-    openingHours: locationProperty(detailProperties, 'opening_hours', 'openingHours'),
-    phone: locationProperty(detailProperties, 'phone', 'contact:phone', 'contact_phone'),
-    email: locationProperty(detailProperties, 'email', 'contact:email', 'contact_email'),
-    website: safeHttpUrl(website),
-    ...parseLocationMetadata(detailProperties),
-  };
-}
-
-function locationSelectionFromFeature(feature: MapGeoJSONFeature): LocationSelection {
-  const properties = (feature.properties ?? {}) as Record<string, unknown>;
-  return {
-    name: locationName(properties),
-    category: locationCategory(properties),
-    address: locationAddress(properties),
-    coordinates: feature.geometry.type === 'Point'
-      ? feature.geometry.coordinates as [number, number]
-      : [0, 0],
-    source: 'map',
-    ...locationDetails(properties),
-    iconId: locationIconId(properties),
-    favoriteId: typeof properties.favoriteId === 'string' ? properties.favoriteId : undefined,
-    osmId: typeof properties.osm_id === 'string' || typeof properties.osm_id === 'number'
-      ? properties.osm_id
-      : (typeof feature.id === 'string' || typeof feature.id === 'number' ? feature.id : undefined),
-    osmType: typeof properties.osm_type === 'string' ? properties.osm_type : undefined,
-  };
-}
 
 const BUILDING_3D_LAYER_IDS = [...GLOBAL_BUILDING_3D_LAYER_IDS];
 
@@ -683,9 +472,8 @@ function globalWaterPatternLayer(): FillLayerSpecification {
 
 export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (active: boolean) => void }) {
   const { preference: themePreference, resolvedTheme, setPreference: setThemePreference } = useTheme();
-  const initialDeepLinkRef = useRef<MapDeepLink | null>(parseMapDeepLink(window.location.search));
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<Map | null>(null);
+  const { mapRef, mapError, mapLoaded, orientationChanged } = useMapRuntime(containerRef, installMapFeatures);
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
@@ -700,6 +488,21 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
   const selectedRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
+  const mapLayerRuntimeRefs = {
+    tree: treeLayerRef,
+    bridge: bridgeLayerRef,
+    roof: roofLayerRef,
+    facade: facadeLayerRef,
+    transitStops: transitStopsLayerRef,
+    trafficCameras: trafficCamerasLayerRef,
+    roadWeather: roadWeatherLayerRef,
+    roadTraffic: roadTrafficLayerRef,
+    chargingStations: chargingStationsLayerRef,
+    transitVehicle: transitVehicleLayerRef,
+    transitRouteOverlay: transitRouteOverlayRef,
+    selectedRouteDeck: selectedRouteDeckLayerRef,
+    transitStopRouteDeck: transitStopRouteDeckLayerRef,
+  } satisfies MapLayerRuntimeRefs;
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
   const flightActiveRef = useRef(false);
   const driveActiveRef = useRef(false);
@@ -708,9 +511,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const plannedVehicleTripRef = useRef<string | null>(null);
   const terrainSourceRef = useRef('terrain');
   const terrainEnabledRef = useRef(false);
-  const [mapError, setMapError] = useState<string | null>(null);
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const [orientationChanged, setOrientationChanged] = useState(false);
   const routePlanning = useRoutePlanning();
   const {
     selectedTransitStop,
@@ -779,9 +579,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     transitRouteOptions, setTransitRouteOptions, selectedTransitRouteIndex, setSelectedTransitRouteIndex,
     transitDetailsOpen, setTransitDetailsOpen, transitTimeMode, setTransitTimeMode,
     transitDateTime, setTransitDateTime, transitTimeControlsOpen, setTransitTimeControlsOpen,
-    routeSheet, routeSheetCollapsed, routeSheetSnapBeforeDetailsRef, journeyBackButtonRef,
-    journeyDetailsToggleRef, routeOriginRef, routeDestinationRef, routePickingRef, routeAbortRef,
-    routeCameraRequestRef, setRouteSheetCollapsed, openTransitDetails, closeTransitDetails,
+    routeSheet, routeSheetCollapsed, routeSheetSnapBeforeDetailsRef,
+    routeOriginRef, routeDestinationRef, routePickingRef, routeAbortRef,
+    routeCameraRequestRef, setRouteSheetCollapsed, closeTransitDetails,
   } = routePlanning;
   const routeVehicleViewRef = useRef(Boolean(routeOpen && routeResult));
   routeVehicleViewRef.current = Boolean(routeOpen && routeResult);
@@ -1609,50 +1409,29 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     source?.setData({ type: 'FeatureCollection', features });
   };
 
-  const fitRouteInView = (result: RouteResult) => {
-    const map = mapRef.current;
-    const coordinates = [
-      ...routeCoordinates(result),
-      routeOriginRef.current,
-      routeDestinationRef.current,
-    ].filter(isValidCoordinate);
-    if (!map || coordinates.length < 2 || map.getContainer().clientWidth === 0 || map.getContainer().clientHeight === 0) return;
-    const bounds = coordinateBounds(coordinates);
-    if (!bounds) return;
-    const padding = panelViewportPadding(map, 48, 24);
-    const mapRect = map.getContainer().getBoundingClientRect();
-    const panelRect = document.querySelector<HTMLElement>('.route-panel')?.getBoundingClientRect();
-    const camera = map.cameraForBounds(
-      [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
-      { padding, maxZoom: 15, pitch: map.getPitch(), bearing: map.getBearing() },
-    );
-    console.debug('[route-camera]', { coordinateCount: coordinates.length, bounds, mapRect, panelRect, padding, camera });
-    if (!camera) return;
-    map.stop();
-    map.easeTo({ ...camera, duration: 900 });
-  };
-
-  const scheduleRouteFit = (result: RouteResult) => {
-    const request = ++routeCameraRequestRef.current;
-    // The route panel may be entering, expanding, or collapsing. Wait for its
-    // actual CSS animations and two layout frames rather than starting several
-    // fits whose map.stop() calls interrupt each other.
-    const panels = [...document.querySelectorAll<HTMLElement>('.route-panel')];
-    const animations = panels.flatMap((panel) => panel.getAnimations({ subtree: true }));
-    void Promise.allSettled(animations.map((animation) => animation.finished)).then(() => {
-      if (routeCameraRequestRef.current !== request) return;
-      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-        if (routeCameraRequestRef.current !== request) return;
-        mapRef.current?.resize();
-        fitRouteInView(result);
-      }));
-    });
-  };
-
-  const fitRouteNow = (result: RouteResult) => {
-    if (window.innerWidth <= 760) setRouteSheetCollapsed(true);
-    scheduleRouteFit(result);
-  };
+  const { cancelPendingCamera, fitRouteNow, scheduleRouteFit } = useMapCameraCoordinator({
+    mapRef,
+    mapLoaded,
+    immersiveActive,
+    routeOpen,
+    routeResult,
+    routeSheetCollapsed,
+    transitDetailsOpen,
+    routeOriginRef,
+    routeDestinationRef,
+    routeCameraRequestRef,
+    pendingSearchCameraRef,
+    selectionCameraActiveRef,
+    selectedTransitStop,
+    selectedLocation,
+    positionInformation,
+    selectedTrafficCamera,
+    selectedChargingStation,
+    selectedRoadWeather,
+    selectedRoadTraffic,
+    selectedRoadTrafficMessage,
+    setRouteSheetCollapsed,
+  });
 
   const showTransitLegVehicle = (result: RouteResult) => {
     if (routeMode !== 'transit') {
@@ -1985,10 +1764,12 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
 
   const {
     prepareInfoPanelOpen,
+    prepareInfrastructurePanelOpen,
     preserveRouteVehicleForInfoPanel,
     selectTransitStopForInfoPanel,
     clearTransitInfoSelection,
     openPositionInformation,
+    prepareForMeasurement,
   } = usePanelCoordinator({
     routeVehicleViewRef,
     routeResultRef,
@@ -2025,58 +1806,13 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   function startMeasurement(start: [number, number]) {
     const map = mapRef.current;
     if (!map) return;
-    cancelRoute();
     stopMeasurement();
-    setPositionInformation(null);
-    setSelectedLocation(null);
-    setSelectedTransitStop(null);
-    setSelectedTrafficCamera(null);
-    trafficCamerasLayerRef.current?.clearSelection();
-    setSelectedChargingStation(null);
-    chargingStationsLayerRef.current?.clearSelection();
-    setSelectedRoadWeather(null);
-    roadWeatherLayerRef.current?.clearSelection();
-    setSelectedRoadTraffic(null);
-    setSelectedRoadTrafficMessage(null);
-    roadTrafficLayerRef.current?.clearSelection();
-    viewedWeather.closePanel();
+    prepareForMeasurement();
     setRouteContextMenu(null);
-    setContextMenuMarker(null);
     measurementControllerRef.current = new DistanceMeasurementController(map, start, setMeasurement);
   }
 
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-
-    const deepLink = initialDeepLinkRef.current;
-    const savedView = deepLink ? null : loadPersistedMapView();
-    let map: Map;
-    try {
-      map = new maplibregl.Map({
-        container: containerRef.current,
-        style: GLOBAL_MAP_STYLE,
-        center: deepLink?.coordinates ?? savedView?.center ?? TAMPERE,
-        zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
-        pitch: savedView?.pitch ?? 0,
-        bearing: savedView?.bearing ?? 0,
-        // MapLibre line layers are screen-space strokes. At extreme pitch the
-        // perspective projection makes foreground roads look disproportionately
-        // wide; keep the line-based mode readable until polygon roads return.
-        maxPitch: 55,
-        // Keep the default view focused on an area a few hundred metres across;
-        // closer views make screen-space MapLibre roads dominate the scene.
-        maxZoom: 18,
-        attributionControl: {
-          compact: true,
-          customAttribution: '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a> · <a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a> · <a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a> · <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo</a> · <a href="https://clouds.matteason.co.uk/" target="_blank" rel="noreferrer">Cloud maps by Matt Eason / EUMETSAT</a> · <a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
-        },
-      });
-    } catch (error) {
-      // MapLibre 6.7.0 throws GPUInitializationError from the constructor when
-      // WebGL2 is unavailable, instead of firing an error event after return.
-      setMapError(error instanceof Error ? error.message : 'The map could not be created.');
-      return;
-    }
+  function installMapFeatures(map: Map, deepLink: MapDeepLink | null, runtime: MapRuntimeControls) {
     // Peak markers share a symbol with their labels; register the icon before
     // the first paint so labeled peaks render as a point + name together.
     ensureMountainPeakIcon(map);
@@ -2085,29 +1821,8 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     // broader defaults, so modifier keys and editable controls remain untouched.
     map.keyboard.disable();
 
-    const treeLayer = new TreeModelLayer({
-      sourceId: OPENFREEMAP_SOURCE_ID,
-      waterLayers: ['water'],
-      vegetationLayers: ['landcover', 'landuse', 'park'],
-      biomeLayer: 'global-globe-biomes',
-    });
-    treeLayerRef.current = treeLayer;
-    const bridgeLayer = new BridgeModelLayer();
-    bridgeLayerRef.current = bridgeLayer;
-    const roofLayer = new RoofModelLayer();
-    roofLayerRef.current = roofLayer;
-    const facadeLayer = new FacadeModelLayer();
-    facadeLayerRef.current = facadeLayer;
-    const transitVehicleLayer = new TransitVehicleModelLayer();
-    transitVehicleLayerRef.current = transitVehicleLayer;
-    transitVehicleLayer.setBridgeDeckSource(bridgeLayer);
-    const transitStopsLayer = new TransitStopsLayer((pose) => {
+    const layerRuntime = createMapLayerRuntime((pose) => {
       latestVehiclePoseRef.current = pose;
-      // Keep the custom model layer synchronized with the same estimated pose
-      // used by the map marker and follow camera. Layer visibility decides
-      // whether the model is rendered; clearing the pose here prevents the
-      // 3D vehicles toggle from ever having anything to display.
-      transitVehicleLayer.setPose(pose);
       setVehicleFollowAvailable(Boolean(pose));
       setVehiclePositionStatus(pose?.status ?? 'unavailable');
       if (!pose || !vehicleFollowEnabledRef.current || (flightActiveRef.current || driveActiveRef.current)) return;
@@ -2119,33 +1834,23 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       map.setCenter(followCameraCenter(map, vehicle.coordinates));
       if (map.getZoom() < 14.6) map.setZoom(14.6);
     });
-    transitStopsLayerRef.current = transitStopsLayer;
-    const trafficCamerasLayer = new TrafficCamerasLayer();
-    trafficCamerasLayerRef.current = trafficCamerasLayer;
-    const roadWeatherLayer = new RoadWeatherLayer();
-    roadWeatherLayerRef.current = roadWeatherLayer;
-    const roadTrafficLayer = new RoadTrafficLayer();
-    roadTrafficLayerRef.current = roadTrafficLayer;
-    const chargingStationsLayer = new ChargingStationsLayer();
-    chargingStationsLayerRef.current = chargingStationsLayer;
-    const transitRouteOverlay = new TransitRouteOverlay();
-    transitRouteOverlayRef.current = transitRouteOverlay;
-    const selectedRouteDeckLayer = new RouteLineDeckLayer('selected-route-deck-3d');
-    selectedRouteDeckLayerRef.current = selectedRouteDeckLayer;
-    selectedRouteDeckLayer.setBridgeDeckSource(bridgeLayer);
-    const transitStopRouteDeckLayer = new RouteLineDeckLayer('transit-selected-route-deck-3d');
-    transitStopRouteDeckLayerRef.current = transitStopRouteDeckLayer;
-    transitStopRouteDeckLayer.setBridgeDeckSource(bridgeLayer);
-    transitStopsLayer.onSelectedRoutes((features) => {
-      transitStopRouteDeckLayer.setFeatures(features.map((f) => ({
-        coordinates: f.geometry.coordinates as Array<[number, number]>,
-        color: f.properties.color,
-        widthPixels: 4.5,
-        casingWidthPixels: 8,
-      })));
-    });
+    assignMapLayerRuntimeRefs(layerRuntime, mapLayerRuntimeRefs);
+    const {
+      tree: treeLayer,
+      bridge: bridgeLayer,
+      roof: roofLayer,
+      facade: facadeLayer,
+      transitVehicle: transitVehicleLayer,
+      transitStops: transitStopsLayer,
+      trafficCameras: trafficCamerasLayer,
+      roadWeather: roadWeatherLayer,
+      roadTraffic: roadTrafficLayer,
+      chargingStations: chargingStationsLayer,
+      transitRouteOverlay,
+      selectedRouteDeck: selectedRouteDeckLayer,
+      transitStopRouteDeck: transitStopRouteDeckLayer,
+    } = layerRuntime;
     let disposeMapPatterns: (() => void) | undefined;
-    let treeUpdateTimer: number | undefined;
     let transitStopsTimer: number | undefined;
     let chargingStationsTimer: number | undefined;
     let initialLoadComplete = false;
@@ -2153,9 +1858,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     let roadWidthMaxZoom: number | undefined;
     let globalLabelDensitySignature: string | undefined;
     let previousOrientationChanged = false;
-    let modelDataRevision = 0;
-    let lastModelUpdateSignature: string | undefined;
-    const modelVectorSourceId = OPENFREEMAP_SOURCE_ID;
 
     const updateGlobalPhysicalWidths = () => {
       const latitude = map.getCenter().lat;
@@ -2212,44 +1914,14 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         );
       }
     };
-    const modelUpdateSignature = () => {
-      const bounds = map.getBounds();
-      return treeViewportSignature(
-        {
-          west: bounds.getWest(),
-          south: bounds.getSouth(),
-          east: bounds.getEast(),
-          north: bounds.getNorth(),
-        },
-        map.getZoom(),
-        map.getPitch(),
-        terrainSourceRef.current,
-        terrainEnabledRef.current,
-        Math.floor(map.getZoom() + 1e-6),
-      );
-    };
-    const updateTreeModels = () => {
-      treeUpdateTimer = undefined;
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      if (map.isMoving()) {
-        scheduleTreeUpdate();
-        return;
-      }
-      bridgeLayer.updateBridges();
-      // Rebuild deck lines after bridges have had a chance to sample so they
-      // lift onto newly-available deck elevations.
-      map.once('idle', () => {
-        selectedRouteDeckLayer.rebuildFromCurrentFeatures();
-        transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
-      });
-      const nextSignature = `${modelUpdateSignature()}:${modelDataRevision}`;
-      if (nextSignature === lastModelUpdateSignature) return;
-      treeLayer.updateTrees(() => { lastModelUpdateSignature = nextSignature; });
-    };
-    const scheduleTreeUpdate = () => {
-      if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
-      treeUpdateTimer = window.setTimeout(updateTreeModels, 120);
-    };
+    const modelRefresh = installModelRefresh({
+      map,
+      layers: layerRuntime,
+      terrainSource: () => terrainSourceRef.current,
+      terrainEnabled: () => terrainEnabledRef.current,
+      immersiveActive: () => flightActiveRef.current || driveActiveRef.current,
+    });
+    const scheduleTreeUpdate = modelRefresh.schedule;
     const updateTransitStops = () => {
       transitStopsTimer = undefined;
       if (!map.isStyleLoaded()) return;
@@ -2278,46 +1950,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     const updateTransitRouteOverlay = () => {
       transitRouteOverlay.update(map.getBounds(), map.getZoom());
     };
-    const invalidateAndScheduleModels = () => {
-      bridgeLayer.invalidateTerrain();
-      treeLayer.invalidateTerrain();
-      roofLayer.invalidateSource();
-      facadeLayer.invalidateSource();
-      modelDataRevision += 1;
-      scheduleTreeUpdate();
-    };
-    const handleModelSourceData = (event: MapSourceDataEvent) => {
-      if (event.sourceId === terrainSourceRef.current && event.sourceDataType === 'content') {
-        bridgeLayer.invalidateTerrain();
-        treeLayer.invalidateTerrain();
-        roofLayer.invalidateSource();
-        facadeLayer.invalidateSource();
-        modelDataRevision += 1;
-        scheduleTreeUpdate();
-        // Terrain data changed: deck elevations need re-sampling.
-        map.once('idle', () => {
-          selectedRouteDeckLayer.rebuildFromCurrentFeatures();
-          transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
-        });
-        return;
-      }
-      if (event.sourceId !== modelVectorSourceId || event.sourceDataType !== 'content') return;
-      if (flightActiveRef.current || driveActiveRef.current) {
-        // Immersive chase cameras stream tiles continuously; hard invalidation
-        // wipes bridge mesh caches and commits partial stitch topologies.
-        bridgeLayer.markSourceDirty();
-      } else {
-        bridgeLayer.invalidateSource();
-      }
-      treeLayer.cancelTreeJobs();
-      roofLayer.invalidateSource();
-      facadeLayer.invalidateSource();
-      modelDataRevision += 1;
-      // Tile arrival does not change the camera, so idle may already have
-      // passed. Rebuild 3D bridges once the transportation tiles exist.
-      scheduleTreeUpdate();
-    };
-    treeRefreshRef.current = invalidateAndScheduleModels;
+    treeRefreshRef.current = modelRefresh.invalidate;
     const handleLocationClick = (event: { point: Point }) => {
       if ((flightActiveRef.current || driveActiveRef.current)) return;
       if (measurementControllerRef.current) return;
@@ -2421,19 +2054,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: selection.coordinates }, properties: {} }],
       });
     };
-    let longPressTimer: number | undefined;
-    let longPressStart: { x: number; y: number } | undefined;
-    const activeLongPressPointers = new Set<number>();
-    let multiPointerGestureActive = false;
-    let lastTouchOrPenInteractionAt = 0;
-    const supportsLongPress = (event: PointerEvent) => (
-      event.pointerType === 'touch' || event.pointerType === 'pen'
-    );
-    const cancelLongPressTimer = () => {
-      if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-      longPressTimer = undefined;
-      longPressStart = undefined;
-    };
     const showRouteContextMenu = (point: Point, coordinates: [number, number]) => {
       const container = map.getContainer();
       setContextMenuMarker(coordinates);
@@ -2443,108 +2063,8 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         coordinates,
       });
     };
-    const handleMapKeyDown = (event: KeyboardEvent) => {
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      if (event.altKey || event.ctrlKey || event.metaKey || event.target !== map.getCanvas()) return;
-      const pan: Record<string, [number, number]> = {
-        ArrowLeft: [-100, 0], ArrowRight: [100, 0], ArrowUp: [0, -100], ArrowDown: [0, 100],
-      };
-      if (pan[event.key]) {
-        event.preventDefault();
-        map.panBy(pan[event.key], { duration: 180 });
-      } else if (event.key === '+' || event.key === '=') {
-        event.preventDefault(); map.zoomIn({ duration: 180 });
-      } else if (event.key === '-' || event.key === '_') {
-        event.preventDefault(); map.zoomOut({ duration: 180 });
-      } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-        event.preventDefault();
-        const canvas = map.getCanvas();
-        const point = new maplibregl.Point(canvas.clientWidth / 2, canvas.clientHeight / 2);
-        const center = map.getCenter();
-        showRouteContextMenu(point, [center.lng, center.lat]);
-      }
-    };
-    const handleMapContextMenu = (event: MapMouseEvent) => {
-      event.originalEvent.preventDefault();
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      if (measurementControllerRef.current) return;
-      // Touch and pen long-presses are handled explicitly below. MapLibre/browser
-      // contextmenu events can also arrive during a pinch, so never turn a
-      // pointer-generated contextmenu event into a second route menu.
-      if (('pointerType' in event.originalEvent
-          && (event.originalEvent.pointerType === 'touch' || event.originalEvent.pointerType === 'pen'))
-        || Date.now() - lastTouchOrPenInteractionAt < 1000) return;
-      showRouteContextMenu(event.point, [event.lngLat.lng, event.lngLat.lat]);
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      // Let manual map gestures take ownership from vehicle following.
-      lastUserInteractionRef.current = Date.now();
-      vehicleFollowEnabledRef.current = false;
-      setVehicleFollowing(false);
-      if (measurementControllerRef.current) return;
-      if (!supportsLongPress(event)) return;
-      lastTouchOrPenInteractionAt = Date.now();
-      activeLongPressPointers.add(event.pointerId);
-      if (activeLongPressPointers.size > 1) {
-        // A second contact means this is a pinch/rotate gesture, never a
-        // long-press. This also covers the common case where the second
-        // pointer does not move far enough to trip the movement threshold.
-        multiPointerGestureActive = true;
-        cancelLongPressTimer();
-        return;
-      }
-      multiPointerGestureActive = false;
-      longPressStart = { x: event.clientX, y: event.clientY };
-      longPressTimer = window.setTimeout(() => {
-        if (multiPointerGestureActive || activeLongPressPointers.size !== 1) {
-          cancelLongPressTimer();
-          return;
-        }
-        const rect = map.getCanvas().getBoundingClientRect();
-        const point = new maplibregl.Point(event.clientX - rect.left, event.clientY - rect.top);
-        const lngLat = map.unproject(point);
-        showRouteContextMenu(point, [lngLat.lng, lngLat.lat]);
-        longPressTimer = undefined;
-      }, 600);
-    };
-    const handleWheel = () => {
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      cancelLongPressTimer();
-      lastUserInteractionRef.current = Date.now();
-      vehicleFollowEnabledRef.current = false;
-      setVehicleFollowing(false);
-    };
-    // Capture before MapLibre's mousedown/touchstart handlers so a pan that
-    // starts during scrollZoom's settle window does not reuse the zoom-start
-    // terrain elevation plane (which causes hyperspeed pans after zoom-out).
     let cancelTerrainCameraEase = () => {};
-    const clearTerrainGestureBeforePan = () => {
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      clearStaleTerrainGesture(map);
-      // Stop elevation easing without snapping to the DEM target.
-      cancelTerrainCameraEase();
-    };
-    const cancelLongPress = (event: PointerEvent) => {
-      if (supportsLongPress(event) && event.type === 'pointermove' && activeLongPressPointers.size > 1) {
-        multiPointerGestureActive = true;
-        cancelLongPressTimer();
-      } else if (longPressStart && Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > 12) {
-        cancelLongPressTimer();
-      }
-      if (event.type !== 'pointermove') {
-        if (supportsLongPress(event)) activeLongPressPointers.delete(event.pointerId);
-        if (activeLongPressPointers.size === 0) {
-          multiPointerGestureActive = false;
-          cancelLongPressTimer();
-        }
-      }
-    };
-    const handleMapGestureStart = () => {
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      cancelLongPressTimer();
-      lastUserInteractionRef.current = Date.now();
-    };
+    let interactionController: ReturnType<typeof installMapInteractions> | undefined;
     map.once('load', async () => {
       disposeMapPatterns = installMapPatterns(map);
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
@@ -2562,42 +2082,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         console.warn('Location icons could not be loaded; hiding POI icons.', error);
       }
       const poiLayers = locationPoiLayers();
-      map.addSource('selected-location', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('search-results', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('nearby-results', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('favorites', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('user-location', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('context-menu-location', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('selected-route', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('route-endpoints', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-      map.addSource('route-transitions', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
+      installAppSources(map);
       map.addLayer({
         id: 'selected-route-casing',
         type: 'line',
@@ -2823,24 +2308,23 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         },
       }, poiLayers.before);
       poiLayers.layers.forEach((layer) => map.addLayer(layer, poiLayers.before));
-      map.on('click', handleLocationClick);
-      map.on('contextmenu', handleMapContextMenu);
-      const canvas = map.getCanvas();
-      canvas.setAttribute('aria-label', 'Interactive map. Use arrow keys to pan, plus or minus to zoom, and Shift+F10 for location actions.');
-      canvas.addEventListener('mousedown', clearTerrainGestureBeforePan, true);
-      canvas.addEventListener('touchstart', clearTerrainGestureBeforePan, { capture: true, passive: true });
-      canvas.addEventListener('keydown', handleMapKeyDown);
-      canvas.addEventListener('pointerdown', handlePointerDown);
-      canvas.addEventListener('wheel', handleWheel, { passive: true });
-      canvas.addEventListener('pointermove', cancelLongPress);
-      canvas.addEventListener('pointerup', cancelLongPress);
-      canvas.addEventListener('pointercancel', cancelLongPress);
-      map.on('mouseenter', 'location-poi-icons', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
-      map.on('mouseenter', 'location-poi-labels', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'location-poi-labels', () => { map.getCanvas().style.cursor = ''; });
-      map.on('mouseenter', 'global-hiking-pois', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'global-hiking-pois', () => { map.getCanvas().style.cursor = ''; });
+      interactionController = installMapInteractions(map, {
+        isBlocked: () => flightActiveRef.current || driveActiveRef.current,
+        isMeasurementActive: () => measurementControllerRef.current !== null,
+        onMapClick: handleLocationClick,
+        onContextMenu: showRouteContextMenu,
+        onUserInteraction: () => {
+          lastUserInteractionRef.current = Date.now();
+          vehicleFollowEnabledRef.current = false;
+          setVehicleFollowing(false);
+        },
+        onGestureStart: () => { lastUserInteractionRef.current = Date.now(); },
+        onBeforePan: () => {
+          clearStaleTerrainGesture(map);
+          cancelTerrainCameraEase();
+        },
+      });
+      interactionController.installLayerCursors();
       void transitStopsLayer.install(map, (stop) => {
         if (!preserveRouteVehicleForInfoPanel()) setVehicleFollowAvailable(false);
         setPositionInformation(null);
@@ -2862,15 +2346,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         updateTransitStops();
       });
       void trafficCamerasLayer.install(map, (camera) => {
-        prepareInfoPanelOpen();
-        clearLocationSelection();
-        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
-          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
-          transitStopsLayer.clearStopSelection();
-        } else {
-          transitStopsLayer.clearSelection();
-        }
-        setSelectedTransitStop(null);
+        prepareInfrastructurePanelOpen();
         trafficCamerasLayer.selectCamera(camera);
         setSelectedTrafficCamera(camera);
         pendingSearchCameraRef.current = camera.coordinates;
@@ -2887,15 +2363,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         });
       });
       void chargingStationsLayer.install(map, (station) => {
-        prepareInfoPanelOpen();
-        clearLocationSelection();
-        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
-          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
-          transitStopsLayer.clearStopSelection();
-        } else {
-          transitStopsLayer.clearSelection();
-        }
-        setSelectedTransitStop(null);
+        prepareInfrastructurePanelOpen();
         chargingStationsLayer.selectStation(station);
         setSelectedChargingStation(station);
         pendingSearchCameraRef.current = station.coordinates;
@@ -2910,15 +2378,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         updateChargingStations();
       });
       void roadWeatherLayer.install(map, (station) => {
-        prepareInfoPanelOpen();
-        clearLocationSelection();
-        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
-          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
-          transitStopsLayer.clearStopSelection();
-        } else {
-          transitStopsLayer.clearSelection();
-        }
-        setSelectedTransitStop(null);
+        prepareInfrastructurePanelOpen();
         roadWeatherLayer.selectStation(station);
         setSelectedRoadWeather(station);
         pendingSearchCameraRef.current = station.coordinates;
@@ -2935,15 +2395,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         });
       });
       void roadTrafficLayer.install(map, (target) => {
-        prepareInfoPanelOpen();
-        clearLocationSelection();
-        if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
-          rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
-          transitStopsLayer.clearStopSelection();
-        } else {
-          transitStopsLayer.clearSelection();
-        }
-        setSelectedTransitStop(null);
+        prepareInfrastructurePanelOpen();
         if (target.type === 'message') {
           roadTrafficLayer.selectMessage(target.message);
           setSelectedRoadTrafficMessage(target.message);
@@ -2981,9 +2433,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       scheduleTransitStopsUpdate();
       updateTransitRouteOverlay();
       initialLoadComplete = true;
-      setMapLoaded(true);
+      runtime.setLoaded(true);
       if (deepLink) {
-        initialDeepLinkRef.current = null;
+        runtime.consumeInitialDeepLink();
         const selectedSource = map.getSource('selected-location') as { setData: (data: unknown) => void } | undefined;
         const showPositionFallback = () => {
           openPositionInformation(positionInformationState(deepLink.coordinates));
@@ -3014,15 +2466,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       }
     });
     const persistCamera = () => {
-      try {
-        const center = map.getCenter();
-        savePersistedMapView({
-          center: [center.lng, center.lat],
-          zoom: map.getZoom(),
-          bearing: map.getBearing(),
-          pitch: map.getPitch(),
-        });
-      } catch { /* local storage can be disabled */ }
+      try { persistRuntimeCamera(map); } catch { /* local storage can be disabled */ }
     };
     const terrainCameraFollower = installTerrainCameraFollower(map, {
       isPaused: () => (flightActiveRef.current || driveActiveRef.current),
@@ -3062,7 +2506,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       const nextOrientationChanged = Math.abs(map.getBearing()) > 1 || pitch > 1;
       if (nextOrientationChanged !== previousOrientationChanged) {
         previousOrientationChanged = nextOrientationChanged;
-        setOrientationChanged(nextOrientationChanged);
+        runtime.setOrientationChanged(nextOrientationChanged);
       }
       if (nextLabelSignature !== globalLabelDensitySignature) {
         updateGlobalLabelDensity();
@@ -3074,26 +2518,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     };
     map.on('move', handleCameraMove);
     map.on('moveend', handleMoveEnd);
-    map.on('zoomstart', handleMapGestureStart);
-    map.on('dragstart', handleMapGestureStart);
-    map.on('sourcedata', handleModelSourceData);
-    // Waiting for idle avoids rebuilding all custom meshes once per tile while
-    // a pan/zoom is still filling the viewport. Spread the synchronous source
-    // queries across browser idle periods so roofs, facades, and trees do not
-    // all compete with the first frame after a tile burst.
-    let cancelMapModelJobs: (() => void) | undefined;
-    const handleIdleTreeUpdate = () => {
-      // Immersive modes own their refresh cadence. Running this path too would
-      // duplicate roof/facade scans whenever MapLibre happened to emit idle.
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      if (cancelMapModelJobs) return;
-      cancelMapModelJobs = scheduleSceneJobs([
-        () => { if (roofLayer.updateRoofs()) map.triggerRepaint(); },
-        () => { if (facadeLayer.updateFacades()) map.triggerRepaint(); },
-        scheduleTreeUpdate,
-      ], () => { cancelMapModelJobs = undefined; });
-    };
-    map.on('idle', handleIdleTreeUpdate);
     map.on('error', (event: maplibregl.ErrorEvent) => {
       const message = event.error?.message ?? 'The map style could not be loaded.';
       // MapLibre can emit this while backfilling a missing edge DEM tile. It
@@ -3108,10 +2532,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       if (initialLoadComplete) {
         console.warn(message);
       } else {
-        setMapError(message);
+        runtime.setError(message);
       }
     });
-    mapRef.current = map;
 
     return () => {
       disposeMapPatterns?.();
@@ -3119,59 +2542,20 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       terrainCameraFollower.dispose();
       measurementControllerRef.current?.dispose();
       measurementControllerRef.current = null;
-      if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       if (chargingStationsTimer !== undefined) window.clearTimeout(chargingStationsTimer);
-      cancelMapModelJobs?.();
+      modelRefresh.dispose();
       map.off('move', handleCameraMove);
       removePersistedMapViewFlush();
       removeForegroundRecovery();
       map.off('moveend', handleMoveEnd);
-      map.off('zoomstart', handleMapGestureStart);
-      map.off('dragstart', handleMapGestureStart);
-      map.off('sourcedata', handleModelSourceData);
-      map.off('click', handleLocationClick);
-      map.off('contextmenu', handleMapContextMenu);
-      const canvas = map.getCanvas();
-      canvas.removeEventListener('mousedown', clearTerrainGestureBeforePan, true);
-      canvas.removeEventListener('touchstart', clearTerrainGestureBeforePan, true);
-      canvas.removeEventListener('keydown', handleMapKeyDown);
-      canvas.removeEventListener('pointerdown', handlePointerDown);
-      canvas.removeEventListener('wheel', handleWheel);
-      canvas.removeEventListener('pointermove', cancelLongPress);
-      canvas.removeEventListener('pointerup', cancelLongPress);
-      canvas.removeEventListener('pointercancel', cancelLongPress);
-      if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-      map.off('mouseenter', 'location-poi-icons', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.off('mouseleave', 'location-poi-icons', () => { map.getCanvas().style.cursor = ''; });
-      map.off('mouseenter', 'global-hiking-pois', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.off('mouseleave', 'global-hiking-pois', () => { map.getCanvas().style.cursor = ''; });
-      map.off('idle', handleIdleTreeUpdate);
-      transitStopsLayer.dispose();
-      transitRouteOverlay.dispose();
-      trafficCamerasLayer.dispose();
-      chargingStationsLayer.dispose();
-      roadWeatherLayer.dispose();
-      roadTrafficLayer.dispose();
-      map.remove();
-      mapRef.current = null;
+      interactionController?.dispose();
+      disposeMapLayerRuntime(layerRuntime);
       treeRefreshRef.current = null;
-      treeLayerRef.current = null;
-      bridgeLayerRef.current = null;
       flightTreeLayerRef.current = null;
-      transitStopsLayerRef.current = null;
-      trafficCamerasLayerRef.current = null;
-      chargingStationsLayerRef.current = null;
-      roadWeatherLayerRef.current = null;
-      roadTrafficLayerRef.current = null;
-      transitVehicleLayerRef.current?.setBridgeDeckSource(null);
-      transitVehicleLayerRef.current = null;
-      selectedRouteDeckLayerRef.current?.setBridgeDeckSource(null);
-      selectedRouteDeckLayerRef.current = null;
-      transitStopRouteDeckLayerRef.current?.setBridgeDeckSource(null);
-      transitStopRouteDeckLayerRef.current = null;
+      releaseMapLayerRuntimeRefs(layerRuntime, mapLayerRuntimeRefs);
     };
-  }, []);
+  }
 
 
 
@@ -3491,40 +2875,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     setHighlightedSearchResults([]);
   };
 
-  useEffect(() => {
-    const coordinates = pendingSearchCameraRef.current;
-    if (!coordinates) return;
-    let cancelled = false;
-    let frame: number | undefined;
-    const panels = [...document.querySelectorAll<HTMLElement>(CONTENT_PANEL_SELECTOR)];
-    const panelAnimations = panels.flatMap((panel) => panel.getAnimations({ subtree: true }));
-    void Promise.allSettled(panelAnimations.map((animation) => animation.finished)).then(() => {
-      if (cancelled) return;
-      frame = window.requestAnimationFrame(() => {
-        const map = mapRef.current;
-        if (!map || pendingSearchCameraRef.current !== coordinates) return;
-        pendingSearchCameraRef.current = null;
-        // Measure after the mobile sheet's entrance animation. Its transform
-        // changes getBoundingClientRect without triggering ResizeObserver.
-        // Keep the favourite coordinate as the camera target and express panel
-        // composition in pixels. Calculating a geographic center offset before
-        // zooming makes the displacement depend on the old zoom level.
-        map.stop();
-        selectionCameraActiveRef.current = true;
-        map.once('moveend', () => { selectionCameraActiveRef.current = false; });
-        map.easeTo({
-          center: coordinates,
-          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : selectedTrafficCamera || selectedRoadWeather || selectedRoadTrafficMessage ? 12 : selectedRoadTraffic ? 11 : 14),
-          offset: selectionCameraOffset(map),
-          duration: 900,
-        });
-      });
-    });
-    return () => {
-      cancelled = true;
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-    };
-  }, [positionInformation?.coordinates, selectedLocation, selectedTransitStop, selectedTrafficCamera, selectedChargingStation, selectedRoadWeather, selectedRoadTraffic, selectedRoadTrafficMessage]);
   useEffect(() => () => {
     routeAddressAbortRef.current.origin?.abort();
     routeAddressAbortRef.current.destination?.abort();
@@ -3537,158 +2887,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   useEffect(() => {
     try { window.localStorage.setItem(THREE_D_STYLE_STORAGE_KEY, threeDStyle); } catch { /* storage can be disabled */ }
   }, [threeDStyle]);
-
-  useEffect(() => {
-    if (!routeOpen || !routeResult) return;
-    scheduleRouteFit(routeResult);
-  }, [mapLoaded, routeOpen, routeResult]);
-
-  useEffect(() => () => {
-    routeCameraRequestRef.current += 1;
-  }, []);
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-    let frame: number | undefined;
-    let recenterTimer: number | undefined;
-    let previousRouteLayout: string | undefined;
-    const updatePadding = () => {
-      frame = undefined;
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      if (routeOpen && routeResult) {
-        const padding = panelViewportPadding(map, 48, 24);
-        const layout = [
-          map.getContainer().clientWidth,
-          map.getContainer().clientHeight,
-          padding.top, padding.right, padding.bottom, padding.left,
-        ].join(':');
-        // ResizeObserver can emit repeatedly for a single React/layout pass.
-        // Only request another fit when the measured usable viewport changed.
-        const mobileSheetExpanded = window.innerWidth <= 760 && !routeSheetCollapsed;
-        if (!mobileSheetExpanded && previousRouteLayout !== undefined && previousRouteLayout !== layout) {
-          scheduleRouteFit(routeResult);
-        }
-        previousRouteLayout = layout;
-      } else {
-        // The panel ResizeObserver fires during its entrance transition. Do
-        // not let its delayed composition adjustment interrupt the street-level
-        // zoom that opened this selection.
-        if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
-        const coordinates = selectedTransitStop?.coordinates
-          ?? selectedLocation?.coordinates
-          ?? positionInformation?.coordinates;
-        if (coordinates) {
-          if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
-          recenterTimer = window.setTimeout(() => {
-            if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
-            map.easeTo({ center: coordinates, offset: selectionCameraOffset(map), duration: 250 });
-          }, 120);
-        }
-      }
-    };
-    const schedulePadding = () => {
-      if (frame === undefined) frame = window.requestAnimationFrame(updatePadding);
-    };
-    schedulePadding();
-    const observer = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(schedulePadding)
-      : undefined;
-    document.querySelectorAll<HTMLElement>(CONTENT_PANEL_SELECTOR)
-      .forEach((panel) => observer?.observe(panel));
-    window.addEventListener('resize', schedulePadding);
-    return () => {
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-      if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
-      observer?.disconnect();
-      window.removeEventListener('resize', schedulePadding);
-    };
-  }, [mapLoaded, routeOpen, routeResult, selectedTransitStop, selectedLocation, positionInformation, routeSheetCollapsed, transitDetailsOpen]);
-
-
-  useEffect(() => () => {
-    routeAddressAbortRef.current.origin?.abort();
-    routeAddressAbortRef.current.destination?.abort();
-  }, []);
-
-  useEffect(() => {
-    try { window.localStorage.setItem(LAYER_STORAGE_KEY, JSON.stringify(layerToggles)); } catch { /* storage can be disabled */ }
-  }, [layerToggles]);
-
-  useEffect(() => {
-    if (!routeOpen || !routeResult) return;
-    scheduleRouteFit(routeResult);
-  }, [mapLoaded, routeOpen, routeResult]);
-
-  useEffect(() => () => {
-    routeCameraRequestRef.current += 1;
-  }, []);
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-    let frame: number | undefined;
-    let recenterTimer: number | undefined;
-    let previousRouteLayout: string | undefined;
-    const updatePadding = () => {
-      frame = undefined;
-      if ((flightActiveRef.current || driveActiveRef.current)) return;
-      if (routeOpen && routeResult) {
-        const padding = panelViewportPadding(map, 48, 24);
-        const layout = [
-          map.getContainer().clientWidth,
-          map.getContainer().clientHeight,
-          padding.top, padding.right, padding.bottom, padding.left,
-        ].join(':');
-        // ResizeObserver can emit repeatedly for a single React/layout pass.
-        // Only request another fit when the measured usable viewport changed.
-        const mobileSheetExpanded = window.innerWidth <= 760 && !routeSheetCollapsed;
-        if (!mobileSheetExpanded && previousRouteLayout !== undefined && previousRouteLayout !== layout) {
-          scheduleRouteFit(routeResult);
-        }
-        previousRouteLayout = layout;
-      } else {
-        // The panel ResizeObserver fires during its entrance transition. Do
-        // not let its delayed composition adjustment interrupt the street-level
-        // zoom that opened this selection.
-        if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
-        const coordinates = selectedTransitStop?.coordinates
-          ?? selectedLocation?.coordinates
-          ?? positionInformation?.coordinates;
-        if (coordinates) {
-          if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
-          recenterTimer = window.setTimeout(() => {
-            if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
-            map.easeTo({ center: coordinates, offset: selectionCameraOffset(map), duration: 250 });
-          }, 120);
-        }
-      }
-    };
-    const schedulePadding = () => {
-      if (frame === undefined) frame = window.requestAnimationFrame(updatePadding);
-    };
-    schedulePadding();
-    const observer = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(schedulePadding)
-      : undefined;
-    document.querySelectorAll<HTMLElement>(CONTENT_PANEL_SELECTOR)
-      .forEach((panel) => observer?.observe(panel));
-    window.addEventListener('resize', schedulePadding);
-    return () => {
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-      if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
-      observer?.disconnect();
-      window.removeEventListener('resize', schedulePadding);
-    };
-  }, [mapLoaded, routeOpen, routeResult, selectedTransitStop, selectedLocation, positionInformation, routeSheetCollapsed, transitDetailsOpen]);
-
-  const selectedTransitOption = useMemo(
-    () => transitRouteOptions[selectedTransitRouteIndex],
-    [transitRouteOptions, selectedTransitRouteIndex],
-  );
-
-  const setJourneyBackButton = useCallback((button: HTMLButtonElement | null) => {
-    journeyBackButtonRef.current = button;
-    button?.focus();
-  }, []);
 
   const positionFavorite = positionInformation && favorites.find((favorite) => (
     favorite.id === positionInformation.favoriteId
@@ -4021,7 +3219,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
                 setNearbyPlaces(null);
                 viewedWeather.closeWeatherUi();
                 pendingSearchCameraRef.current = null;
-                routeCameraRequestRef.current += 1;
+                cancelPendingCamera();
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);
                 if (measurementControllerRef.current) stopMeasurement();
@@ -4039,7 +3237,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
                 setNearbyPlaces(null);
                 viewedWeather.closeWeatherUi();
                 pendingSearchCameraRef.current = null;
-                routeCameraRequestRef.current += 1;
+                cancelPendingCamera();
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);
                 if (measurementControllerRef.current) stopMeasurement();
@@ -4107,168 +3305,61 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
               </div>
             </aside>
           )}
-          {pendingFavorite && (
-            <div className="favorite-menu-backdrop" role="presentation" onMouseDown={(event) => {
-              if (event.target === event.currentTarget) closeFavoriteDialog();
-            }}>
-              <form
-                className="favorite-menu"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="favorite-menu-title"
-                onKeyDown={(event) => { if (event.key === 'Escape') closeFavoriteDialog(); }}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  confirmFavorite();
-                }}
-              >
-                <button className="favorite-menu-close" type="button" aria-label="Close" onClick={closeFavoriteDialog}>
-                  <X size={18} aria-hidden="true" />
-                </button>
-                <span className="favorite-menu-eyebrow">{pendingFavorite.editingFavoriteId ? 'Edit favourite' : 'Save place'}</span>
-                <h2 id="favorite-menu-title">{pendingFavorite.editingFavoriteId ? 'Edit favourite' : 'Save as favourite'}</h2>
-                <p>{pendingFavorite.editingFavoriteId ? 'Update the name of this saved place.' : 'Give this place a useful name and choose how it should appear on the map.'}</p>
-                <label className="favorite-name-field">
-                  <span>Name</span>
-                  <input
-                    autoFocus
-                    maxLength={120}
-                    required
-                    value={pendingFavorite.name}
-                    onChange={(event) => setPendingFavorite((current) => current
-                      ? { ...current, name: event.target.value, nameWasEdited: true }
-                      : current)}
-                  />
-                  {pendingFavorite.addressLoading && <small aria-live="polite">Looking up the street address...</small>}
-                </label>
-                {!pendingFavorite.editingFavoriteId && <fieldset className="favorite-kind-group">
-                  <legend className="favorite-kind-label">Type</legend>
-                  <div className="favorite-kind-options">
-                  <button className={pendingFavorite.kind === 'home' ? 'selected' : ''} type="button" aria-pressed={pendingFavorite.kind === 'home'} onClick={() => selectFavoriteKind('home')}>
-                    <House aria-hidden="true" /><span><strong>Home</strong><small>Save as Home</small></span>
-                  </button>
-                  <button className={pendingFavorite.kind === 'work' ? 'selected' : ''} type="button" aria-pressed={pendingFavorite.kind === 'work'} onClick={() => selectFavoriteKind('work')}>
-                    <BriefcaseBusiness aria-hidden="true" /><span><strong>Work</strong><small>Save as Work</small></span>
-                  </button>
-                  <button className={pendingFavorite.kind === 'favorite' ? 'selected' : ''} type="button" aria-pressed={pendingFavorite.kind === 'favorite'} onClick={() => selectFavoriteKind('favorite')}>
-                    <Star aria-hidden="true" /><span><strong>Favourite</strong><small>Standard saved place</small></span>
-                  </button>
-                  </div>
-                </fieldset>}
-                <div className="favorite-menu-actions">
-                  <button type="button" onClick={closeFavoriteDialog}>Cancel</button>
-                  <button type="submit" disabled={!pendingFavorite.name.trim() || pendingFavorite.addressLoading}>
-                    {pendingFavorite.addressLoading ? 'Finding address...' : pendingFavorite.editingFavoriteId ? 'Save changes' : 'Save favourite'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-          {selectedRoadWeather && (
-            <RoadWeatherPanel
-              key={selectedRoadWeather.id}
-              station={selectedRoadWeather}
-              sheet={roadWeatherSheet}
-              onClose={() => {
+          <FavoriteDialog
+            favorite={pendingFavorite}
+            setFavorite={setPendingFavorite}
+            onKindChange={selectFavoriteKind}
+            onClose={closeFavoriteDialog}
+            onConfirm={confirmFavorite}
+          />
+          <InfrastructurePanels
+            selections={{
+              roadWeather: selectedRoadWeather,
+              roadTrafficMessage: selectedRoadTrafficMessage,
+              roadTraffic: selectedRoadTraffic,
+              chargingStation: selectedChargingStation,
+              trafficCamera: selectedTrafficCamera,
+            }}
+            sheets={{
+              roadWeather: roadWeatherSheet,
+              roadTrafficMessage: roadTrafficMessageSheet,
+              roadTraffic: roadTrafficSheet,
+              chargingStation: chargingStationSheet,
+              trafficCamera: trafficCameraSheet,
+            }}
+            onClose={{
+              roadWeather: () => {
                 roadWeatherLayerRef.current?.clearSelection();
                 closeRoadWeather();
-              }}
-              onShare={() => shareSelection({
-                type: 'position',
-                coordinates: selectedRoadWeather.coordinates,
-                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 12),
-                name: selectedRoadWeather.name,
-              }, selectedRoadWeather.name)}
-              onDirections={(destination) => {
-                openRoute();
-                setRouteEndpoint('destination', destination);
-              }}
-            />
-          )}
-          {selectedRoadTrafficMessage && !selectedRoadWeather && (
-            <RoadTrafficMessagePanel
-              key={selectedRoadTrafficMessage.id}
-              message={selectedRoadTrafficMessage}
-              sheet={roadTrafficMessageSheet}
-              onClose={() => {
+              },
+              roadTrafficMessage: () => {
                 roadTrafficLayerRef.current?.clearSelection();
                 closeRoadTrafficMessage();
-              }}
-              onShare={() => shareSelection({
-                type: 'position',
-                coordinates: selectedRoadTrafficMessage.coordinates,
-                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 12),
-                name: selectedRoadTrafficMessage.name,
-              }, selectedRoadTrafficMessage.name)}
-              onDirections={(destination) => {
-                openRoute();
-                setRouteEndpoint('destination', destination);
-              }}
-            />
-          )}
-          {selectedRoadTraffic && !selectedRoadWeather && !selectedRoadTrafficMessage && (
-            <RoadTrafficPanel
-              key={selectedRoadTraffic.id}
-              station={selectedRoadTraffic}
-              sheet={roadTrafficSheet}
-              onClose={() => {
+              },
+              roadTraffic: () => {
                 roadTrafficLayerRef.current?.clearSelection();
                 closeRoadTraffic();
-              }}
-              onShare={() => shareSelection({
-                type: 'position',
-                coordinates: selectedRoadTraffic.coordinates,
-                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 11),
-                name: selectedRoadTraffic.name,
-              }, selectedRoadTraffic.name)}
-              onDirections={(destination) => {
-                openRoute();
-                setRouteEndpoint('destination', destination);
-              }}
-            />
-          )}
-          {selectedChargingStation && !selectedRoadWeather && !selectedRoadTraffic && !selectedRoadTrafficMessage && (
-            <ChargingStationPanel
-              key={selectedChargingStation.id}
-              station={selectedChargingStation}
-              sheet={chargingStationSheet}
-              onClose={() => {
+              },
+              chargingStation: () => {
                 chargingStationsLayerRef.current?.clearSelection();
                 closeChargingStation();
-              }}
-              onShare={() => shareSelection({
-                type: 'position',
-                coordinates: selectedChargingStation.coordinates,
-                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 14),
-                name: selectedChargingStation.name,
-              }, selectedChargingStation.name)}
-              onDirections={(destination) => {
-                openRoute();
-                setRouteEndpoint('destination', destination);
-              }}
-            />
-          )}
-          {selectedTrafficCamera && !selectedChargingStation && !selectedRoadWeather && !selectedRoadTraffic && !selectedRoadTrafficMessage && (
-            <TrafficCameraPanel
-              key={selectedTrafficCamera.id}
-              selection={selectedTrafficCamera}
-              sheet={trafficCameraSheet}
-              onClose={() => {
+              },
+              trafficCamera: () => {
                 trafficCamerasLayerRef.current?.clearSelection();
                 closeTrafficCamera();
-              }}
-              onShare={() => shareSelection({
-                type: 'position',
-                coordinates: selectedTrafficCamera.coordinates,
-                zoom: Math.max(mapRef.current?.getZoom() ?? 14, 12),
-                name: selectedTrafficCamera.name,
-              }, selectedTrafficCamera.name)}
-              onDirections={(destination) => {
-                openRoute();
-                setRouteEndpoint('destination', destination);
-              }}
-            />
-          )}
+              },
+            }}
+            onShare={(selection, minimumZoom) => shareSelection({
+              type: 'position',
+              coordinates: selection.coordinates,
+              zoom: Math.max(mapRef.current?.getZoom() ?? 14, minimumZoom),
+              name: selection.name,
+            }, selection.name)}
+            onDirections={(destination) => {
+              openRoute();
+              setRouteEndpoint('destination', destination);
+            }}
+          />
           {selectedTransitStop && !selectedTrafficCamera && !selectedChargingStation && !selectedRoadWeather && !selectedRoadTraffic && !selectedRoadTrafficMessage && (
             <Suspense fallback={null}><TransitDeparturesPanel
               stop={selectedTransitStop}
@@ -4409,103 +3500,31 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
               }}
             />
           )}
-          {routePicking && (
-            <div className="route-selection-banner" role="status">
-              <strong>Pick {routePicking === 'origin' ? 'a starting point' : 'a destination'}</strong>
-              <span>Click anywhere on the map</span>
-              <button type="button" onClick={() => { routePickingRef.current = null; setRoutePicking(null); }}>Cancel</button>
-            </div>
-          )}
-          {routeOpen && !routePicking && (
-            <aside className={`route-panel mobile-bottom-sheet${routeSheetCollapsed ? ' route-sheet-collapsed' : ''}${routeSheet.dragging ? ' is-dragging' : ''}${transitDetailsOpen ? ' transit-journey-detail' : ''}`} style={routeSheet.style} data-snap={routeSheet.snap} aria-label={transitDetailsOpen ? 'Journey details' : 'Route details'}>
-              <MobileSheetHandle {...routeSheet} closeLabel="Close route planner" onClose={cancelRoute} />
-              {transitDetailsOpen && (
-                <Suspense fallback={null}><TransitJourneyHeader
-                  originName={routeOriginSelection?.name}
-                  destinationName={routeDestinationSelection?.name}
-                  selectedOption={selectedTransitOption}
-                  backButtonRef={setJourneyBackButton}
-                  onBack={closeTransitDetails}
-                /></Suspense>
-              )}
-              <div className="route-panel-heading" {...routeSheet.handleProps}>
-                <div><strong>Plan a route</strong><span>Search for a place or pick it on the map</span></div>
-                <button className="route-panel-close" type="button" aria-label="Close route planner" onClick={cancelRoute}><X aria-hidden="true" /></button>
-              </div>
-              <div className="route-panel-body">
-              <RoutePlannerControls
-                route={{
-                  routeMode, setRouteMode, routeOpen, setRouteOpen, routePicking, setRoutePicking,
-                  routeSearchTarget, setRouteSearchTarget, routeContextMenu, setRouteContextMenu,
-                  routeOriginSelection, setRouteOriginSelection, routeDestinationSelection, setRouteDestinationSelection,
-                  routeLoading, setRouteLoading, routeError, setRouteError, routeResult, setRouteResult,
-                  transitRouteOptions, setTransitRouteOptions, selectedTransitRouteIndex, setSelectedTransitRouteIndex,
-                  transitDetailsOpen, setTransitDetailsOpen, transitTimeMode, setTransitTimeMode,
-                  transitDateTime, setTransitDateTime, transitTimeControlsOpen, setTransitTimeControlsOpen,
-                  routeSheet, routeSheetCollapsed, routeSheetSnapBeforeDetailsRef, journeyBackButtonRef,
-                  journeyDetailsToggleRef, routeOriginRef, routeDestinationRef, routePickingRef, routeAbortRef,
-                  routeCameraRequestRef, setRouteSheetCollapsed, openTransitDetails, closeTransitDetails,
-                }}
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                searchLoading={searchLoading}
-                searchError={searchError}
-                displayedSearchResults={displayedSearchResults}
-                favoriteFeatures={favoriteFeatures}
-                userLocationRef={userLocationRef}
-                routeSearchAnchorRefs={routeSearchAnchorRefs}
-                routeSearchResultsRef={routeSearchResultsRef}
-                setSearchOpen={setSearchOpen}
-                setSearchResults={setSearchResults}
-                setSearchError={setSearchError}
-                beginRouteSearch={beginRouteSearch}
-                pickRouteEndpoint={pickRouteEndpoint}
-                selectYourLocation={selectYourLocation}
-                selectSearchResult={selectSearchResult}
-                selectTransitRoute={selectTransitRoute}
-                swapRouteEndpoints={swapRouteEndpoints}
-                photonResultLabel={photonResultLabel}
-              />
-              {routeResult && !routeLoading && (
-                <>
-                  {routeResult.provider && (
-                    <div className="route-provider-status" role="status">
-                      <span className="route-provider-status-dot" aria-hidden="true" />
-                      {routeResult.provider === 'digitransit' ? 'Digitransit routing'
-                        : routeResult.provider === 'transitous' ? 'Transitous routing'
-                          : routeResult.provider === 'osrm' ? 'OSRM routing' : 'Valhalla routing'}
-                    </div>
-                  )}
-                  {routeMode !== 'transit' && <div className="route-summary">
-                    <strong>{routeResult.distanceKm < 1 ? `${Math.round(routeResult.distanceKm * 1000)} m` : `${routeResult.distanceKm.toFixed(1)} km`}</strong>
-                    <span>{routeResult.durationSeconds < 3600 ? `${Math.round(routeResult.durationSeconds / 60)} min` : `${Math.floor(routeResult.durationSeconds / 3600)} h ${Math.round(routeResult.durationSeconds % 3600 / 60)} min`}</span>
-                  </div>}
-                  {routeMode === 'transit' && routeResult.transitLegs && (
-                    <button
-                      ref={journeyDetailsToggleRef}
-                      className="transit-route-details-toggle"
-                      type="button"
-                      onClick={transitDetailsOpen ? closeTransitDetails : openTransitDetails}
-                    >
-                      {transitDetailsOpen ? 'Hide journey details' : 'View journey details'}
-                      <ArrowRight aria-hidden="true" />
-                    </button>
-                  )}
-                  {routeMode === 'transit' && transitDetailsOpen && routeResult.transitLegs && (
-                    <Suspense fallback={null}><TransitJourneyDetails
-                      routeResult={routeResult}
-                      destinationName={routeDestinationSelection?.name}
-                      selectedOption={selectedTransitOption}
-                    /></Suspense>
-                  )}
-                </>
-              )}
-              {!routeLoading && !routeResult && !routeError && !routeOriginSelection && (
-                <p className="route-panel-message">Choose a starting point to begin.</p>
-              )}
-              </div>
-            </aside>
-          )}
+          <RoutePlannerPanel
+            route={routePlanning}
+            onCancel={cancelRoute}
+            controls={{
+              searchQuery,
+              setSearchQuery,
+              searchLoading,
+              searchError,
+              displayedSearchResults,
+              favoriteFeatures,
+              userLocationRef,
+              routeSearchAnchorRefs,
+              routeSearchResultsRef,
+              setSearchOpen,
+              setSearchResults,
+              setSearchError,
+              beginRouteSearch,
+              pickRouteEndpoint,
+              selectYourLocation,
+              selectSearchResult,
+              selectTransitRoute,
+              swapRouteEndpoints,
+              photonResultLabel,
+            }}
+          />
         </>
       )}
     </div>

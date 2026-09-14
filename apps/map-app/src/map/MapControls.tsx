@@ -538,7 +538,8 @@ export function MapControls({
                 <li>Drag or use provided controls to expand panels</li>
               </ul></section>
               <section><h3>Mouse and keyboard</h3><ul>
-                <li>Drag and scroll</li><li>Right-click for location actions</li>
+                <li>Drag and scroll</li><li>Right-drag or <kbd>Ctrl</kbd> + drag to rotate and tilt</li>
+                <li>Right-click for location actions</li>
                 <li><kbd>Arrow keys</kbd> to pan</li><li><kbd>+</kbd> / <kbd>−</kbd> to zoom</li>
                 <li><kbd>Tab</kbd> to navigate controls</li><li><kbd>Arrow keys</kbd> to navigate suggestions</li>
                 <li><kbd>Enter</kbd> to select or submit</li><li><kbd>Escape</kbd> to close the current menu</li>

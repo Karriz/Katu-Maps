@@ -69,9 +69,7 @@ export function usePanelCoordinator({
   cancelRoute,
   rememberRouteVehicle,
 }: PanelCoordinatorOptions) {
-  function prepareInfoPanelOpen() {
-    closePositionInformation();
-    setContextMenuMarker(null);
+  function clearInfrastructureSelections() {
     trafficCamerasLayerRef.current?.clearSelection();
     setSelectedTrafficCamera(null);
     chargingStationsLayerRef.current?.clearSelection();
@@ -81,6 +79,12 @@ export function usePanelCoordinator({
     roadTrafficLayerRef.current?.clearSelection();
     setSelectedRoadTraffic(null);
     setSelectedRoadTrafficMessage(null);
+  }
+
+  function prepareInfoPanelOpen() {
+    closePositionInformation();
+    setContextMenuMarker(null);
+    clearInfrastructureSelections();
     closeWeatherPanel();
     if (window.innerWidth <= 760) cancelRoute();
   }
@@ -124,8 +128,34 @@ export function usePanelCoordinator({
     setPositionInformation(information);
   }
 
+  function prepareInfrastructurePanelOpen() {
+    prepareInfoPanelOpen();
+    clearLocationSelection();
+    if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
+      rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
+      transitStopsLayerRef.current?.clearStopSelection();
+    } else {
+      transitStopsLayerRef.current?.clearSelection();
+    }
+    setSelectedTransitStop(null);
+  }
+
+  function prepareForMeasurement() {
+    cancelRoute();
+    closePositionInformation();
+    setContextMenuMarker(null);
+    clearLocationSelection();
+    clearTransitInfoSelection();
+    setSelectedTransitStop(null);
+    clearInfrastructureSelections();
+    closeWeatherPanel();
+  }
+
   return {
+    clearInfrastructureSelections,
     prepareInfoPanelOpen,
+    prepareInfrastructurePanelOpen,
+    prepareForMeasurement,
     preserveRouteVehicleForInfoPanel,
     selectTransitStopForInfoPanel,
     clearTransitInfoSelection,
