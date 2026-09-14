@@ -72,7 +72,7 @@ import { TransitRouteOverlay } from './TransitRouteOverlay';
 import { RouteLineDeckLayer, type RouteLineFeature } from './RouteLineDeckLayer';
 import { FlightControls } from './flight/FlightControls';
 import { FlightTreeModelLayer } from './flight/FlightTreeModelLayer';
-import { installFlightSceneScheduler } from './flight/FlightSceneScheduler';
+import { installFlightSceneScheduler, scheduleSceneJobs } from './flight/FlightSceneScheduler';
 import { useFlightSimulator } from './flight/useFlightSimulator';
 import { useFlightModePresentation } from './flight/useFlightModePresentation';
 import { DriveControls } from './drive/DriveControls';
@@ -3069,14 +3069,20 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     map.on('dragstart', handleMapGestureStart);
     map.on('sourcedata', handleModelSourceData);
     // Waiting for idle avoids rebuilding all custom meshes once per tile while
-    // a pan/zoom is still filling the viewport. moveend handles interaction;
-    // idle handles the final set of newly loaded tiles. Flight trees and bridges have a
-    // dedicated refresh scheduler, so avoid updating the hidden regular layer.
+    // a pan/zoom is still filling the viewport. Spread the synchronous source
+    // queries across browser idle periods so roofs, facades, and trees do not
+    // all compete with the first frame after a tile burst.
+    let cancelMapModelJobs: (() => void) | undefined;
     const handleIdleTreeUpdate = () => {
-      if (roofLayer.updateRoofs()) map.triggerRepaint();
-      if (facadeLayer.updateFacades()) map.triggerRepaint();
+      // Immersive modes own their refresh cadence. Running this path too would
+      // duplicate roof/facade scans whenever MapLibre happened to emit idle.
       if ((flightActiveRef.current || driveActiveRef.current)) return;
-      scheduleTreeUpdate();
+      if (cancelMapModelJobs) return;
+      cancelMapModelJobs = scheduleSceneJobs([
+        () => { if (roofLayer.updateRoofs()) map.triggerRepaint(); },
+        () => { if (facadeLayer.updateFacades()) map.triggerRepaint(); },
+        scheduleTreeUpdate,
+      ], () => { cancelMapModelJobs = undefined; });
     };
     map.on('idle', handleIdleTreeUpdate);
     map.on('error', (event: maplibregl.ErrorEvent) => {
@@ -3107,6 +3113,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       if (treeUpdateTimer !== undefined) window.clearTimeout(treeUpdateTimer);
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       if (chargingStationsTimer !== undefined) window.clearTimeout(chargingStationsTimer);
+      cancelMapModelJobs?.();
       map.off('move', handleCameraMove);
       removePersistedMapViewFlush();
       removeForegroundRecovery();
