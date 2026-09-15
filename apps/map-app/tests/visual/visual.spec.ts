@@ -203,6 +203,7 @@ async function openChargingStation(page: Page) {
   await page.getByRole('button', { name: 'Map layers' }).click();
   const panel = page.locator('#map-layer-panel');
   await expect(panel).toBeVisible();
+  await panel.locator('details.layer-group').filter({ hasText: 'Driving' }).locator('summary').click();
   const toggle = panel.getByRole('switch', { name: /Charging stations/i });
   const pending = page.waitForResponse(
     (response) => response.url().includes('api.openchargemap.io/v3/poi') && response.ok(),
@@ -903,6 +904,7 @@ const scenarios: Scenario[] = [
       await page.getByRole('button', { name: 'Map layers' }).click();
       const layersPanel = page.locator('#map-layer-panel');
       await expect(layersPanel).toBeVisible();
+      await layersPanel.locator('details.layer-group').filter({ hasText: 'Environment' }).locator('summary').click();
       const weatherToggle = layersPanel.getByRole('switch', { name: /^Weather/ });
       await expect(weatherToggle).toHaveAttribute('aria-checked', 'false');
       await weatherToggle.click();
