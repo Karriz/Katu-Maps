@@ -31,6 +31,15 @@ npm run dev
 
 Finnish Digitransit features require a subscription key in `.env.local`. The global keyless data sources work without one. See [the application documentation](apps/map-app/README.md) for details.
 
+## Android app
+
+The Play Store wrapper is a Trusted Web Activity generated from the production
+PWA manifest. Its source lives in [`android/`](android/) so web-manifest and
+Android wrapper changes can be reviewed and released together. See the
+[Android README](android/README.md) for prerequisites, reproducible
+Bubblewrap update/build commands, signing-key backup, and Digital Asset Links
+setup.
+
 ## Data and technology
 
 Built with React, TypeScript, MapLibre GL JS, OpenFreeMap, OpenStreetMap, Mapterhorn, Transitous, Digitransit, Digitraffic, and Valhalla.

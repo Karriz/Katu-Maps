@@ -13,3 +13,20 @@ data/sources/*dem*.tif
 data/sources/source.sha256
 data/processed/*
 !data/processed/.gitkeep
+
+# Android/Bubblewrap machine-local state and build outputs. Signing keys and
+# passwords must never be stored in this repository.
+android/.gradle/
+android/local.properties
+android/**/build/
+android/*.apk
+android/*.aab
+android/*.keystore
+android/*.jks
+android/*.p12
+android/signing.properties
+android/.env*
+*.keystore
+*.jks
+*.p12
+*signing*.properties

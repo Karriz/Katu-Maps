@@ -1,0 +1,51 @@
+{
+  "packageId": "io.github.karriz.katumaps",
+  "host": "karriz.github.io",
+  "name": "Katu Maps",
+  "launcherName": "Katu Maps",
+  "display": "standalone",
+  "themeColor": "#17344B",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#74C8F4",
+  "enableNotifications": true,
+  "startUrl": "/Katu-Maps/",
+  "iconUrl": "https://karriz.github.io/Katu-Maps/icon-512.png",
+  "maskableIconUrl": "https://karriz.github.io/Katu-Maps/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "upload.keystore",
+    "alias": "katu-maps-upload"
+  },
+  "appVersionName": "2",
+  "appVersionCode": 2,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://karriz.github.io/Katu-Maps/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://karriz.github.io/Katu-Maps/",
+  "minSdkVersion": 21,
+  "orientation": "any",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [],
+  "appVersion": "2"
+}
