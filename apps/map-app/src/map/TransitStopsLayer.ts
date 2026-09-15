@@ -87,6 +87,7 @@ export type TransitVehiclePose = {
   mode: string;
   color: string;
   status: TransitPositionStatus;
+  hasLeftStartingStop: boolean;
   /** Compatibility flag: true only for observed coordinates, never stop-time interpolation. */
   realTime: boolean;
   parts: Array<{
@@ -460,6 +461,7 @@ export function estimatedVehiclePose(
     mode,
     color,
     status: 'estimated',
+    hasLeftStartingStop: time >= leg.anchors[0].time,
     realTime: false,
     parts: Array.from({ length: layout.count }, (_, index) => (
       pathPoseAtDistance(leg, centerDistance + (index - (layout.count - 1) / 2) * spacing)
@@ -472,6 +474,7 @@ function observedVehiclePose(
   coordinates: [number, number],
   mode: string,
   color: string,
+  hasLeftStartingStop: boolean,
   headingDegrees?: number,
 ): TransitVehiclePose {
   const pathIndex = nearestPathIndex(leg.coordinates, coordinates, 0);
@@ -489,7 +492,7 @@ function observedVehiclePose(
       }
       : pathPoseAtDistance(leg, centerDistance + (index - centerIndex) * spacing)
   ));
-  return { mode, color, status: 'live', realTime: true, parts };
+  return { mode, color, status: 'live', hasLeftStartingStop, realTime: true, parts };
 }
 
 export class TransitStopsLayer {
@@ -1031,6 +1034,7 @@ export class TransitStopsLayer {
         observedPositionAt(tracked.observedTransition!, now),
         tracked.selection.mode,
         tracked.selection.color,
+        now >= displayableLeg.anchors[0].time,
         tracked.observedTransition!.observation.heading,
       )
       : estimatedVehiclePose(

@@ -46,6 +46,16 @@ export function followCameraCenter(map: Map, coordinates: [number, number]): [nu
   ];
 }
 
+/** Blend frequent vehicle updates into one continuous camera movement. */
+export function smoothlyFollowVehicle(map: Map, coordinates: [number, number], duration = 350) {
+  map.easeTo({
+    center: followCameraCenter(map, coordinates),
+    zoom: Math.max(map.getZoom(), 14.6),
+    duration,
+    easing: (progress) => progress,
+  });
+}
+
 export function selectionCameraOffset(map: Map): [number, number] {
   const mapRect = map.getContainer().getBoundingClientRect();
   const [targetX, targetY] = visibleMapTargetPoint(map);

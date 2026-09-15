@@ -159,7 +159,7 @@ import { WATER_PATTERN_ID } from './WaterPattern';
 import { installMapPatterns } from './MapPatterns';
 import {
   closeRangeCameraOffset,
-  followCameraCenter,
+  smoothlyFollowVehicle,
   panelViewportPadding,
   searchViewportPadding,
 } from './MapViewportLayout';
@@ -550,6 +550,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     vehiclePositionStatus,
     setVehiclePositionStatus,
   } = useTransitVehicleFollow();
+  const departureAutoFollowPendingRef = useRef(false);
   const { remember: rememberRouteVehicle, take: takeRouteVehicleRestore } = useRouteVehicleRestore();
   const [layersOpen, setLayersOpen] = useState(false);
   const [mapToolNotice, setMapToolNotice] = useState<string | null>(null);
@@ -1051,8 +1052,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     resumeRouteVehicle: (map, coordinates) => {
       vehicleFollowEnabledRef.current = true;
       setVehicleFollowing(true);
-      map.setCenter(followCameraCenter(map, coordinates));
-      if (map.getZoom() < 14.6) map.setZoom(14.6);
+      smoothlyFollowVehicle(map, coordinates, 500);
     },
   });
   const pauseVehicleFollow = () => {
@@ -1066,8 +1066,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     vehicleFollowEnabledRef.current = true;
     setVehicleFollowing(true);
     const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
-    map.setCenter(followCameraCenter(map, vehicle.coordinates));
-    if (map.getZoom() < 14.6) map.setZoom(14.6);
+    smoothlyFollowVehicle(map, vehicle.coordinates, 500);
   };
 
   useEffect(() => () => {
@@ -1825,14 +1824,16 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       latestVehiclePoseRef.current = pose;
       setVehicleFollowAvailable(Boolean(pose));
       setVehiclePositionStatus(pose?.status ?? 'unavailable');
+      if (pose?.hasLeftStartingStop && departureAutoFollowPendingRef.current
+        && vehicleFollowEnabledRef.current) {
+        departureAutoFollowPendingRef.current = false;
+        setVehicleFollowing(true);
+      }
       if (!pose || !vehicleFollowEnabledRef.current || (flightActiveRef.current || driveActiveRef.current)) return;
+      if (!vehicleFollowingRef.current && !pose.hasLeftStartingStop) return;
       if (Date.now() - lastUserInteractionRef.current < 400) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
-      // Keep camera tracking independent of style loading/animation state.
-      // The vehicle pose is updated on every timer tick, so setCenter avoids
-      // a queue of interrupted easeTo animations and follows the tram exactly.
-      map.setCenter(followCameraCenter(map, vehicle.coordinates));
-      if (map.getZoom() < 14.6) map.setZoom(14.6);
+      smoothlyFollowVehicle(map, vehicle.coordinates);
     });
     assignMapLayerRuntimeRefs(layerRuntime, mapLayerRuntimeRefs);
     const {
@@ -3366,8 +3367,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
               onDetailOpenChange={setTransitDepartureDetailOpen}
               navigationBackSignal={transitNavigationBackSignal}
               onDepartureSelect={({ tripId, mode, color, serviceDate, departure, scheduledDeparture }) => {
+                departureAutoFollowPendingRef.current = true;
                 vehicleFollowEnabledRef.current = true;
-                setVehicleFollowing(true);
+                setVehicleFollowing(false);
                 setVehicleFollowAvailable(true);
                 void transitStopsLayerRef.current?.selectTrip(
                   tripId,
@@ -3385,12 +3387,21 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
                 );
               }}
               onDepartureBack={() => {
+                departureAutoFollowPendingRef.current = false;
                 vehicleFollowEnabledRef.current = false;
                 setVehicleFollowing(false);
                 setVehicleFollowAvailable(false);
                 transitStopsLayerRef.current?.clearTrip();
+                const map = mapRef.current;
+                if (map) map.easeTo({
+                  center: selectedTransitStop.coordinates,
+                  zoom: Math.max(map.getZoom(), 14.6),
+                  offset: closeRangeCameraOffset(),
+                  duration: 700,
+                });
               }}
               onFollowRequest={() => {
+                departureAutoFollowPendingRef.current = false;
                 vehicleFollowEnabledRef.current = true;
                 setVehicleFollowing(true);
               }}

@@ -147,6 +147,8 @@ describe('transit vehicle estimation', () => {
     const pose = estimatedVehiclePose(leg, baseTime + 2 * minute, 'TRAM', '#8554c7');
     expect(pose?.status).toBe('estimated');
     expect(pose?.realTime).toBe(false);
+    expect(estimatedVehiclePose(leg, baseTime - minute, 'TRAM', '#8554c7')?.hasLeftStartingStop).toBe(false);
+    expect(pose?.hasLeftStartingStop).toBe(true);
   });
 
   it('approaches conservatively and dwells between arrival and departure', () => {
