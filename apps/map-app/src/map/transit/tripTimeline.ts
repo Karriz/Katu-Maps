@@ -52,6 +52,20 @@ function places(leg: TransitTripLeg) {
     .filter((place): place is TransitTripPlace => Boolean(place));
 }
 
+function interpolationTimes(stops: TransitTripPlace[]) {
+  return stops.flatMap((stop, index) => {
+    const arrival = tripPlaceTime(stop);
+    const departure = tripPlaceTime(stop, true);
+    if (index === 0) return [departure ?? arrival];
+    if (index === stops.length - 1) return [arrival ?? departure];
+    // Realtime feeds commonly update only one side of a stop call. If its
+    // scheduled counterpart now appears earlier, conservatively collapse the
+    // dwell at the later clock instead of disabling the entire estimate.
+    if (arrival !== undefined && departure !== undefined && departure < arrival) return [arrival];
+    return arrival === departure ? [arrival] : [arrival, departure];
+  }).filter((time): time is number => time !== undefined);
+}
+
 /** Resolve identity first; validate the optional vehicle timeline separately. */
 export function resolveSelectedTripResult(payload: TransitTrip, context: SelectedTripContext): TripResolution {
   const matching = payload.legs.filter((leg) => leg.tripId === context.tripId
@@ -84,8 +98,9 @@ export function resolveSelectedTripResult(payload: TransitTrip, context: Selecte
 
   const parsed = stops.map((stop, index) => tripPlaceTime(stop, index === 0));
   const times = parsed.filter((time): time is number => time !== undefined);
+  const anchorTimes = interpolationTimes(stops);
   const vehicleTimelineUsable = times.length === stops.length
-    && times.every((time, index) => index === 0 || time >= times[index - 1]);
+    && anchorTimes.every((time, index) => index === 0 || time >= anchorTimes[index - 1]);
   return { ok: true, trip: {
     leg,
     stops,

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildEstimatedTripLeg,
+  blendVehiclePoses,
   estimatedDistance,
   estimatedVehiclePose,
+  transitStopIconCollisionLayout,
   TransitStopsLayer,
   type TransitVehiclePose,
 } from './TransitStopsLayer';
@@ -63,6 +65,22 @@ describe('transit panel and route vehicle selection', () => {
   });
 });
 
+describe('transit stop icon collisions', () => {
+  it('keeps rail and tram icons visible while they reserve space from bus stops', () => {
+    expect(transitStopIconCollisionLayout(true)).toMatchObject({
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': false,
+    });
+  });
+
+  it('continues decluttering ordinary bus stop icons', () => {
+    expect(transitStopIconCollisionLayout(false)).toMatchObject({
+      'icon-allow-overlap': false,
+      'icon-ignore-placement': false,
+    });
+  });
+});
+
 describe('transit vehicle estimation', () => {
   it('orients reversed geometry in stop-call order', () => {
     const leg = buildEstimatedTripLeg({
@@ -107,6 +125,32 @@ describe('transit vehicle estimation', () => {
 
     expect(constrained).toBe(leg!.anchors[1].distance);
     expect(unconstrained).toBeGreaterThan(constrained!);
+  });
+
+  it('caps a repeated stop at the resolved occurrence rather than the first one', () => {
+    const leg = buildEstimatedTripLeg({
+      from: { stopId: 'loop', lon: 24, lat: 60, departure: baseTime },
+      intermediateStops: [{ stopId: 'turn', lon: 24.01, lat: 60, arrival: baseTime + 5 * minute }],
+      to: { stopId: 'loop', lon: 24, lat: 60, arrival: baseTime + 10 * minute },
+      coordinates: [],
+    }, [[24, 60], [24.01, 60], [24, 60]])!;
+    const finalDistance = leg.anchors.find((anchor) => anchor.stopIndex === 2)!.distance;
+    const distance = estimatedDistance(leg, baseTime + 9 * minute, {
+      stopId: 'loop', coordinates: [24, 60], departureTime: baseTime + 11 * minute,
+    }, finalDistance);
+    expect(distance).toBeGreaterThan(leg.anchors[0].distance);
+    expect(distance).toBeLessThanOrEqual(finalDistance);
+  });
+
+  it('blends an expired live position into its estimate without a jump', () => {
+    const pose = (longitude: number, status: TransitVehiclePose['status']): TransitVehiclePose => ({
+      mode: 'BUS', color: '#123456', status, realTime: status === 'live',
+      hasLeftStartingStop: true,
+      parts: [{ coordinates: [longitude, 60], heading: 0 }],
+    });
+    expect(blendVehiclePoses(pose(24, 'live'), pose(24.01, 'estimated'), 0).parts[0].coordinates[0]).toBe(24);
+    expect(blendVehiclePoses(pose(24, 'live'), pose(24.01, 'estimated'), 0.5).parts[0].coordinates[0]).toBeCloseTo(24.005);
+    expect(blendVehiclePoses(pose(24, 'live'), pose(24.01, 'estimated'), 1).parts[0].coordinates[0]).toBe(24.01);
   });
 
   it('uses scheduled Transitous stop times when realtime values are absent', () => {

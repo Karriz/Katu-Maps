@@ -59,6 +59,19 @@ describe('selected trip identity resolution', () => {
     expect(result.ok && result.trip.stops).toHaveLength(3);
     expect(result.ok && result.trip.vehicleTimelineUsable).toBe(false);
   });
+  it('rejects a departure anchor that runs beyond the following arrival', () => {
+    const inconsistent = structuredClone(transitous);
+    inconsistent.trip.legs[0].intermediateStops[0].departure = '2026-08-29T07:25:00Z';
+    const result = resolve(inconsistent, 'transitous');
+    expect(result.ok && result.trip.vehicleTimelineUsable).toBe(false);
+  });
+  it('keeps partial realtime usable when a scheduled departure trails its delayed arrival', () => {
+    const partial = structuredClone(digitransit);
+    partial.trip.legs[0].intermediateStops[0].arrival = '2026-08-29T07:16:00Z';
+    partial.trip.legs[0].intermediateStops[0].departure = '2026-08-29T07:14:00Z';
+    const result = resolve(partial, 'digitransit');
+    expect(result.ok && result.trip.vehicleTimelineUsable).toBe(true);
+  });
   it('handles midnight and expires completed markers', () => {
     const end = Date.parse('2026-08-30T00:08:00Z');
     expect(tripIsDisplayableAt([Date.parse('2026-08-29T23:59:00Z'), end], end + 30_000)).toBe(true);

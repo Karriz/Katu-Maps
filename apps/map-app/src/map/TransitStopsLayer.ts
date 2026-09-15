@@ -26,6 +26,7 @@ import {
   beginObservedPositionTransition,
   LIVE_OBSERVATION_FUTURE_TOLERANCE_MS,
   LIVE_OBSERVATION_MAX_AGE_MS,
+  LIVE_POSITION_SMOOTHING_MS,
   matchLiveObservation,
   observedPositionAt,
   vehicleResponseIsCurrent,
@@ -57,7 +58,7 @@ type TransitFeature = {
 type EstimatedTripLeg = {
   coordinates: [number, number][];
   cumulativeDistances: number[];
-  anchors: Array<{ distance: number; time: number; stopId?: string }>;
+  anchors: Array<{ distance: number; time: number; stopId?: string; stopIndex?: number }>;
   realTime: boolean;
 };
 
@@ -78,7 +79,9 @@ type TrackedTrip = {
   estimatedLegs: EstimatedTripLeg[];
   routeCoordinates?: [number, number][];
   boardingContextUsable: boolean;
+  boardingDistance?: number;
   observedTransition?: ObservedPositionTransition;
+  liveFallback?: { from: TransitVehiclePose; start: number; end: number; observationRecordedAt: number };
   controller?: AbortController;
   lastFetchAt: number;
 };
@@ -113,6 +116,13 @@ const TRANSIT_ICON_IDS = {
 } as const;
 
 const METRO_COLOR = '#e87524';
+
+export function transitStopIconCollisionLayout(priority: boolean) {
+  return priority ? {
+    'icon-allow-overlap': true as const,
+    'icon-ignore-placement': false as const,
+  } : overlayIconCollisionLayout();
+}
 
 async function addTransitIcon(
   map: Map,
@@ -331,7 +341,7 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
   const reversed = [...coordinates].reverse();
   if (mappingError(reversed) < mappingError(coordinates)) coordinates = reversed;
   const distances = cumulativeDistances(coordinates);
-  const anchors: Array<{ distance: number; time: number; stopId?: string }> = [];
+  const anchors: Array<{ distance: number; time: number; stopId?: string; stopIndex?: number }> = [];
   let pathIndex = 0;
 
   places.forEach((place, placeIndex) => {
@@ -348,7 +358,7 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
         : [arrival, departure];
     times.forEach((time) => {
       if (time !== undefined && (anchors.length === 0 || time >= anchors[anchors.length - 1].time)) {
-        anchors.push({ distance: distances[pathIndex], time, stopId: place?.stopId });
+        anchors.push({ distance: distances[pathIndex], time, stopId: place?.stopId, stopIndex: placeIndex });
       }
     });
   });
@@ -375,6 +385,7 @@ export function estimatedDistance(
   leg: EstimatedTripLeg,
   time: number,
   boardingStop?: TransitVehicleTripSelection['boardingStop'],
+  resolvedBoardingDistance?: number,
 ) {
   const { anchors } = leg;
   if (!anchors.length) return undefined;
@@ -398,7 +409,7 @@ export function estimatedDistance(
   const conservative = Math.min(interpolated, nextAnchor.distance - approachReserve);
   if (!boardingStop || time >= boardingStop.departureTime) return conservative;
   const stopAnchor = anchors.find((anchor) => anchor.stopId === boardingStop.stopId);
-  const boardingDistance = stopAnchor?.distance ?? leg.cumulativeDistances[
+  const boardingDistance = resolvedBoardingDistance ?? stopAnchor?.distance ?? leg.cumulativeDistances[
     nearestPathIndex(leg.coordinates, boardingStop.coordinates, 0)
   ];
   return Math.min(conservative, boardingDistance);
@@ -447,8 +458,9 @@ export function estimatedVehiclePose(
   mode: string,
   color: string,
   boardingStop?: SelectedTrip['boardingStop'],
+  resolvedBoardingDistance?: number,
 ): TransitVehiclePose | undefined {
-  const distance = estimatedDistance(leg, time, boardingStop);
+  const distance = estimatedDistance(leg, time, boardingStop, resolvedBoardingDistance);
   if (distance === undefined) return undefined;
   const layout = vehiclePartLayout(mode);
   const spacing = layout.length + layout.gap;
@@ -493,6 +505,23 @@ function observedVehiclePose(
       : pathPoseAtDistance(leg, centerDistance + (index - centerIndex) * spacing)
   ));
   return { mode, color, status: 'live', hasLeftStartingStop, realTime: true, parts };
+}
+
+export function blendVehiclePoses(from: TransitVehiclePose, to: TransitVehiclePose, progress: number) {
+  const amount = Math.max(0, Math.min(1, progress));
+  if (from.parts.length !== to.parts.length) return to;
+  return {
+    ...to,
+    parts: to.parts.map((part, index) => ({
+      coordinates: [
+        from.parts[index].coordinates[0]
+          + (part.coordinates[0] - from.parts[index].coordinates[0]) * amount,
+        from.parts[index].coordinates[1]
+          + (part.coordinates[1] - from.parts[index].coordinates[1]) * amount,
+      ] as [number, number],
+      heading: amount < 0.5 ? from.parts[index].heading : part.heading,
+    })),
+  };
 }
 
 export class TransitStopsLayer {
@@ -561,6 +590,7 @@ export class TransitStopsLayer {
       maxzoom: number,
       iconImage: string,
       modes: string[],
+      priority = false,
     ): SymbolLayerSpecification => ({
       id,
       type: 'symbol',
@@ -571,7 +601,7 @@ export class TransitStopsLayer {
       layout: {
         'icon-image': iconImage,
         'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.32, 14, 1.58, 18, 1.82],
-        ...overlayIconCollisionLayout(),
+        ...transitStopIconCollisionLayout(priority),
         'symbol-sort-key': ['-', ['coalesce', ['get', 'importance'], 0]],
       },
     });
@@ -579,9 +609,9 @@ export class TransitStopsLayer {
       // Rail stops carry the city-scale network, so they appear first.
       iconLayer('transit-train-stop-icons', 10, 11, TRANSIT_ICON_IDS.train, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
-      ]),
-      iconLayer('transit-metro-stop-icons', 10, 12, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
-      iconLayer('transit-tram-stop-icons', 12, 14, TRANSIT_ICON_IDS.tram, ['TRAM']),
+      ], true),
+      iconLayer('transit-metro-stop-icons', 10, 12, TRANSIT_ICON_IDS.metro, ['SUBWAY'], true),
+      iconLayer('transit-tram-stop-icons', 12, 14, TRANSIT_ICON_IDS.tram, ['TRAM'], true),
       iconLayer('transit-bus-stop-icons', 14, 16, TRANSIT_ICON_IDS.bus, ['BUS']),
     ];
     const hitLayer = (
@@ -614,6 +644,7 @@ export class TransitStopsLayer {
       minzoom: number,
       iconImage: string,
       modes: string[],
+      priority = false,
     ): SymbolLayerSpecification => ({
       id,
       type: 'symbol',
@@ -623,7 +654,7 @@ export class TransitStopsLayer {
       layout: {
         'icon-image': iconImage,
         'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 1.32, 14, 1.58, 18, 1.82],
-        ...overlayIconCollisionLayout(),
+        ...transitStopIconCollisionLayout(priority),
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Regular', 'Open Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], minzoom, 10, 18, 12],
@@ -643,9 +674,9 @@ export class TransitStopsLayer {
     const labels = [
       labelLayer('transit-train-stop-labels', 11, TRANSIT_ICON_IDS.train, [
         'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL',
-      ]),
-      labelLayer('transit-metro-stop-labels', 12, TRANSIT_ICON_IDS.metro, ['SUBWAY']),
-      labelLayer('transit-tram-stop-labels', 14, TRANSIT_ICON_IDS.tram, ['TRAM']),
+      ], true),
+      labelLayer('transit-metro-stop-labels', 12, TRANSIT_ICON_IDS.metro, ['SUBWAY'], true),
+      labelLayer('transit-tram-stop-labels', 14, TRANSIT_ICON_IDS.tram, ['TRAM'], true),
       labelLayer('transit-bus-stop-labels', 16, TRANSIT_ICON_IDS.bus, ['BUS']),
     ];
     // Keep transit symbols below the app's close-zoom POI labels when the
@@ -985,6 +1016,9 @@ export class TransitStopsLayer {
         ? resolved.leg.coordinates : undefined;
       tracked.boardingContextUsable = resolved?.boardingContextUsable ?? false;
       tracked.estimatedLegs = estimatedLegs;
+      tracked.boardingDistance = resolved && estimatedLegs[0] && resolved.boardingStopIndex >= 0
+        ? estimatedLegs[0].anchors.find((anchor) => anchor.stopIndex === resolved.boardingStopIndex)?.distance
+        : undefined;
       const observation = resolved?.boardingContextUsable
         ? matchLiveObservation(payload.vehicleObservations ?? [], selection, Date.now())
         : undefined;
@@ -993,6 +1027,7 @@ export class TransitStopsLayer {
           ? observedPositionAt(tracked.observedTransition, Date.now())
           : undefined;
         tracked.observedTransition = beginObservedPositionTransition(currentCoordinates, observation, Date.now());
+        tracked.liveFallback = undefined;
       }
       this.updateSelectedRoutes();
       this.updateEstimatedVehicle();
@@ -1028,7 +1063,16 @@ export class TransitStopsLayer {
     const liveUsable = tracked.observedTransition
       && tracked.observedTransition.observation.recordedAt >= now - LIVE_OBSERVATION_MAX_AGE_MS
       && tracked.observedTransition.observation.recordedAt <= now + LIVE_OBSERVATION_FUTURE_TOLERANCE_MS;
-    const pose = liveUsable
+    if (liveUsable) tracked.liveFallback = undefined;
+    const estimatedPose = estimatedVehiclePose(
+      displayableLeg,
+      now,
+      tracked.selection.mode,
+      tracked.selection.color,
+      tracked.boardingContextUsable ? tracked.selection.boardingStop : undefined,
+      tracked.boardingDistance,
+    );
+    let pose = liveUsable
       ? observedVehiclePose(
         displayableLeg,
         observedPositionAt(tracked.observedTransition!, now),
@@ -1037,13 +1081,33 @@ export class TransitStopsLayer {
         now >= displayableLeg.anchors[0].time,
         tracked.observedTransition!.observation.heading,
       )
-      : estimatedVehiclePose(
-        displayableLeg,
-        now,
-        tracked.selection.mode,
-        tracked.selection.color,
-        tracked.boardingContextUsable ? tracked.selection.boardingStop : undefined,
-      );
+      : estimatedPose;
+    if (!liveUsable && estimatedPose && tracked.observedTransition) {
+      const recordedAt = tracked.observedTransition.observation.recordedAt;
+      if (!tracked.liveFallback || tracked.liveFallback.observationRecordedAt !== recordedAt) {
+        tracked.liveFallback = {
+          from: observedVehiclePose(
+            displayableLeg,
+            observedPositionAt(tracked.observedTransition, now),
+            tracked.selection.mode,
+            tracked.selection.color,
+            now >= displayableLeg.anchors[0].time,
+            tracked.observedTransition.observation.heading,
+          ),
+          start: now,
+          end: now + LIVE_POSITION_SMOOTHING_MS,
+          observationRecordedAt: recordedAt,
+        };
+      }
+      const fallback = tracked.liveFallback;
+      if (now < fallback.end) {
+        pose = blendVehiclePoses(
+          fallback.from,
+          estimatedPose,
+          (now - fallback.start) / (fallback.end - fallback.start),
+        );
+      }
+    }
     return pose ? { pose, leg: displayableLeg } : undefined;
   }
 
