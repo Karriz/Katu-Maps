@@ -15,6 +15,7 @@ import {
   Home,
   Code2,
   Layers3,
+  Map as MapIcon,
   MapPin,
   Route,
   Mountain,
@@ -590,14 +591,14 @@ export function MapControls({
               <div className="theme-setting map-style-setting">
                 <span className="theme-setting-label">Map style</span>
                 <div className="theme-options" role="group" aria-label="Map style">
-                  {([['2d', '2D'], ['simple', 'Simple 3D'], ['detailed', 'Detailed 3D']] as const).map(([value, label]) => (
+                  {([['2d', '2D', MapIcon], ['simple', 'Simple 3D', Box], ['detailed', 'Detailed 3D', Building2]] as const).map(([value, label, Icon]) => (
                     <button
                       className={selectedMapStyle === value ? 'selected' : ''}
                       key={value}
                       type="button"
                       aria-pressed={selectedMapStyle === value}
                       onClick={() => onMapStyleChange(value)}
-                    >{label}</button>
+                    ><Icon aria-hidden="true" /><span>{label}</span></button>
                   ))}
                 </div>
               </div>
