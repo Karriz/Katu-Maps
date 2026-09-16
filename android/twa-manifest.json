@@ -20,15 +20,15 @@
     "path": "upload.keystore",
     "alias": "katu-maps-upload"
   },
-  "appVersionName": "2",
-  "appVersionCode": 2,
+  "appVersionName": "3",
+  "appVersionCode": 3,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://karriz.github.io/Katu-Maps/manifest.webmanifest",
   "fallbackType": "customtabs",
   "features": {
     "locationDelegation": {
-      "enabled": true
+      "enabled": false
     }
   },
   "alphaDependencies": {
@@ -47,5 +47,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "2"
+  "appVersion": "3"
 }
