@@ -8,6 +8,8 @@ An open 3D map for exploring places, public transport, and routes—directly in 
 
 **[Open Katu Maps](https://karriz.github.io/Katu-Maps/)**
 
+**[Get Katu Maps on Google Play](https://play.google.com/store/apps/details?id=io.github.karriz.katumaps)**
+
 ## What it does
 
 - 🏙️ Explore 3D buildings, terrain, trees, and a globe view
