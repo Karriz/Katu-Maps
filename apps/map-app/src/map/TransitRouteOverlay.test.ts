@@ -32,14 +32,14 @@ describe('TransitRouteOverlay', () => {
         { mode: 'BUS', transitRoutes: [{ shortName: '8', color: '0055CC' }] },
       ],
       polylines: [{
-        polyline: { points: encodePolyline([[0, 0], [0.1, 0.1]]), precision: 5 },
+        polyline: { points: encodePolyline([[0, 0], [0.01, 0.01]]), precision: 5 },
         routeIndexes: [0, 1],
       }],
     });
 
     expect(features).toHaveLength(1);
     expect(features[0].properties).toEqual({ color: '#D93D3D', label: '3', mode: 'TRAM' });
-    expect(features[0].geometry.coordinates).toEqual([[0, 0], [0.1, 0.1]]);
+    expect(features[0].geometry.coordinates).toEqual([[0, 0], [0.01, 0.01]]);
   });
 
   it('uses app-consistent mode colors when a route has no usable color', () => {
@@ -50,7 +50,7 @@ describe('TransitRouteOverlay', () => {
         { mode: 'RAIL', transitRoutes: [{ shortName: 'IC' }] },
       ],
       polylines: [{
-        polyline: { points: encodePolyline([[0, 0], [0.1, 0.1]]), precision: 5 },
+        polyline: { points: encodePolyline([[0, 0], [0.01, 0.01]]), precision: 5 },
         routeIndexes: [0, 1, 2],
       }],
     });
@@ -61,8 +61,8 @@ describe('TransitRouteOverlay', () => {
   });
 
   it('splits rail geometry at implausibly long segments and preserves valid fragments', () => {
-    const firstFragment: [number, number][] = [[24, 60], [24.1, 60.1]];
-    const secondFragment: [number, number][] = [[25, 61], [25.1, 61.1]];
+    const firstFragment: [number, number][] = [[24, 60], [24.01, 60.01]];
+    const secondFragment: [number, number][] = [[24.01, 60.03], [24.02, 60.04]];
     const features = railRouteFeatures({
       routes: [{ mode: 'RAIL', transitRoutes: [{ shortName: 'IC' }] }],
       polylines: [{
