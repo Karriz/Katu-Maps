@@ -10,6 +10,7 @@ const HEADERS = { Accept: 'application/json', 'X-Client-Id': serviceConfig.clien
 const RAIL_MODES = new Set([
   'TRAM', 'SUBWAY', 'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL', 'FUNICULAR',
 ]);
+const MAX_RAIL_SEGMENT_METERS = 35_000;
 
 type EncodedPolyline = { points?: unknown; precision?: unknown };
 type TransitRoute = {
@@ -40,6 +41,34 @@ function color(value: unknown, fallback: string) {
   return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : fallback;
 }
 
+function distanceMeters(from: [number, number], to: [number, number]) {
+  const radians = Math.PI / 180;
+  const latitude1 = from[1] * radians;
+  const latitude2 = to[1] * radians;
+  const latitudeDelta = (to[1] - from[1]) * radians;
+  const longitudeDelta = (to[0] - from[0]) * radians;
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+/** Split rather than reconnecting a route when its source contains an implausible rail segment. */
+function plausibleRailFragments(coordinates: [number, number][]) {
+  const fragments: [number, number][][] = [];
+  let fragment: [number, number][] = coordinates.length > 0 ? [coordinates[0]] : [];
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const coordinate = coordinates[index];
+    if (distanceMeters(coordinates[index - 1], coordinate) > MAX_RAIL_SEGMENT_METERS) {
+      if (fragment.length >= 2) fragments.push(fragment);
+      fragment = [coordinate];
+    } else {
+      fragment.push(coordinate);
+    }
+  }
+  if (fragment.length >= 2) fragments.push(fragment);
+  return fragments;
+}
+
 export function railRouteFeatures(payload: TransitousMapRoutes): OverlayFeature[] {
   const routes = payload.routes ?? [];
   const features: OverlayFeature[] = [];
@@ -55,11 +84,13 @@ export function railRouteFeatures(payload: TransitousMapRoutes): OverlayFeature[
       if (!RAIL_MODES.has(mode)) return;
       const service = route.transitRoutes?.[0];
       const label = [service?.shortName, service?.longName].find((value): value is string => typeof value === 'string') ?? mode;
-      features.push({
-        type: 'Feature',
-        id: `${routeIndex}:${lineIndex}`,
-        geometry: { type: 'LineString', coordinates },
-        properties: { color: color(service?.color ?? (Array.isArray(line.colors) ? line.colors[0] : undefined), defaultColor(mode)), label, mode },
+      plausibleRailFragments(coordinates).forEach((fragment, fragmentIndex) => {
+        features.push({
+          type: 'Feature',
+          id: `${routeIndex}:${lineIndex}:${fragmentIndex}`,
+          geometry: { type: 'LineString', coordinates: fragment },
+          properties: { color: color(service?.color ?? (Array.isArray(line.colors) ? line.colors[0] : undefined), defaultColor(mode)), label, mode },
+        });
       });
     });
   });

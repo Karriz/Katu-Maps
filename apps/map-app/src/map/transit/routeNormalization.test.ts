@@ -96,4 +96,36 @@ describe('transit route provider normalization', () => {
 
     expect(result.transitLegs.map((leg) => leg.distanceMeters)).toEqual([undefined, undefined]);
   });
+
+  it('keeps Transitous transit details without inventing missing leg geometry', () => {
+    const [result] = normalizeTransitousRouteResults([{
+      legs: [{
+        mode: 'RAIL', routeShortName: 'IC',
+        from: { name: 'Tampere', stopId: 'tre', lat: 61.5, lon: 23.77 },
+        to: { name: 'Helsinki', stopId: 'hki', lat: 60.17, lon: 24.94 },
+      }],
+    }]);
+
+    expect(result.geometry.coordinates).toEqual([]);
+    expect(result.transitLegs[0]).toMatchObject({
+      mode: 'RAIL', route: 'IC', from: { stopId: 'tre' }, to: { stopId: 'hki' },
+    });
+    expect(result.transitLegs[0].geometry).toBeUndefined();
+  });
+
+  it('keeps Digitransit transit details without inventing missing leg geometry', () => {
+    const [result] = normalizeDigitransitRouteResults([{
+      legs: [{
+        mode: 'RAIL', transitLeg: true, route: { shortName: 'IC' },
+        from: { name: 'Tampere', lat: 61.5, lon: 23.77, stop: { gtfsId: 'tre' } },
+        to: { name: 'Helsinki', lat: 60.17, lon: 24.94, stop: { gtfsId: 'hki' } },
+      }],
+    }]);
+
+    expect(result.geometry.coordinates).toEqual([]);
+    expect(result.transitLegs[0]).toMatchObject({
+      mode: 'RAIL', route: 'IC', from: { stopId: 'tre' }, to: { stopId: 'hki' },
+    });
+    expect(result.transitLegs[0].geometry).toBeUndefined();
+  });
 });

@@ -356,7 +356,11 @@ function legTime(value: PlanLeg['start']) {
 }
 
 function planLegCoordinates(leg: PlanLeg): [number, number][] {
-  if (typeof leg.legGeometry?.points === 'string') return decodePolyline(leg.legGeometry.points, 5);
+  if (typeof leg.legGeometry?.points === 'string') {
+    const coordinates = decodePolyline(leg.legGeometry.points, 5);
+    if (coordinates.length >= 2) return coordinates;
+  }
+  if (leg.transitLeg === true) return [];
   return [leg.from, leg.to].flatMap((place) => (
     finiteNumber(place?.lon) && finiteNumber(place?.lat)
       ? [[place.lon, place.lat] as [number, number]]
@@ -380,8 +384,8 @@ function planRoutePlace(place?: PlanPlace | null): TransitRoutePlace | undefined
 export function normalizeDigitransitRouteResults(itineraries: PlanItinerary[]): TransitRouteResult[] {
   return itineraries.flatMap((itinerary): TransitRouteResult[] => {
     const legs = itinerary.legs ?? [];
-    const coordinates = legs.flatMap(planLegCoordinates);
-    if (coordinates.length < 2) return [];
+    const legCoordinates = legs.map(planLegCoordinates);
+    const coordinates = legCoordinates.flat();
     const transitLegCount = legs.filter((leg) => leg.transitLeg === true).length;
     return [{
       geometry: { type: 'LineString', coordinates },
@@ -393,9 +397,11 @@ export function normalizeDigitransitRouteResults(itineraries: PlanItinerary[]): 
         ? itinerary.numberOfTransfers
         : Math.max(0, transitLegCount - 1),
       provider: 'digitransit',
-      transitLegs: legs.map((leg) => ({
+      transitLegs: legs.map((leg, index) => ({
         mode: typeof leg.mode === 'string' ? leg.mode : 'TRANSIT',
-        geometry: { type: 'LineString', coordinates: planLegCoordinates(leg) },
+        geometry: legCoordinates[index].length >= 2
+          ? { type: 'LineString', coordinates: legCoordinates[index] }
+          : undefined,
         tripId: typeof leg.trip?.gtfsId === 'string' ? leg.trip.gtfsId : undefined,
         realTime: leg.realTime === true,
         cancelled: leg.realtimeState === 'CANCELED',

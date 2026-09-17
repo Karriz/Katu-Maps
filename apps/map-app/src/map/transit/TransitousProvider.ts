@@ -78,11 +78,15 @@ function absoluteTime(value: unknown) {
 function tripLeg(raw: RawLeg) {
   const points = raw.legGeometry?.points;
   const precision = raw.legGeometry?.precision;
-  const coordinates = typeof points === 'string' && typeof precision === 'number'
+  const decodedCoordinates = typeof points === 'string' && typeof precision === 'number'
     ? decodePolyline(points, precision)
-    : [raw.from, raw.to]
+    : [];
+  const mode = text(raw.mode).toUpperCase();
+  const coordinates = decodedCoordinates.length >= 2
+    ? decodedCoordinates
+    : ['WALK', 'FOOT'].includes(mode) ? [raw.from, raw.to]
       .filter((place): place is RawPlace => finiteNumber(place?.lon) && finiteNumber(place?.lat))
-      .map((place) => [place.lon as number, place.lat as number] as [number, number]);
+      .map((place) => [place.lon as number, place.lat as number] as [number, number]) : [];
   return {
     provider: 'transitous' as const,
     tripId: text(raw.tripId) || undefined,
@@ -116,7 +120,6 @@ export function normalizeTransitousRouteResults(itineraries: TransitousItinerary
     const legs = itinerary.legs ?? [];
     const legRoutes = legs.map((leg) => tripLeg(leg));
     const coordinates = legRoutes.flatMap((leg) => leg.coordinates);
-    if (coordinates.length < 2) return [];
     const startTime = absoluteTime(itinerary.startTime);
     const endTime = absoluteTime(itinerary.endTime);
     const durationSeconds = startTime && endTime
@@ -135,7 +138,9 @@ export function normalizeTransitousRouteResults(itineraries: TransitousItinerary
       provider: 'transitous',
       transitLegs: legs.map((leg, index) => ({
         mode: text(leg.mode, 'TRANSIT'),
-        geometry: { type: 'LineString', coordinates: legRoutes[index].coordinates },
+        geometry: legRoutes[index].coordinates.length >= 2
+          ? { type: 'LineString', coordinates: legRoutes[index].coordinates }
+          : undefined,
         tripId: text(leg.tripId) || undefined,
         realTime: leg.realTime === true,
         cancelled: leg.cancelled === true,
