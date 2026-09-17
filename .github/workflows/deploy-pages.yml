@@ -118,3 +118,28 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify published production version
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_TAG: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          for attempt in {1..12}; do
+            CACHE_BUSTER="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${attempt}-$(date +%s)"
+            if DEPLOYED=$(curl --fail --silent --show-error --location \
+              "${SITE_URL%/}/deployment.json?verify=$CACHE_BUSTER"); then
+              TAG=$(jq -r '.tag // empty' <<<"$DEPLOYED")
+              SHA=$(jq -r '.sha // empty' <<<"$DEPLOYED")
+              if [ "$TAG" = "$EXPECTED_TAG" ] && [ "$SHA" = "$EXPECTED_SHA" ]; then
+                echo "Verified live deployment: $TAG ($SHA)"
+                exit 0
+              fi
+              echo "Attempt $attempt: live site reports $TAG ($SHA), expected $EXPECTED_TAG ($EXPECTED_SHA)"
+            else
+              echo "Attempt $attempt: deployment.json is not available yet"
+            fi
+            sleep 5
+          done
+          echo "GitHub Pages did not publish the expected production deployment within 60 seconds" >&2
+          exit 1
