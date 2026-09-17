@@ -10,7 +10,7 @@ const HEADERS = { Accept: 'application/json', 'X-Client-Id': serviceConfig.clien
 const RAIL_MODES = new Set([
   'TRAM', 'SUBWAY', 'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL', 'FUNICULAR',
 ]);
-const MAX_RAIL_SEGMENT_METERS = 35_000;
+const MAX_RAIL_SEGMENT_METERS = 2_000;
 
 type EncodedPolyline = { points?: unknown; precision?: unknown };
 type TransitRoute = {
