@@ -1367,7 +1367,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         : routeMode === 'auto' ? 'CAR' : undefined;
     source?.setData(legFeatures.length
       ? { type: 'FeatureCollection', features: legFeatures }
-      : { type: 'Feature', geometry: result.geometry, properties: { mode: directMode } });
+      : result.geometry.coordinates.length > 1
+        ? { type: 'Feature', geometry: result.geometry, properties: { mode: directMode } }
+        : { type: 'FeatureCollection', features: [] });
     // Feed the same geometry to the 3D deck layer so route lines render on
     // bridge decks instead of sinking under them when terrain is on.
     const deckFeatures: RouteLineFeature[] = legFeatures.length > 0
@@ -1377,12 +1379,12 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
           widthPixels: 4.5,
           casingWidthPixels: 8,
         }))
-      : [{
+      : result.geometry.coordinates.length > 1 ? [{
           coordinates: result.geometry.coordinates as Array<[number, number]>,
           color: routeColorForFeature(directMode),
           widthPixels: 4.5,
           casingWidthPixels: 8,
-        }];
+        }] : [];
     selectedRouteDeckLayerRef.current?.setFeatures(deckFeatures);
     const transitions = legFeatures.slice(1).flatMap((leg) => {
       const coordinates = leg.geometry.coordinates[0];
