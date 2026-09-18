@@ -679,18 +679,18 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     };
   }, [routeSearchTarget, routeSheetHeight]);
   const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
-    const defaults = defaultMapLayerState(typeof window !== 'undefined' && window.innerWidth <= 760);
+    const defaults = defaultMapLayerState();
     try {
       const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
       return saved ? { ...defaults, ...saved } : defaults;
     } catch { return defaults; }
   });
   const [threeDStyle, setThreeDStyle] = useState<Map3dStyle>(() => {
-    const desktopDefault: Map3dStyle = typeof window !== 'undefined' && window.innerWidth > 760 ? 'detailed' : 'simple';
+    const defaultStyle: Map3dStyle = 'simple';
     try {
       const saved = window.localStorage.getItem(THREE_D_STYLE_STORAGE_KEY);
-      return saved === 'simple' || saved === 'detailed' ? saved : desktopDefault;
-    } catch { return desktopDefault; }
+      return saved === 'simple' || saved === 'detailed' ? saved : defaultStyle;
+    } catch { return defaultStyle; }
   });
   const is3dMode = is3dModeEnabled(layerToggles);
   const selectedMapStyle: '2d' | Map3dStyle = is3dMode ? threeDStyle : '2d';
