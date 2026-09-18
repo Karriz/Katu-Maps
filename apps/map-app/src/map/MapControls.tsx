@@ -86,20 +86,20 @@ export const MAP_3D_LAYER_KEYS = [
   'transitModels',
 ] as const satisfies readonly MapLayerKey[];
 
-export function defaultMapLayerState(mobileDefault2d: boolean): MapLayerState {
+export function defaultMapLayerState(): MapLayerState {
   return {
     globe: true,
-    trees: !mobileDefault2d,
-    buildings: !mobileDefault2d,
-    buildingColors: !mobileDefault2d,
-    bridges: !mobileDefault2d,
-    proceduralBuildingDetails: !mobileDefault2d,
-    terrain: !mobileDefault2d,
+    trees: true,
+    buildings: true,
+    buildingColors: false,
+    bridges: true,
+    proceduralBuildingDetails: false,
+    terrain: true,
     cycling: false,
     hiking: false,
     transit: true,
     transitLines: false,
-    transitModels: !mobileDefault2d,
+    transitModels: true,
     trafficCameras: false,
     chargingStations: false,
     roadWeather: false,
