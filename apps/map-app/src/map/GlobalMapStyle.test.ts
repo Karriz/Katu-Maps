@@ -7,6 +7,7 @@ import {
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
   GLOBAL_MAP_STYLE,
+  globalMapStyleForBuildingMode,
   GLOBAL_TRANSIT_LINE_LAYER_IDS,
   GLOBAL_BASE_LABEL_LAYER_IDS,
   MOUNTAIN_PEAK_ICON_ID,
@@ -20,6 +21,30 @@ import { HIKING_POI_CLASSES } from './PoiClasses';
 import { globeBiomeColor } from './GlobeBiomeStyle';
 
 describe('global map overlay styles', () => {
+  it('applies the selected building mode before the initial map render', () => {
+    const simpleLayers = new Map(globalMapStyleForBuildingMode({ buildings: true, buildingColors: false })
+      .layers.map((layer) => [layer.id, layer]));
+    expect(simpleLayers.get('global-buildings')).toMatchObject({
+      layout: { visibility: 'visible' },
+      paint: { 'fill-extrusion-color': '#fffdf8' },
+    });
+    expect(simpleLayers.get('global-building-footprints-2d')).toMatchObject({
+      layout: { visibility: 'none' },
+      paint: { 'fill-color': '#fffdf8' },
+    });
+
+    const flatLayers = new Map(globalMapStyleForBuildingMode({ buildings: false, buildingColors: false })
+      .layers.map((layer) => [layer.id, layer]));
+    expect(flatLayers.get('global-buildings')?.layout?.visibility).toBe('none');
+    expect(flatLayers.get('global-building-shadow')?.layout?.visibility).toBe('none');
+    expect(flatLayers.get('global-building-footprints-2d')?.layout?.visibility).toBe('visible');
+
+    const detailedLayers = new Map(globalMapStyleForBuildingMode({ buildings: true, buildingColors: true })
+      .layers.map((layer) => [layer.id, layer]));
+    expect((detailedLayers.get('global-buildings')?.paint as Record<string, unknown>)?.['fill-extrusion-color']).toEqual(
+      pastelBuildingColor('#fffdf8'),
+    );
+  });
   it('renders tunnel shadows from entrance geometry instead of full tunnel lines', () => {
     const layers = GLOBAL_MAP_STYLE.layers;
     expect(layers.some((layer) => ['global-road-tunnels', 'global-railway-tunnels'].includes(layer.id))).toBe(false);

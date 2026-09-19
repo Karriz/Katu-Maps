@@ -19,6 +19,7 @@ type MapRuntimeInitializer = (
 export function useMapRuntime(
   containerRef: RefObject<HTMLDivElement | null>,
   initializeFeatures: MapRuntimeInitializer,
+  initialBuildingMode: { buildings: boolean; buildingColors: boolean },
 ) {
   const mapRef = useRef<Map | null>(null);
   const initializerRef = useRef(initializeFeatures);
@@ -34,7 +35,7 @@ export function useMapRuntime(
     const initialDeepLink = initialDeepLinkRef.current;
     let map: Map;
     try {
-      map = createRuntimeMap(container, initialDeepLink);
+      map = createRuntimeMap(container, initialDeepLink, initialBuildingMode);
     } catch (error) {
       setMapError(error instanceof Error ? error.message : 'The map could not be created.');
       return;

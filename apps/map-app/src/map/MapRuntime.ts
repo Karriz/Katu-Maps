@@ -1,7 +1,7 @@
 import { Map } from 'maplibre-gl';
 import type { MapDeepLink } from '../lib/DeepLink';
 import { loadPersistedMapView, savePersistedMapView } from './PersistedMapView';
-import { GLOBAL_MAP_STYLE } from './GlobalMapStyle';
+import { globalMapStyleForBuildingMode } from './GlobalMapStyle';
 
 const DEFAULT_CENTER: [number, number] = [23.7609, 61.4981];
 const PROVIDER_ATTRIBUTION = [
@@ -13,11 +13,15 @@ const PROVIDER_ATTRIBUTION = [
   '<a href="https://transitous.org/sources/" target="_blank" rel="noreferrer">Transit data by Transitous</a>',
 ].join(' · ');
 
-export function createRuntimeMap(container: HTMLElement, deepLink: MapDeepLink | null) {
+export function createRuntimeMap(
+  container: HTMLElement,
+  deepLink: MapDeepLink | null,
+  buildingMode: { buildings: boolean; buildingColors: boolean },
+) {
   const savedView = deepLink ? null : loadPersistedMapView();
   return new Map({
     container,
-    style: GLOBAL_MAP_STYLE,
+    style: globalMapStyleForBuildingMode(buildingMode),
     center: deepLink?.coordinates ?? savedView?.center ?? DEFAULT_CENTER,
     zoom: deepLink?.zoom ?? savedView?.zoom ?? 2.2,
     pitch: savedView?.pitch ?? 0,
