@@ -6,6 +6,7 @@ import type { RoofModelLayer } from './RoofModelLayer';
 import type { FacadeModelLayer } from './FacadeModelLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
+import { TRANSIT_VEHICLE_ICON_HIDE_ZOOM } from './TransitVehicleModelLayer';
 import type { RouteLineDeckLayer } from './RouteLineDeckLayer';
 import type { MapLayerState } from './MapControls';
 import { applyMapTheme, buildingColorPaint, GLOBAL_BASE_LABEL_LAYER_IDS, GLOBAL_FEATURE_LABEL_LAYER_IDS } from './GlobalMapStyle';
@@ -113,6 +114,12 @@ export function useMapLayerVisibility({
     setVisibility((map.getStyle().layers ?? []).map((layer) => layer.id)
       .filter((layerId) => layerId.startsWith('transit-') && layerId !== 'transit-vehicle-model-3d' && layerId !== 'transit-selected-route-deck-3d'), layerToggles.transit);
     setVisibility(['transit-vehicle-model-3d'], layerToggles.transitModels);
+    // At the zoom where the 3D model starts rendering, remove its 2D halo and
+    // icon so the two representations do not stack on top of each other.
+    const estimatedVehicleIconMaxZoom = layerToggles.transitModels ? TRANSIT_VEHICLE_ICON_HIDE_ZOOM : 24;
+    ['transit-estimated-vehicle-halo', 'transit-estimated-vehicle-icon'].forEach((layerId) => {
+      if (map.getLayer(layerId)) map.setLayerZoomRange(layerId, 5, estimatedVehicleIconMaxZoom);
+    });
     setVisibility([...TRAFFIC_CAMERA_LAYER_IDS], layerToggles.trafficCameras);
     setVisibility([...CHARGING_STATION_LAYER_IDS], layerToggles.chargingStations);
     setVisibility([...ROAD_WEATHER_LAYER_IDS], layerToggles.roadWeather);

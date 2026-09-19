@@ -35,7 +35,8 @@ export type BridgeDeckSource = {
   ): number | null;
 };
 
-const MODEL_MIN_ZOOM = 12;
+export const TRANSIT_VEHICLE_MODEL_MIN_ZOOM = 12;
+export const TRANSIT_VEHICLE_ICON_HIDE_ZOOM = 16;
 const RECENTER_DISTANCE_METERS = 20_000;
 const EARTH_RADIUS_METERS = 6_378_137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
@@ -623,7 +624,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
 
   render(_gl: WebGLRenderingContext | WebGL2RenderingContext, options: CustomRenderMethodInput) {
     const map = this.map;
-    if (!map || !this.renderer || !this.modelGroup || !this.pose || map.getZoom() < MODEL_MIN_ZOOM) return;
+    if (!map || !this.renderer || !this.modelGroup || !this.pose || map.getZoom() < TRANSIT_VEHICLE_MODEL_MIN_ZOOM) return;
     const now = performance.now();
     const deltaSeconds = this.lastFrameTime > 0 ? Math.min(0.1, (now - this.lastFrameTime) / 1_000) : 1 / 60;
     this.lastFrameTime = now;
