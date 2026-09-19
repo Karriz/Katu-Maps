@@ -473,7 +473,24 @@ function globalWaterPatternLayer(): FillLayerSpecification {
 export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (active: boolean) => void }) {
   const { preference: themePreference, resolvedTheme, setPreference: setThemePreference } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
-  const { mapRef, mapError, mapLoaded, orientationChanged } = useMapRuntime(containerRef, installMapFeatures);
+  const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
+    const defaults = defaultMapLayerState();
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
+      return saved ? { ...defaults, ...saved } : defaults;
+    } catch { return defaults; }
+  });
+  const [threeDStyle, setThreeDStyle] = useState<Map3dStyle>(() => {
+    const defaultStyle: Map3dStyle = 'simple';
+    try {
+      const saved = window.localStorage.getItem(THREE_D_STYLE_STORAGE_KEY);
+      return saved === 'simple' || saved === 'detailed' ? saved : defaultStyle;
+    } catch { return defaultStyle; }
+  });
+  const { mapRef, mapError, mapLoaded, orientationChanged } = useMapRuntime(containerRef, installMapFeatures, {
+    buildings: layerToggles.buildings,
+    buildingColors: layerToggles.buildingColors,
+  });
   const treeRefreshRef = useRef<(() => void) | null>(null);
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
@@ -678,20 +695,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       window.visualViewport?.removeEventListener('scroll', updatePosition);
     };
   }, [routeSearchTarget, routeSheetHeight]);
-  const [layerToggles, setLayerToggles] = useState<MapLayerState>(() => {
-    const defaults = defaultMapLayerState();
-    try {
-      const saved = JSON.parse(window.localStorage.getItem(LAYER_STORAGE_KEY) ?? 'null') as Partial<MapLayerState> | null;
-      return saved ? { ...defaults, ...saved } : defaults;
-    } catch { return defaults; }
-  });
-  const [threeDStyle, setThreeDStyle] = useState<Map3dStyle>(() => {
-    const defaultStyle: Map3dStyle = 'simple';
-    try {
-      const saved = window.localStorage.getItem(THREE_D_STYLE_STORAGE_KEY);
-      return saved === 'simple' || saved === 'detailed' ? saved : defaultStyle;
-    } catch { return defaultStyle; }
-  });
   const is3dMode = is3dModeEnabled(layerToggles);
   const selectedMapStyle: '2d' | Map3dStyle = is3dMode ? threeDStyle : '2d';
   const handleTransitDisabled = useCallback(() => {

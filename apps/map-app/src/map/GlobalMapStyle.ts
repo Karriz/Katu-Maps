@@ -3181,6 +3181,51 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
   ])),
 };
 
+export function globalMapStyleForBuildingMode(options: {
+  buildings: boolean;
+  buildingColors: boolean;
+}): StyleSpecification {
+  const hidden3dLayerIds = new Set([
+    ...GLOBAL_BUILDING_3D_LAYER_IDS,
+    'global-building-shadow',
+    'global-building-contact-shadow',
+  ]);
+
+  return {
+    ...GLOBAL_MAP_STYLE,
+    layers: GLOBAL_MAP_STYLE.layers.map((layer) => {
+      const show2dFootprints = layer.id === GLOBAL_BUILDING_2D_LAYER_ID;
+      const show3dBuilding = layer.id === GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID
+        || hidden3dLayerIds.has(layer.id);
+      if (!show2dFootprints && !show3dBuilding) return layer;
+
+      const nextLayer = {
+        ...layer,
+        layout: {
+          ...layer.layout,
+          visibility: (show2dFootprints ? !options.buildings : options.buildings) ? 'visible' : 'none',
+        },
+      } as typeof layer;
+
+      if (layer.type === 'fill') {
+        nextLayer.paint = {
+          ...layer.paint,
+          'fill-color': buildingColorPaint(GLOBAL_BUILDING_COLOR, options.buildingColors),
+        };
+      } else if (layer.type === 'fill-extrusion') {
+        const baseColor = layer.id === GLOBAL_BUILDING_FACADE_LAYER_IDS[0]
+          ? GLOBAL_BUILDING_GROUND_COLOR
+          : GLOBAL_BUILDING_COLOR;
+        nextLayer.paint = {
+          ...layer.paint,
+          'fill-extrusion-color': buildingColorPaint(baseColor, options.buildingColors),
+        };
+      }
+      return nextLayer;
+    }),
+  };
+}
+
 function createMountainPeakDot() {
   const size = 14;
   const data = new Uint8Array(size * size * 4);
