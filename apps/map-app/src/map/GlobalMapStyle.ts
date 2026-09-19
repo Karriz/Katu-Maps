@@ -872,22 +872,28 @@ function markingWidthExpression(
   return ['interpolate', ['exponential', 2], ['zoom'], ...stops] as ExpressionSpecification;
 }
 
-function pathWidthExpression(
+export function pathWidthExpression(
   widthMetres: number | ExpressionSpecification,
   latitude: number,
   casing = false,
+  maxZoom = ROAD_WIDTH_DEFAULT_MAX_ZOOM,
 ): ExpressionSpecification {
   const renderedWidthMetres: number | ExpressionSpecification = casing
     ? ['+', widthMetres, 0.6] as ExpressionSpecification
     : widthMetres;
 
-  return [
-    'interpolate', ['exponential', 2], ['zoom'],
+  const stops: Array<number | ExpressionSpecification> = [
     12, ['max', casing ? 1 : 0.6, ['*', renderedWidthMetres, pixelsPerMetre(12, latitude)]],
     14, ['*', renderedWidthMetres, pixelsPerMetre(14, latitude)],
     16, ['*', renderedWidthMetres, pixelsPerMetre(16, latitude)],
-    18, ['*', renderedWidthMetres, pixelsPerMetre(18, latitude)],
-    22, ['*', renderedWidthMetres, pixelsPerMetre(22, latitude)],
+    ROAD_WIDTH_DEFAULT_MAX_ZOOM, ['*', renderedWidthMetres, pixelsPerMetre(ROAD_WIDTH_DEFAULT_MAX_ZOOM, latitude)],
+  ];
+  if (maxZoom > ROAD_WIDTH_DEFAULT_MAX_ZOOM) {
+    stops.push(maxZoom, ['*', renderedWidthMetres, pixelsPerMetre(maxZoom, latitude)]);
+  }
+  return [
+    'interpolate', ['exponential', 2], ['zoom'],
+    ...stops,
   ] as ExpressionSpecification;
 }
 
@@ -921,7 +927,7 @@ export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number, max
   setWidth('global-aeroway-runways', aerowayWidthExpression(latitude, maxZoom, 45));
   setWidth(AEROWAY_TAXIWAY_CENTERLINE_LAYER_ID, markingWidthExpression(0.18, latitude, maxZoom));
   setWidth(AEROWAY_RUNWAY_CENTERLINE_LAYER_ID, markingWidthExpression(0.3, latitude, maxZoom));
-  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude));
+  setWidth(ROAD_CENTER_MARKINGS_LAYER_ID, pathWidthExpression(0.2, latitude, false, maxZoom));
 
   const paths: Array<[string, number | ExpressionSpecification, boolean?]> = [
     ['global-path-bridge-shadow', BRIDGE_PATH_WIDTH_METRES, true],
@@ -935,7 +941,7 @@ export function updatePhysicalWidthPaint(map: MapLibreMap, latitude: number, max
     ['global-other-paths', 1.8],
     ['global-paths-under-construction', 2],
   ];
-  paths.forEach(([id, metres, casing]) => setWidth(id, pathWidthExpression(metres, latitude, casing)));
+  paths.forEach(([id, metres, casing]) => setWidth(id, pathWidthExpression(metres, latitude, casing, maxZoom)));
 
   setWidth('global-railway-bed', railwayWidth(RAIL_BED_WIDTH, false, latitude));
   setWidth('global-railway-sleepers', railwayWidth(SLEEPER_WIDTH, false, latitude));

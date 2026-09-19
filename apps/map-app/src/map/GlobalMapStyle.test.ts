@@ -2,6 +2,7 @@ import { createExpression, validateStyleMin } from '@maplibre/maplibre-gl-style-
 import { describe, expect, it } from 'vitest';
 import {
   aerowayWidthExpression,
+  pathWidthExpression,
   roadWidthExpression,
   buildingColorPaint,
   GLOBAL_CYCLING_LAYER_IDS,
@@ -142,6 +143,24 @@ describe('global map overlay styles', () => {
     }
   });
 
+  it('caps physical path widths at the active camera mode maximum zoom', () => {
+    for (const [maxZoom, plateauZoom] of [[undefined, 18], [19, 19], [21, 21]] as const) {
+      const compiled = createExpression(
+        pathWidthExpression(1.8, 61.4981, true, maxZoom),
+        'physical-path-width',
+      );
+      if (compiled.result !== 'success') throw new Error('Invalid path width expression');
+      const evaluate = (zoom: number) => compiled.value.evaluate(
+        { zoom },
+        { properties: { class: 'path' } } as any,
+      ) as number;
+      const plateauWidth = evaluate(plateauZoom);
+      for (const zoom of [plateauZoom + 0.5, 22]) {
+        expect(evaluate(zoom)).toBeCloseTo(plateauWidth, 6);
+      }
+    }
+  });
+
   it('uses camera-only widths for every close-up road cohort', () => {
     for (const baseId of [
       'global-road-tunnel-portals',
@@ -224,14 +243,14 @@ describe('global map overlay styles', () => {
     }
   });
 
-  it('keeps path widths in ground metres at close zooms', () => {
+  it('keeps default path widths stable beyond the map-mode scaling range', () => {
     const path = GLOBAL_MAP_STYLE.layers.find((layer) => layer.id === 'global-path-casing') as any;
     if (!path) throw new Error('Missing path layer');
     const compiled = createExpression(path.paint['line-width'], 'path-surface-width');
     if (compiled.result !== 'success') throw new Error('Invalid path width expression');
     const feature = { properties: { class: 'track' } } as any;
-    expect(compiled.value.evaluate({ zoom: 22 }, feature)
-      / compiled.value.evaluate({ zoom: 18 }, feature)).toBeCloseTo(16, 6);
+    expect(compiled.value.evaluate({ zoom: 22 }, feature))
+      .toBeCloseTo(compiled.value.evaluate({ zoom: 18 }, feature), 6);
   });
 
   it('uses metre-scaled paired rails inside the ground railway bed at close zoom', () => {
