@@ -147,18 +147,31 @@ export function shouldFollowTerrainElevation(
   return Math.abs(target - current) >= minDeltaMeters;
 }
 
-function elevationTransform(map: object): ElevationTransform | null {
-  const camera = (map as { _camera?: { transform?: ElevationTransform } })._camera;
-  return camera?.transform ?? null;
+function elevationTransforms(map: object): ElevationTransform[] {
+  const camera = (map as {
+    _camera?: {
+      transform?: ElevationTransform;
+      _requestedCameraState?: ElevationTransform;
+    };
+  })._camera;
+  if (!camera?.transform) return [];
+  if (!camera._requestedCameraState || camera._requestedCameraState === camera.transform) {
+    return [camera.transform];
+  }
+  return [camera.transform, camera._requestedCameraState];
 }
 
 /** Change look-at elevation only — do not recalculate zoom/center (that reads as a snap/pan). */
 function applyElevationQuietly(map: TerrainCameraFollowMap, elevation: number): void {
-  const transform = elevationTransform(map);
-  if (transform) {
-    if (Math.abs(transform.elevation - elevation) < TERRAIN_ELEVATION_APPLY_METERS) return;
-    transform.setElevation(elevation);
-    map.triggerRepaint();
+  const transforms = elevationTransforms(map);
+  if (transforms.length) {
+    let changed = false;
+    for (const transform of transforms) {
+      if (Math.abs(transform.elevation - elevation) < TERRAIN_ELEVATION_APPLY_METERS) continue;
+      transform.setElevation(elevation);
+      changed = true;
+    }
+    if (changed) map.triggerRepaint();
     return;
   }
   const publicMap = map as TerrainCameraFollowMap & {
@@ -205,6 +218,7 @@ export function installTerrainCameraFollower(
   let smoothedTarget: number | null = null;
   let following = false;
   let resetting = false;
+  let frameGeneration = 0;
 
   const meshEnabled = () => Boolean(map.getTerrain());
 
@@ -216,10 +230,24 @@ export function installTerrainCameraFollower(
   };
 
   const stopFrame = () => {
-    if (!frame) return;
-    cancelFrame(frame);
+    // cancelAnimationFrame cannot stop a callback that the browser has
+    // already dispatched. Invalidate it as well so an interrupted ease can
+    // never apply the previous location's elevation during a new gesture.
+    frameGeneration += 1;
+    if (frame) cancelFrame(frame);
     frame = 0;
     lastTime = 0;
+  };
+
+  const scheduleTick = () => {
+    const generation = frameGeneration;
+    let handle = 0;
+    handle = requestFrame((time) => {
+      if (generation !== frameGeneration) return;
+      if (frame === handle) frame = 0;
+      tick(time);
+    });
+    frame = handle;
   };
 
   /** Stop easing immediately without snapping elevation to the DEM target. */
@@ -264,7 +292,6 @@ export function installTerrainCameraFollower(
   };
 
   const tick = (time: number) => {
-    frame = 0;
     if ((!following && !resetting) || isPaused() || map.isMoving()) {
       lastTime = 0;
       return;
@@ -290,7 +317,7 @@ export function installTerrainCameraFollower(
 
     if (Math.abs(sampledTarget - smoothedElevation) > TERRAIN_ELEVATION_SETTLE_METERS
       || Math.abs(sampledTarget - smoothedTarget) > TERRAIN_ELEVATION_SETTLE_METERS) {
-      frame = requestFrame(tick);
+      scheduleTick();
     } else {
       lastTime = 0;
       if (resetting) {
@@ -312,7 +339,7 @@ export function installTerrainCameraFollower(
       if (resetting && target != null) finishReset();
       return;
     }
-    frame = requestFrame(tick);
+    scheduleTick();
   }
 
   const request = requestFrameIfNeeded;

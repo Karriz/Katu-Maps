@@ -177,10 +177,17 @@ describe('terrain elevation smoothing', () => {
     expect(elevation).toBeGreaterThan(10);
     expect(elevation).toBeLessThan(210);
     const midEaseElevation = elevation;
+    const staleFrame = frames[0];
 
     follower.cancel();
     expect(frames).toHaveLength(0);
     expect(elevation).toBe(midEaseElevation);
+
+    // A RAF callback may already have been dispatched when cancellation
+    // happens. It must not apply the old center's correction during a pan.
+    staleFrame?.(32);
+    expect(elevation).toBe(midEaseElevation);
+    expect(frames).toHaveLength(0);
 
     elevation = 50;
     map.queryTerrainElevation = () => 55;
@@ -205,6 +212,54 @@ describe('terrain elevation smoothing', () => {
     expect(clamped).toBe(true);
     expect(elevation).toBe(0);
 
+    follower.dispose();
+  });
+
+  it('keeps MapLibre requested camera elevation aligned before the next pan', () => {
+    const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    const frames: FrameRequestCallback[] = [];
+    const renderedTransform = {
+      elevation: 10,
+      setElevation(value: number) { this.elevation = value; },
+    };
+    const requestedTransform = {
+      elevation: 0,
+      setElevation(value: number) { this.elevation = value; },
+    };
+    const map = {
+      _camera: {
+        transform: renderedTransform,
+        _requestedCameraState: requestedTransform,
+      },
+      getTerrain: () => ({ source: 'terrain' }),
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      getCenterElevation: () => renderedTransform.elevation,
+      getCenterClampedToGround: () => false,
+      setCenterClampedToGround: vi.fn(),
+      queryTerrainElevation: () => 210,
+      isMoving: () => false,
+      triggerRepaint: vi.fn(),
+      on: (type: string, listener: (...args: never[]) => void) => {
+        const bucket = listeners.get(type) ?? [];
+        bucket.push(listener as (...args: unknown[]) => void);
+        listeners.set(type, bucket);
+      },
+      off: vi.fn(),
+    };
+
+    const follower = installTerrainCameraFollower(map, {
+      requestAnimationFrame: (callback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+      cancelAnimationFrame: vi.fn(),
+    });
+
+    listeners.get('moveend')?.forEach((listener) => listener());
+    frames.shift()?.(16);
+
+    expect(renderedTransform.elevation).toBeGreaterThan(10);
+    expect(requestedTransform.elevation).toBe(renderedTransform.elevation);
     follower.dispose();
   });
 });

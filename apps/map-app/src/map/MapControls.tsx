@@ -71,7 +71,6 @@ export type Map3dStyle = 'simple' | 'detailed';
 const MAP_3D_CORE_LAYER_KEYS = [
   'terrain',
   'buildings',
-  'bridges',
   'trees',
   'transitModels',
 ] as const satisfies readonly MapLayerKey[];
@@ -92,7 +91,7 @@ export function defaultMapLayerState(): MapLayerState {
     trees: true,
     buildings: true,
     buildingColors: false,
-    bridges: true,
+    bridges: false,
     proceduralBuildingDetails: false,
     terrain: true,
     cycling: false,
@@ -132,6 +131,7 @@ export function set2dModeLayers(current: MapLayerState): MapLayerState {
 export function set3dStyleLayers(current: MapLayerState, style: Map3dStyle): MapLayerState {
   const next: MapLayerState = { ...current, transit: true };
   for (const key of MAP_3D_CORE_LAYER_KEYS) next[key] = true;
+  next.bridges = style === 'detailed';
   next.buildingColors = style === 'detailed';
   next.proceduralBuildingDetails = style === 'detailed';
   return next;

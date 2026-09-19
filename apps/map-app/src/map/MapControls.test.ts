@@ -6,6 +6,7 @@ describe('map layer 3D mode', () => {
     const layers = defaultMapLayerState();
     expect(layers.buildingColors).toBe(false);
     expect(layers.proceduralBuildingDetails).toBe(false);
+    expect(layers.bridges).toBe(false);
     expect(is3dModeEnabled(layers)).toBe(true);
     expect(layers.locationIcons).toBe(true);
     expect(layers.labels).toBe(true);
@@ -28,10 +29,12 @@ describe('map layer 3D mode', () => {
     expect(is3dModeEnabled(simple)).toBe(true);
     expect(simple.buildingColors).toBe(false);
     expect(simple.proceduralBuildingDetails).toBe(false);
+    expect(simple.bridges).toBe(false);
 
     const detailed = set3dStyleLayers(simple, 'detailed');
     expect(detailed.buildingColors).toBe(true);
     expect(detailed.proceduralBuildingDetails).toBe(true);
+    expect(detailed.bridges).toBe(true);
   });
 
   it('disables all 3D layers for the 2D preset', () => {
