@@ -92,6 +92,7 @@ type RoofFootprint = {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   area: number;
   id: number | string;
+  colorId: number | string;
   renderHeight: number;
   wallHeight: number;
 };
@@ -443,6 +444,12 @@ export class RoofModelLayer implements CustomLayerInterface {
         const id = feature.geometry.type === 'Polygon' && sourceId !== undefined
           ? sourceId
           : `building:${centroidLngLat.lng.toFixed(6)}:${centroidLngLat.lat.toFixed(6)}`;
+        // Palette identity must survive vector-tile ID changes as the camera
+        // approaches and MapLibre selects a different source zoom.
+        const stableSourceId = feature.properties?.osm_id ?? feature.properties?.id;
+        const colorId = feature.geometry.type === 'Polygon' && stableSourceId !== undefined
+          ? stableSourceId
+          : `roof:${centroidLngLat.lng.toFixed(4)}:${centroidLngLat.lat.toFixed(4)}`;
         const localRing = outerRing.map(([lng, lat]) => toLocal(lng, lat));
         // Pitched roofs apply to small rectangular houses; flat roof slabs
         // apply to larger building outlines. The two ranges are disjoint, so
@@ -456,6 +463,7 @@ export class RoofModelLayer implements CustomLayerInterface {
           bounds: polygonBounds(localRing),
           area: polygonArea(localRing),
           id,
+          colorId,
           renderHeight,
           wallHeight,
         });
@@ -477,6 +485,8 @@ export class RoofModelLayer implements CustomLayerInterface {
 
       const numericId = typeof footprint.id === 'number'
         ? footprint.id : hashString(footprint.id);
+      const colorNumericId = typeof footprint.colorId === 'number'
+        ? footprint.colorId : hashString(footprint.colorId);
       const bucket = Math.abs(Math.floor(numericId / 10)) % 100;
 
       const groundElevation = map.queryTerrainElevation(footprint.centroid) ?? 0;
@@ -504,7 +514,7 @@ export class RoofModelLayer implements CustomLayerInterface {
           featureId: footprint.id,
         };
         roofData = generateRoofGeometry(candidate);
-        palette = ROOF_PALETTE_LIGHT[Math.abs(numericId) % ROOF_PALETTE_LIGHT.length];
+        palette = ROOF_PALETTE_LIGHT[Math.abs(colorNumericId) % ROOF_PALETTE_LIGHT.length];
       } else if (!footprint.hasHoles && isEligibleFlatRoofFootprint(footprint.ring) && footprint.wallHeight <= 45) {
         // Larger buildings get an inset flat roof slab in every climate,
         // leaving a parapet rim of the building top around it. The larger
@@ -518,7 +528,7 @@ export class RoofModelLayer implements CustomLayerInterface {
           featureId: footprint.id,
         };
         roofData = generateFlatRoofGeometry(candidate);
-        palette = FLAT_ROOF_PALETTE_LIGHT[Math.abs(numericId) % FLAT_ROOF_PALETTE_LIGHT.length];
+        palette = FLAT_ROOF_PALETTE_LIGHT[Math.abs(colorNumericId) % FLAT_ROOF_PALETTE_LIGHT.length];
       }
       if (!roofData || !palette) continue;
 

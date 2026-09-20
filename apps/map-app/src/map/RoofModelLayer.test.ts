@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LngLat } from 'maplibre-gl';
+import * as THREE from 'three';
 import { RoofModelLayer } from './RoofModelLayer';
 
 type PolygonRoofGeometry = { type: 'Polygon'; coordinates: Array<Array<[number, number]>> };
@@ -45,8 +46,10 @@ function fixture(features: RoofFeature[]) {
   };
   (layer as any).map = map;
   (layer as any).sceneOrigin = map.getCenter();
+  const mesh = new THREE.Mesh(new THREE.BufferGeometry());
+  (layer as any).roofMesh = mesh;
   return {
-    layer,
+    layer, mesh,
     map,
     setLoaded(value: boolean) { loaded = value; },
     sampledCount: () => (layer as any).sampledRoofCount as number,
@@ -81,6 +84,20 @@ describe('RoofModelLayer source refresh', () => {
     expect(completeJob(() => layer.updateRoofs())).toBe(true);
     expect(sampledCount()).toBe(2);
     expect(map.querySourceFeatures).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps roof colours stable when tile-local feature IDs change', () => {
+    const roof = rectangle(10);
+    const { layer, mesh, setLoaded } = fixture([roof]);
+    setLoaded(true);
+    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+    const first = [...mesh.geometry.getAttribute('color').array];
+
+    roof.id = 11;
+    layer.invalidateSource();
+    expect(completeJob(() => layer.updateRoofs())).toBe(true);
+
+    expect([...mesh.geometry.getAttribute('color').array]).toEqual(first);
   });
 
   it('does not let an ineligible tile fragment hide a usable duplicate', () => {

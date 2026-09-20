@@ -74,7 +74,16 @@ export function installModelRefresh({
 
   const handleSourceData = (event: MapSourceDataEvent) => {
     if (event.sourceId === terrainSource() && event.sourceDataType === 'content') {
-      invalidate();
+      if (immersiveActive()) {
+        layers.bridge.markTerrainDirty();
+        layers.tree.invalidateTerrain();
+        layers.roof.invalidateSource();
+        layers.facade.invalidateSource();
+        dataRevision += 1;
+        schedule();
+      } else {
+        invalidate();
+      }
       map.once('idle', () => {
         layers.selectedRouteDeck.rebuildFromCurrentFeatures();
         layers.transitStopRouteDeck.rebuildFromCurrentFeatures();

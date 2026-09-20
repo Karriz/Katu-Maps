@@ -194,6 +194,11 @@ export function shouldRejectImmersiveBridgeSample(
   if (previous.length === 0) return false;
   if (next.length === 0) return !options.viewChanged || !options.sourceLoaded;
 
+  // Once the tiles required for a moved view are complete, topology is expected
+  // to change: old bridges leave coverage and new bridges enter it. Comparing
+  // source-key retention here can otherwise pin the scene to an earlier area.
+  if (options.viewChanged && options.sourceLoaded) return false;
+
   const before = bridgeSampleStats(previous);
   const after = bridgeSampleStats(next);
   const retention = before.keys.size === 0
@@ -511,6 +516,13 @@ export function planBounds(points: PlanPoint[], padding: number): PlanBounds {
     maxEast: maxEast + padding,
     maxNorth: maxNorth + padding,
   };
+}
+
+/** Distance from the plan origin to a bounds rectangle (zero when it contains it). */
+export function planBoundsDistance(bounds: PlanBounds) {
+  const east = Math.max(bounds.minEast, 0, -bounds.maxEast);
+  const north = Math.max(bounds.minNorth, 0, -bounds.maxNorth);
+  return Math.hypot(east, north);
 }
 
 /** Keep whole nearby parts and their neighbours, including offscreen tile continuations. */
@@ -2772,6 +2784,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private shadowOffsetEast = -Math.sin(CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS) * SHADOW_OFFSET_METERS;
   private shadowOffsetNorth = -Math.cos(CARTOON_SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS) * SHADOW_OFFSET_METERS;
   private lastUpdateSignature?: string;
+  private acceptedViewSignature?: string;
   private terrainSignature?: string;
   private userEnabled = true;
   private flightMode = false;
@@ -3000,6 +3013,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.sourceContentDirty = true;
   }
 
+  /** Resample streamed terrain without throwing away source-derived geometry. */
+  markTerrainDirty() {
+    this.samplingJob = undefined;
+    this.elevationCache.clear();
+    this.pendingElevation = true;
+    this.sourceContentDirty = true;
+  }
+
   private cancelBridgeJobs() {
     this.samplingJob = undefined;
     this.meshWrite = undefined;
@@ -3210,11 +3231,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
       map.triggerRepaint();
       return;
     }
-    const commitViewChanged = this.pendingCommitViewChanged || viewChanged;
+    // A rejected/pending refresh must not consume the move: later tile arrivals
+    // still need to replace the scene accepted for the previous coverage area.
+    const commitViewChanged = this.pendingCommitViewChanged || viewChanged
+      || (this.acceptedViewSignature !== undefined && signature !== this.acceptedViewSignature);
     if (
       this.flightMode
       && shouldRejectImmersiveBridgeSample(
-        this.sampledBridges,
+        sampled.bridges.length === 0 ? this.sampledBridges : this.bridgesInCoverage(view),
         sampled.bridges,
         {
           sourceLoaded: typeof map.isSourceLoaded === 'function'
@@ -3235,6 +3259,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.sourceContentDirty = false;
     this.pendingCommitViewChanged = false;
     this.sampledBridges = sampled.bridges;
+    this.acceptedViewSignature = signature;
     this.fallbackFeatures = ('fallbackFeatures' in sampled ? sampled.fallbackFeatures : undefined) ?? new Map();
     this.fallbackSignature = '';
     this.meshWrite = undefined;
@@ -3339,6 +3364,23 @@ export class BridgeModelLayer implements CustomLayerInterface {
       terrainEnabled: Boolean(map.getTerrain()),
     };
     return this.flightMode ? quantizeBridgeView(view) : view;
+  }
+
+  /** Only protect old topology that is still inside the requested coverage. */
+  private bridgesInCoverage(view: BridgeViewState) {
+    // Match source-part coverage padding and preserve conservative world wrapping.
+    if (view.west < -180 || view.east > 180 || view.east < view.west) return this.sampledBridges;
+    const origin = planOriginFromLngLat((view.west + view.east) / 2, (view.south + view.north) / 2);
+    const viewport = planBounds(lngLatsToPlan([
+      [view.west, view.south], [view.east, view.north],
+    ], origin), BRIDGE_VIEW_PADDING_METERS);
+    return this.sampledBridges.filter((bridge) => {
+      const bounds = this.lngLatBounds(bridge);
+      if (!Number.isFinite(bounds.minLng + bounds.minLat + bounds.maxLng + bounds.maxLat)) return true;
+      return boundsOverlap(viewport, planBounds(lngLatsToPlan([
+        [bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat],
+      ], origin), 0));
+    });
   }
 
   private terrainElevationReady(map: MaplibreMap) {
@@ -3490,6 +3532,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
       })),
     ];
 
+    const priorityOrigin = planOriginFromLngLat(
+      (view.west + view.east) / 2,
+      (view.south + view.north) / 2,
+    );
     const clusters = clusterBridgeDrawables(drawables)
       .map((members) => {
         // Tile enumeration may change the shared plan origin. Build each cluster
@@ -3509,10 +3555,15 @@ export class BridgeModelLayer implements CustomLayerInterface {
           cluster,
           surfaces: clusterSurfaces(cluster),
           span: clusterSpanLength(cluster),
+          distance: planBoundsDistance(planBounds(lngLatsToPlan(
+            members.flatMap((member) => member.coordinates), priorityOrigin,
+          ), 0)),
         };
       })
       .filter((entry) => entry.span >= MIN_BRIDGE_LENGTH_METERS)
-      .sort((left, right) => right.span - left.span)
+      // The flight coverage can contain more candidates than the GPU budget.
+      // Admit bridges near the active area before spending capacity on distant spans.
+      .sort((left, right) => left.distance - right.distance || right.span - left.span)
       .slice(0, MAX_BRIDGES);
 
     const terrainZoomBucket = Math.floor(view.zoom + 1e-6);
@@ -3839,18 +3890,11 @@ export class BridgeModelLayer implements CustomLayerInterface {
       });
       const activeKeys = new Set(entries.map((entry) => entry.key));
       this.activeResourceKeys = activeKeys;
-      const missing = [...activeKeys].filter((key) => !this.bridgeResources.has(key)).length;
-      // Evict before allocating so tile replacement does not double texture memory.
-      for (const [key, resource] of this.bridgeResources) {
-        if (this.bridgeResources.size + missing <= MAX_BRIDGES) break;
-        if (activeKeys.has(key)) continue;
-        this.disposeResource(resource);
-        this.bridgeResources.delete(key);
-      }
       this.meshWrite = { entries, index: 0 };
     }
 
     const { entries } = this.meshWrite;
+    const activeKeys = this.activeResourceKeys ?? new Set(entries.map((entry) => entry.key));
     const started = performance.now();
     let created = 0;
     while (this.meshWrite.index < entries.length) {
@@ -3863,44 +3907,52 @@ export class BridgeModelLayer implements CustomLayerInterface {
       this.meshWrite.index += 1;
     }
 
-    this.decks.clear();
-    for (const { key } of entries) {
-      const resource = this.bridgeResources.get(key);
-      if (resource) this.decks.add(resource.deck, resource.shadow);
-    }
+    this.positionResources();
+    const complete = this.meshWrite.index >= entries.length;
+    if (complete) {
+      this.decks.clear();
+      for (const { key } of entries) {
+        const resource = this.bridgeResources.get(key);
+        if (resource) this.decks.add(resource.deck, resource.shadow);
+      }
 
-    // Every continuation rewrites all instances in the current scene frame.
-    // Rendering may have recentered since the preceding batch.
-    this.pierOrigin = this.sceneOrigin;
-    this.pierOriginElevation = this.sceneOriginElevation;
-    let pierCount = 0;
-    for (const bridge of this.sampledBridges) {
-      for (const pier of bridge.piers ?? []) {
-        if (pierCount >= MAX_PIERS) break;
-        const local = this.toLocal(pier.longitude, pier.latitude, pier.ground);
-        const height = pier.deck - pier.ground;
-        this.transformHelper.position.set(local.east, local.up + height / 2, local.north);
-        this.transformHelper.rotation.set(0, 0, 0);
-        this.transformHelper.scale.set(1, height, 1);
-        this.transformHelper.updateMatrix();
-        pierMesh.setMatrixAt(pierCount, this.transformHelper.matrix);
-        pierCount += 1;
+      this.pierOrigin = this.sceneOrigin;
+      this.pierOriginElevation = this.sceneOriginElevation;
+      let pierCount = 0;
+      for (const bridge of this.sampledBridges) {
+        for (const pier of bridge.piers ?? []) {
+          if (pierCount >= MAX_PIERS) break;
+          const local = this.toLocal(pier.longitude, pier.latitude, pier.ground);
+          const height = pier.deck - pier.ground;
+          this.transformHelper.position.set(local.east, local.up + height / 2, local.north);
+          this.transformHelper.rotation.set(0, 0, 0);
+          this.transformHelper.scale.set(1, height, 1);
+          this.transformHelper.updateMatrix();
+          pierMesh.setMatrixAt(pierCount, this.transformHelper.matrix);
+          pierCount += 1;
+        }
+      }
+      this.applyLighting();
+      pierMesh.count = pierCount;
+      pierMesh.instanceMatrix.needsUpdate = true;
+      pierMesh.visible = pierCount > 0;
+      this.positionResources();
+
+      // Keep the previous scene alive during upload, then restore the steady-state budget.
+      for (const [key, resource] of this.bridgeResources) {
+        if (this.bridgeResources.size <= MAX_BRIDGES) break;
+        if (activeKeys.has(key)) continue;
+        this.disposeResource(resource);
+        this.bridgeResources.delete(key);
       }
     }
-
-    this.positionResources();
-    this.applyLighting();
-    pierMesh.count = pierCount;
-    pierMesh.instanceMatrix.needsUpdate = true;
-    pierMesh.visible = pierCount > 0;
-    const complete = this.meshWrite.index >= entries.length;
     const replaced = new Set<string>();
     // A feature remains draped until every texture section of its bridge exists.
     for (const bridge of this.sampledBridges) {
       const keys = bridge.sourceKeys ?? [];
       if (!keys.length) continue;
       const sections = entries.filter((entry) => entry.sourceKeys === bridge.sourceKeys);
-      if (sections.length && sections.every((entry) => this.bridgeResources.has(entry.key))) {
+      if (complete && sections.length && sections.every((entry) => this.bridgeResources.has(entry.key))) {
         keys.forEach((key) => replaced.add(key));
       }
     }

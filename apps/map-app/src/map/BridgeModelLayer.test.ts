@@ -50,6 +50,7 @@ import {
   bridgeDeckHeightAt,
   bridgeDeckSampler,
   planBounds,
+  planBoundsDistance,
   planOriginFromLngLat,
   planToLngLat,
   pointInFilledPolygon,
@@ -93,6 +94,14 @@ describe('quantizeBridgeView', () => {
   });
 });
 
+describe('planBoundsDistance', () => {
+  it('prioritizes bounds containing or nearest to the view origin', () => {
+    expect(planBoundsDistance({ minEast: -10, minNorth: -5, maxEast: 20, maxNorth: 5 })).toBe(0);
+    expect(planBoundsDistance({ minEast: 30, minNorth: -5, maxEast: 40, maxNorth: 5 })).toBe(30);
+    expect(planBoundsDistance({ minEast: 30, minNorth: 40, maxEast: 50, maxNorth: 60 })).toBe(50);
+  });
+});
+
 describe('isIncompleteImmersiveBridgeSample', () => {
   it('rejects sparse or split samples while tiles are still streaming', () => {
     expect(isIncompleteImmersiveBridgeSample(
@@ -121,7 +130,7 @@ describe('isIncompleteImmersiveBridgeSample', () => {
 });
 
 describe('shouldRejectImmersiveBridgeSample', () => {
-  it('rejects regressions even after the source reports loaded', () => {
+  it('accepts changed topology after a moved view finishes loading', () => {
     expect(shouldRejectImmersiveBridgeSample(
       [{ sourceKeys: ['a', 'b', 'c'], spanLength: 180 }],
       [
@@ -129,6 +138,14 @@ describe('shouldRejectImmersiveBridgeSample', () => {
         { sourceKeys: ['c'], spanLength: 55 },
       ],
       { sourceLoaded: true, viewChanged: true },
+    )).toBe(false);
+  });
+
+  it('retains the previous topology while a moved view is still loading', () => {
+    expect(shouldRejectImmersiveBridgeSample(
+      [{ sourceKeys: ['a', 'b', 'c'], spanLength: 180 }],
+      [{ sourceKeys: ['a'], spanLength: 50 }],
+      { sourceLoaded: false, viewChanged: true },
     )).toBe(true);
   });
 
@@ -1420,6 +1437,7 @@ describe('BridgeModelLayer', () => {
     (layer as any).sampledBridges = [previous];
     (layer as any).geometryCache.set('keep', {});
     (layer as any).lastUpdateSignature = JSON.stringify((layer as any).currentView(map));
+    (layer as any).terrainSignature = JSON.stringify(map.getTerrain());
     (layer as any).samplingJob = { generator: null, view: 'old' };
     (layer as any).writeMeshes = vi.fn();
     (layer as any).sampleVisibleBridges = vi.fn(() => ({
@@ -1437,6 +1455,103 @@ describe('BridgeModelLayer', () => {
     expect((layer as any).sampledBridges).toEqual([previous]);
     expect((layer as any).writeMeshes).not.toHaveBeenCalled();
     expect((layer as any).sourceContentDirty).toBe(false);
+  });
+
+  it('resamples streamed terrain without discarding source geometry', () => {
+    const layer = new BridgeModelLayer() as any;
+    layer.geometryCache.set('geometry', { meshPoints: [] });
+    layer.sectionCache.set('section', { sections: [], heights: '' });
+    layer.elevationCache.set('elevation', 12);
+    layer.samplingJob = { generator: null, view: 'old' };
+
+    layer.markTerrainDirty();
+
+    expect(layer.geometryCache.has('geometry')).toBe(true);
+    expect(layer.sectionCache.has('section')).toBe(true);
+    expect(layer.elevationCache.size).toBe(0);
+    expect(layer.samplingJob).toBeUndefined();
+    expect(layer.sourceContentDirty).toBe(true);
+    expect(layer.pendingElevation).toBe(true);
+  });
+
+  it.each([false, true])('loads bridges after leaving the initial area (shared bridge: %s)', (shared) => {
+    const layer = new BridgeModelLayer() as any;
+    let longitude = 23.76;
+    const bridge = (key: string, lng: number, spanLength: number) => ({
+      sourceKeys: [key], spanLength,
+      surface: [{ longitude: lng, latitude: 61.5 }, { longitude: lng + 0.001, latitude: 61.5 }],
+    });
+    const old = bridge('old', 23.76, 500);
+    const nearby = bridge('nearby', 23.855, 100);
+    const fresh = bridge('new', 23.86, 80);
+    const previous = shared ? [old, nearby] : [old];
+    const next = shared ? [nearby, fresh] : [fresh];
+    layer.map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: longitude, lat: 61.5 }),
+      getBearing: () => 0,
+      isSourceLoaded: () => true,
+      queryTerrainElevation: () => 0,
+    };
+    layer.writeMeshes = vi.fn();
+    layer.setDrapedVisible = vi.fn();
+    layer.sampleVisibleBridges = vi.fn(() => ({ bridges: previous, pending: false }));
+    layer.updateBridges();
+    layer.setFlightMode(true);
+    layer.updateBridges();
+
+    longitude = 23.86;
+    layer.sampleVisibleBridges.mockReturnValue({ bridges: next, pending: false });
+    layer.writeMeshes.mockClear();
+    layer.updateBridges();
+
+    expect(layer.sampledBridges).toEqual(next);
+    expect(layer.writeMeshes).toHaveBeenCalledOnce();
+
+    // A later incomplete tile set must still protect the bridge in this area.
+    layer.sampleVisibleBridges.mockReturnValue({
+      bridges: [bridge('new', 23.86, 10)], pending: false,
+    });
+    layer.markSourceDirty();
+    layer.writeMeshes.mockClear();
+    layer.updateBridges();
+    expect(layer.sampledBridges).toEqual(next);
+    expect(layer.writeMeshes).not.toHaveBeenCalled();
+  });
+
+  it('remembers travel until delayed source data can replace the accepted scene', () => {
+    const layer = new BridgeModelLayer() as any;
+    let longitude = 23.76;
+    let sourceLoaded = true;
+    const previous = [{
+      sourceKeys: ['old'], spanLength: 100,
+      surface: [{ longitude: 23.76, latitude: 61.5 }],
+    }];
+    layer.map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: longitude, lat: 61.5 }),
+      getBearing: () => 0,
+      isSourceLoaded: () => sourceLoaded,
+      queryTerrainElevation: () => 0,
+    };
+    layer.writeMeshes = vi.fn();
+    layer.setDrapedVisible = vi.fn();
+    layer.sampleVisibleBridges = vi.fn(() => ({ bridges: previous, pending: false }));
+    layer.updateBridges();
+    layer.setFlightMode(true);
+    layer.updateBridges();
+
+    longitude = 23.86;
+    sourceLoaded = false;
+    layer.sampleVisibleBridges.mockReturnValue({ bridges: [], pending: false });
+    layer.updateBridges();
+    expect(layer.sampledBridges).toEqual(previous);
+
+    // Tiles finish after the aircraft stops; the empty new area is legitimate.
+    sourceLoaded = true;
+    layer.markSourceDirty();
+    layer.updateBridges();
+    expect(layer.sampledBridges).toEqual([]);
   });
 
   it('updates lighting without replacing bridge resources and skips unchanged lighting', () => {
@@ -1627,14 +1742,14 @@ describe('BridgeModelLayer', () => {
     expect(layer.needsElevationRetry()).toBe(true);
   });
 
-  it('retains original fallback geometry for short bridges and bridges beyond the mesh budget', () => {
+  it('prioritizes nearby bridges and retains fallback geometry beyond the mesh budget', () => {
     const layer = new BridgeModelLayer() as any;
     const origin = planOriginFromLngLat(18.08, 59.3);
     const features = Array.from({ length: 242 }, (_, index) => ({
       type: 'Feature', properties: { class: 'primary', brunnel: 'bridge', layer: 1 },
       geometry: { type: 'LineString', coordinates: [
-        planToLngLat({ east: 0, north: index * 25 }, origin),
-        planToLngLat({ east: index === 241 ? 2 : 100, north: index * 25 }, origin),
+        planToLngLat({ east: 0, north: index === 241 ? 3_340 : index * 25 }, origin),
+        planToLngLat({ east: index === 241 ? 10 : 100, north: index === 241 ? 3_340 : index * 25 }, origin),
       ] },
     }));
     const job = layer.sampleBridgeJob({ getSource: () => ({}), querySourceFeatures: () => features,
@@ -1646,7 +1761,7 @@ describe('BridgeModelLayer', () => {
     const replaced = new Set(result.value.bridges.flatMap((bridge: any) => bridge.sourceKeys));
     const skipped = [...result.value.fallbackFeatures].filter(([key]) => !replaced.has(key));
     expect(skipped).toHaveLength(2);
-    expect(skipped.map(([, feature]) => feature)).toContainEqual(features[241]);
+    expect(skipped.map(([, feature]) => feature)).not.toContainEqual(features[241]);
   });
 
   const withBridgeResources = (run: (layer: BridgeModelLayer, internal: any, bridge: any) => void) => {
@@ -2142,12 +2257,19 @@ describe('BridgeModelLayer', () => {
           { type: 'Feature', properties: { key }, geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] } }]));
         internal.writeMeshes();
         expect(internal.bridgeResources.size).toBe(1);
-        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['1', '2', 'skipped']);
+        expect(internal.decks.children).toHaveLength(0);
+        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['0', '1', '2', 'skipped']);
         expect(internal.meshWrite).toBeTruthy();
         internal.sceneOrigin = { lng: internal.sceneOrigin.lng + 0.01, lat: internal.sceneOrigin.lat + 0.01 };
         internal.sceneOriginElevation = 4;
         internal.writeMeshes();
         expect(internal.bridgeResources.size).toBe(2);
+        expect(internal.decks.children).toHaveLength(0);
+        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['0', '1', '2', 'skipped']);
+        internal.writeMeshes();
+        expect(internal.bridgeResources.size).toBe(3);
+        expect(internal.meshWrite).toBeUndefined();
+        expect(internal.decks.children).toHaveLength(6);
         const matrix = new THREE.Matrix4();
         internal.pierMesh.getMatrixAt(0, matrix);
         const pierPosition = new THREE.Vector3().setFromMatrixPosition(matrix)
@@ -2156,11 +2278,6 @@ describe('BridgeModelLayer', () => {
         expect(pierPosition.x).toBeCloseTo(expectedPier.east, 3);
         expect(pierPosition.y).toBeCloseTo(expectedPier.up, 3);
         expect(pierPosition.z).toBeCloseTo(expectedPier.north, 3);
-        expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['2', 'skipped']);
-        internal.writeMeshes();
-        expect(internal.bridgeResources.size).toBe(3);
-        expect(internal.meshWrite).toBeUndefined();
-        expect(internal.decks.children).toHaveLength(6);
         expect(internal.fallbackData.features.map((feature: any) => feature.properties.key)).toEqual(['skipped']);
         internal.sampledBridges = internal.sampledBridges.map((sample: any) => ({ ...sample, sourceKeys: [...sample.sourceKeys] }));
         internal.writeMeshes();
