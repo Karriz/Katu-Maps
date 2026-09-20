@@ -505,6 +505,59 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
   const selectedRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('bridgeDebug') !== '1') return;
+
+    const debugWindow = window as typeof window & { katuBridgeDebug?: unknown };
+    const samples: Array<Record<string, number | string>> = [];
+    let intervalId: number | undefined;
+
+    const snapshot = () => {
+      const stats = bridgeLayerRef.current?.getPerformanceStats();
+      if (!stats) return null;
+      const map = mapRef.current;
+      const center = map?.getCenter();
+      return {
+        timestamp: new Date().toISOString(),
+        longitude: center?.lng ?? Number.NaN,
+        latitude: center?.lat ?? Number.NaN,
+        zoom: map?.getZoom() ?? Number.NaN,
+        ...stats,
+      };
+    };
+    const capture = () => {
+      const sample = snapshot();
+      if (sample) samples.push(sample);
+      return sample;
+    };
+    const stop = () => {
+      if (intervalId !== undefined) window.clearInterval(intervalId);
+      intervalId = undefined;
+      return [...samples];
+    };
+    const api = {
+      snapshot,
+      start(intervalMs = 500) {
+        stop();
+        samples.length = 0;
+        capture();
+        const safeInterval = Number.isFinite(intervalMs) ? Math.max(250, intervalMs) : 500;
+        intervalId = window.setInterval(capture, safeInterval);
+      },
+      stop,
+      report() {
+        return JSON.stringify(samples, null, 2);
+      },
+    };
+
+    debugWindow.katuBridgeDebug = api;
+    return () => {
+      stop();
+      if (debugWindow.katuBridgeDebug === api) delete debugWindow.katuBridgeDebug;
+    };
+  }, [mapRef]);
+
   const mapLayerRuntimeRefs = {
     tree: treeLayerRef,
     bridge: bridgeLayerRef,

@@ -92,6 +92,26 @@ describe('quantizeBridgeView', () => {
     expect(signatures.size).toBeLessThan(20);
     expect(quantizeBridgeView({ ...view, zoom: 16.4, pitch: 70 })).not.toEqual(quantized);
   });
+
+  it('keeps the longitude grid stable during small north-south flight movement', () => {
+    const view = {
+      west: -0.08,
+      south: 51.48,
+      east: -0.02,
+      north: 51.52,
+      zoom: 19.62,
+      pitch: 70,
+      terrainEnabled: true,
+    };
+    const signatures = new Set(
+      Array.from({ length: 20 }, (_, index) => JSON.stringify(quantizeBridgeView({
+        ...view,
+        south: view.south + index * 1e-6,
+        north: view.north + index * 1e-6,
+      }))),
+    );
+    expect(signatures.size).toBe(1);
+  });
 });
 
 describe('planBoundsDistance', () => {
@@ -231,6 +251,11 @@ describe('bridgePartsForView', () => {
     const end = part(1120, 1800);
     const distant = part(1900, 2100);
     expect(bridgePartsForView([end, distant, middle, visible], view)).toEqual([end, middle, visible]);
+  });
+
+  it('bounds dense retention work while prioritizing parts nearest the view centre', () => {
+    const parts = [part(500, 510), part(0, 10), part(250, 260), part(-20, -10)];
+    expect(bridgePartsForView(parts, view, 2)).toEqual([parts[1], parts[3]]);
   });
 
   it('retains enclosing polygons and their holes even with all vertices offscreen', () => {
@@ -1447,13 +1472,19 @@ describe('BridgeModelLayer', () => {
 
     layer.markSourceDirty();
     expect((layer as any).geometryCache.has('keep')).toBe(true);
-    expect((layer as any).samplingJob).toBeUndefined();
+    expect((layer as any).samplingJob).toBeDefined();
+    expect((layer as any).sourceRefreshPending).toBe(true);
     expect((layer as any).sourceContentDirty).toBe(true);
     expect((layer as any).lastUpdateSignature).toBeTruthy();
 
     layer.updateBridges();
     expect((layer as any).sampledBridges).toEqual([previous]);
     expect((layer as any).writeMeshes).not.toHaveBeenCalled();
+    expect((layer as any).sourceContentDirty).toBe(true);
+
+    // The arrival that interrupted the first job is consumed by one coherent
+    // follow-up rather than repeatedly restarting the in-flight generator.
+    layer.updateBridges();
     expect((layer as any).sourceContentDirty).toBe(false);
   });
 
@@ -1468,10 +1499,47 @@ describe('BridgeModelLayer', () => {
 
     expect(layer.geometryCache.has('geometry')).toBe(true);
     expect(layer.sectionCache.has('section')).toBe(true);
-    expect(layer.elevationCache.size).toBe(0);
-    expect(layer.samplingJob).toBeUndefined();
+    expect(layer.elevationCache.size).toBe(1);
+    expect(layer.samplingJob).toBeDefined();
+    expect(layer.terrainRefreshPending).toBe(true);
     expect(layer.sourceContentDirty).toBe(true);
-    expect(layer.pendingElevation).toBe(true);
+    expect(layer.pendingElevation).toBe(false);
+
+    layer.samplingJob = undefined;
+    layer.markTerrainDirty();
+    expect(layer.elevationCache.size).toBe(0);
+    expect(layer.pendingElevation).toBe(false);
+  });
+
+  it('defers a DEM refresh until the active bridge sample has finished', () => {
+    const layer = new BridgeModelLayer() as any;
+    const map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      isSourceLoaded: () => true,
+      queryTerrainElevation: () => 0,
+    };
+    const previous = { sourceKeys: ['old'], spanLength: 80 };
+    layer.map = map;
+    layer.sampledBridges = [previous];
+    layer.terrainSignature = JSON.stringify(map.getTerrain());
+    layer.samplingJob = { generator: null, view: 'active' };
+    layer.sampleVisibleBridges = vi.fn(() => {
+      layer.samplingJob = undefined;
+      return { bridges: [{ sourceKeys: ['new'], spanLength: 80 }], pending: false };
+    });
+    layer.writeMeshes = vi.fn();
+    layer.elevationCache.set('old-height', 10);
+
+    layer.markTerrainDirty();
+    layer.updateBridges();
+
+    expect(layer.sampledBridges).toEqual([previous]);
+    expect(layer.writeMeshes).not.toHaveBeenCalled();
+    expect(layer.elevationCache.size).toBe(0);
+    expect(layer.terrainRefreshPending).toBe(false);
+    expect(layer.sourceContentDirty).toBe(true);
+    expect(layer.pendingElevation).toBe(false);
   });
 
   it.each([false, true])('loads bridges after leaving the initial area (shared bridge: %s)', (shared) => {
@@ -1618,6 +1686,61 @@ describe('BridgeModelLayer', () => {
     layer.updateBridges();
     expect(map.triggerRepaint).toHaveBeenCalledTimes(4);
     expect(sample).toHaveBeenCalledTimes(3);
+  });
+
+  it('finishes a pending mesh handoff before sampling changed camera coverage', () => {
+    const layer = new BridgeModelLayer();
+    const internal = layer as any;
+    const map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      queryTerrainElevation: () => 0,
+    };
+    internal.map = map;
+    internal.terrainSignature = JSON.stringify(map.getTerrain());
+    internal.lastUpdateSignature = 'previous-view';
+    internal.meshWrite = { entries: [], index: 0 };
+    internal.sampleVisibleBridges = vi.fn();
+    internal.writeMeshes = vi.fn(() => {
+      internal.meshWrite = undefined;
+      return true;
+    });
+
+    layer.updateBridges();
+
+    expect(internal.writeMeshes).toHaveBeenCalledOnce();
+    expect(internal.sampleVisibleBridges).not.toHaveBeenCalled();
+    expect(internal.sourceContentDirty).toBe(true);
+    expect(internal.pendingCommitViewChanged).toBe(true);
+    expect(internal.refreshAfterMeshWrite).toBe(true);
+
+    internal.renderer = {};
+    const refresh = vi.spyOn(layer, 'updateBridges').mockImplementation(() => undefined);
+    layer.render(null as any, {} as any);
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(internal.refreshAfterMeshWrite).toBe(false);
+  });
+
+  it('cancels a pending mesh handoff before handling an invisible view', () => {
+    const layer = new BridgeModelLayer();
+    const internal = layer as any;
+    const map = {
+      ...terrainViewMap(),
+      getZoom: () => 10,
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+    };
+    internal.map = map;
+    internal.terrainSignature = JSON.stringify(map.getTerrain());
+    internal.lastUpdateSignature = 'visible-view';
+    internal.meshWrite = { entries: [], index: 0 };
+    internal.sampledBridges = [{ keep: true }];
+    internal.writeMeshes = vi.fn();
+
+    layer.updateBridges();
+
+    expect(internal.writeMeshes).not.toHaveBeenCalled();
+    expect(internal.meshWrite).toBeUndefined();
+    expect(internal.lastUpdateSignature).toBe('hidden');
   });
 
   it('does not place 3D bridges until the terrain source has loaded', () => {
@@ -2186,12 +2309,40 @@ describe('BridgeModelLayer', () => {
     });
   });
 
-  it('cancels an in-flight sample when the view changes without committing it', () => {
+  it('skips clustering when streamed tiles do not change bridge topology', () => {
+    const layer = new BridgeModelLayer();
+    const internal = layer as any;
+    const feature = {
+      properties: { brunnel: 'bridge', class: 'minor' },
+      geometry: { type: 'LineString', coordinates: [[23.76, 61.5], [23.762, 61.5]] },
+    };
+    internal.map = {
+      ...terrainViewMap(),
+      getCenter: () => ({ lng: 23.76, lat: 61.5 }),
+      getSource: () => ({}),
+      getLayer: () => undefined,
+      isSourceLoaded: () => true,
+      querySourceFeatures: () => [feature],
+      queryTerrainElevation: () => 0,
+    };
+    internal.writeMeshes = vi.fn();
+
+    layer.updateBridges();
+    const accepted = internal.sampledBridges;
+    layer.markSourceDirty();
+    layer.updateBridges();
+
+    expect(internal.sampledBridges).toBe(accepted);
+    expect(layer.getPerformanceStats().topologySkips).toBe(1);
+    expect(internal.writeMeshes).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes an in-flight sample before refreshing changed camera coverage', () => {
     const layer = new BridgeModelLayer();
     const internal = layer as any;
     const previous = { keep: true };
     internal.sampledBridges = [previous];
-    internal.renderer = { capabilities: { getMaxAnisotropy: () => 1 } };
+    internal.renderer = { capabilities: { getMaxAnisotropy: () => 1 }, dispose: vi.fn() };
     let zoom = 15;
     const feature = (lng: number) => ({
       properties: { brunnel: 'bridge', class: 'minor' },
@@ -2222,9 +2373,12 @@ describe('BridgeModelLayer', () => {
       zoom = 15.4;
       layer.updateBridges();
       expect(internal.sampledBridges).toEqual([previous]);
-      expect(internal.samplingJob.view).not.toBe(firstView);
+      if (internal.samplingJob) expect(internal.samplingJob.view).toBe(firstView);
+      else expect(internal.sourceContentDirty).toBe(true);
+      expect(layer.getPerformanceStats().updates).toBe(1);
       expect(sampleCluster).toHaveBeenCalled();
       internal.renderer = undefined;
+      layer.updateBridges();
       layer.updateBridges();
       expect(internal.sampledBridges).not.toEqual([previous]);
       expect(internal.sampledBridges.length).toBeGreaterThan(0);

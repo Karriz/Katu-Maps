@@ -43,10 +43,11 @@ const SAMPLE_FRAME_BUDGET_MS = 6;
 const PAINT_FRAME_BUDGET_MS = 3;
 const PENDING_RETRY_MS = 160;
 const BRIDGE_VIEW_PADDING_METERS = 600;
+const MAX_RETAINED_BRIDGE_PARTS = 1_200;
 // Covers stitching gaps, deck widths and abutment extension without clipping geometry.
 const BRIDGE_NEIGHBOUR_METERS = 40;
 const MAX_PIERS = 400;
-const MAX_ELEVATION_CACHE_ENTRIES = 8_000;
+const MAX_ELEVATION_CACHE_ENTRIES = 32_000;
 const SAMPLE_SPACING_METERS = 10;
 const MAX_CLEARANCE_PROBES = 128;
 const CLEARANCE_LIFT_SLOPE = 0.12;
@@ -148,7 +149,11 @@ export type BridgeViewState = {
 /** Bucket immersive coverage so tiny chase-camera moves do not restart sampling. */
 export function quantizeBridgeView(view: BridgeViewState, meters = 80): BridgeViewState {
   const midLat = (view.south + view.north) * 0.5;
-  const latitudeScale = Math.max(0.01, Math.cos(midLat * DEGREES_TO_RADIANS));
+  // Keep the longitude grid itself stable while travelling north/south. Using
+  // the exact latitude makes every tiny camera move alter the grid step, so a
+  // serialized "quantized" view changes every frame and cancels sampling.
+  const latitudeBand = Math.round(midLat);
+  const latitudeScale = Math.max(0.01, Math.cos(latitudeBand * DEGREES_TO_RADIANS));
   const longitudeStep = meters / (EARTH_RADIUS_METERS * latitudeScale) * (180 / Math.PI);
   const latitudeStep = meters / EARTH_RADIUS_METERS * (180 / Math.PI);
   const quantize = (value: number, step: number) => Math.round(value / step) * step;
@@ -343,7 +348,13 @@ type LocalPoint = {
 };
 
 type SourceFeature = ReturnType<MaplibreMap['querySourceFeatures']>[number];
-type BridgeSampleResult = { bridges: SampledBridge[]; pending: boolean; fallbackFeatures?: Map<string, Feature> };
+type BridgeSampleResult = {
+  bridges: SampledBridge[];
+  pending: boolean;
+  fallbackFeatures?: Map<string, Feature>;
+  topologySignature?: string;
+  unchanged?: boolean;
+};
 
 export function inflatePlanPoints<T extends PlanPoint>(points: T[], metres: number) {
   if (points.length === 0 || metres === 0) return points;
@@ -529,6 +540,7 @@ export function planBoundsDistance(bounds: PlanBounds) {
 export function bridgePartsForView<T extends { coordinates: Array<[number, number]> }>(
   parts: T[],
   view: Pick<BridgeViewState, 'west' | 'south' | 'east' | 'north'>,
+  maxParts = Infinity,
 ): T[] {
   if (parts.length === 0) return [];
   // The downstream pipeline owns world wrapping; be conservative at its seams.
@@ -557,11 +569,9 @@ export function bridgePartsForView<T extends { coordinates: Array<[number, numbe
   };
   const retained = new Set<number>();
   const queue: number[] = [];
+  const seeds: number[] = [];
   bounds.forEach((box, index) => {
-    if (boundsOverlap(box, viewport)) {
-      retained.add(index);
-      queue.push(index);
-    }
+    if (boundsOverlap(box, viewport)) seeds.push(index);
     const keys = cells(box);
     if (!keys) {
       oversized.push(index);
@@ -573,6 +583,12 @@ export function bridgePartsForView<T extends { coordinates: Array<[number, numbe
       else grid.set(key, [index]);
     }
   });
+  seeds.sort((left, right) => planBoundsDistance(bounds[left]) - planBoundsDistance(bounds[right]));
+  for (const index of seeds) {
+    if (retained.size >= maxParts) break;
+    retained.add(index);
+    queue.push(index);
+  }
   for (let cursor = 0; cursor < queue.length; cursor += 1) {
     const box = bounds[queue[cursor]];
     const expanded = {
@@ -586,6 +602,7 @@ export function bridgePartsForView<T extends { coordinates: Array<[number, numbe
       ? new Set([...oversized, ...keys.flatMap((key) => grid.get(key) ?? [])])
       : bounds.keys();
     for (const index of candidates) {
+      if (retained.size >= maxParts) break;
       if (retained.has(index) || !boundsOverlap(expanded, bounds[index])) continue;
       retained.add(index);
       queue.push(index);
@@ -1307,8 +1324,15 @@ export function clusterBridgeDrawables(drawables: BridgeDrawable[]) {
     parent[index] = find(parent[index]);
     return parent[index];
   };
-  for (let left = 0; left < polygons.length; left += 1) {
-    for (let right = left + 1; right < polygons.length; right += 1) {
+  const polygonBounds = polygons.map((polygon) => planBounds(polygon.plan, POLYGON_SPAN_GAP_METRES));
+  const polygonOrder = polygons.map((_, index) => index)
+    .sort((left, right) => polygonBounds[left].minEast - polygonBounds[right].minEast);
+  for (let orderedLeft = 0; orderedLeft < polygonOrder.length; orderedLeft += 1) {
+    const left = polygonOrder[orderedLeft];
+    for (let orderedRight = orderedLeft + 1; orderedRight < polygonOrder.length; orderedRight += 1) {
+      const right = polygonOrder[orderedRight];
+      if (polygonBounds[right].minEast > polygonBounds[left].maxEast) break;
+      if (!boundsOverlap(polygonBounds[left], polygonBounds[right])) continue;
       if (!polygonsFormOneSpan(polygons[left], polygons[right])) continue;
       const rootLeft = find(left);
       const rootRight = find(right);
@@ -1412,16 +1436,17 @@ function regroupParallelLineClusters(groups: BridgeDrawable[][]) {
   if (lineGroups.length <= 1) return groups;
   return [...withPolygons, ...unionDrawableGroups(lineGroups, (left, right) => (
     left.some((first) => right.some((second) => linesFormParallelBundle(first, second)))
-  ))];
+  ), 45)];
 }
 
 function regroupCompactPathJunctions(groups: BridgeDrawable[][]) {
-  return unionDrawableGroups(groups, pathClustersFormCompactJunction);
+  return unionDrawableGroups(groups, pathClustersFormCompactJunction, POLYGON_SPAN_GAP_METRES);
 }
 
 function unionDrawableGroups(
   groups: BridgeDrawable[][],
   shouldMerge: (left: BridgeDrawable[], right: BridgeDrawable[]) => boolean,
+  padding = Infinity,
 ) {
   if (groups.length <= 1) return groups;
   const parent = groups.map((_, index) => index);
@@ -1430,8 +1455,12 @@ function unionDrawableGroups(
     parent[index] = find(parent[index]);
     return parent[index];
   };
+  const groupBounds = Number.isFinite(padding)
+    ? groups.map((group) => planBounds(group.flatMap((drawable) => drawable.plan), padding))
+    : [];
   for (let left = 0; left < groups.length; left += 1) {
     for (let right = left + 1; right < groups.length; right += 1) {
+      if (groupBounds.length && !boundsOverlap(groupBounds[left], groupBounds[right])) continue;
       if (!shouldMerge(groups[left], groups[right])) continue;
       const rootLeft = find(left);
       const rootRight = find(right);
@@ -2790,8 +2819,15 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private flightMode = false;
   /** Soft dirty from tile streaming — resample without treating it as a camera move. */
   private sourceContentDirty = false;
+  /** A tile arrived while sampling; finish the coherent job before refreshing again. */
+  private sourceRefreshPending = false;
+  /** DEM content changed while sampling; discard that result and refresh once later. */
+  private terrainRefreshPending = false;
+  /** Camera coverage changed while sampling; finish once, then sample the latest view. */
+  private viewRefreshPending = false;
   /** Whether the in-flight sample was started by a camera/view change. */
   private pendingCommitViewChanged = false;
+  private acceptedTopologySignature?: string;
   private readonly bridgeResources = new Map<string, BridgeResources>();
   private pierOrigin = this.sceneOrigin;
   private pierOriginElevation = 0;
@@ -2800,13 +2836,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private fallbackData: FeatureCollection = { type: 'FeatureCollection', features: [] };
   private fallbackSignature = '';
   private meshWrite?: { entries: Array<{ bridge: SampledBridge; paintBridge: SampledBridge; key: string; sourceKeys?: string[] }>; index: number };
+  private refreshAfterMeshWrite = false;
   private jobStarted = 0;
   private activeResourceKeys?: Set<string>;
   private readonly geometryCache = new Map<string, NonNullable<ReturnType<BridgeModelLayer['buildClusterGeometry']>>>();
   private geometryVertices = 0;
   private readonly sectionCache = new Map<string, { sections: ReturnType<typeof bridgeTextureSections>; heights: string }>();
   private cachedSections = 0;
-  private readonly performanceStats = { updates: 0, built: 0, reused: 0, heightUpdates: 0, recenters: 0, lastUpdateMs: 0, geometryMs: 0, supportMs: 0, sectionMs: 0, paintMs: 0, geometryBuilds: 0, geometryCacheHits: 0, sectionBuilds: 0, sectionCacheHits: 0, sourceParts: 0, retainedParts: 0 };
+  private readonly performanceStats = { updates: 0, built: 0, reused: 0, heightUpdates: 0, recenters: 0, topologySkips: 0, lastUpdateMs: 0, sourceQueryMs: 0, normalizeMs: 0, retentionMs: 0, mergeMs: 0, clusterMs: 0, geometryMs: 0, terrainMs: 0, supportMs: 0, sectionMs: 0, paintMs: 0, terrainQueries: 0, geometryBuilds: 0, geometryCacheHits: 0, sectionBuilds: 0, sectionCacheHits: 0, sourceParts: 0, retainedParts: 0, droppedParts: 0 };
 
   getPerformanceStats() {
     return { ...this.performanceStats, cachedBridges: this.bridgeResources.size, cachedGeometryVertices: this.geometryVertices, cachedSections: this.cachedSections };
@@ -3004,26 +3041,41 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.cancelBridgeJobs();
     this.clearCpuCaches();
     this.lastUpdateSignature = undefined;
+    this.acceptedTopologySignature = undefined;
     this.sourceContentDirty = false;
+    this.sourceRefreshPending = false;
+    this.terrainRefreshPending = false;
+    this.viewRefreshPending = false;
   }
 
   /** Soft invalidation for immersive modes: resample without wiping mesh caches. */
   markSourceDirty() {
-    this.samplingJob = undefined;
     this.sourceContentDirty = true;
+    if (this.samplingJob) {
+      this.sourceRefreshPending = true;
+      return;
+    }
   }
 
   /** Resample streamed terrain without throwing away source-derived geometry. */
   markTerrainDirty() {
-    this.samplingJob = undefined;
+    if (this.samplingJob) {
+      this.terrainRefreshPending = true;
+      this.sourceContentDirty = true;
+      return;
+    }
     this.elevationCache.clear();
-    this.pendingElevation = true;
+    // The scene scheduler will perform one refresh after the tile burst. Do not
+    // turn this into an immediate render-loop retry for every DEM tile event.
+    this.pendingElevation = false;
     this.sourceContentDirty = true;
   }
 
   private cancelBridgeJobs() {
     this.samplingJob = undefined;
     this.meshWrite = undefined;
+    this.viewRefreshPending = false;
+    this.refreshAfterMeshWrite = false;
   }
 
   private clearCpuCaches() {
@@ -3037,9 +3089,16 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.jobStarted = performance.now();
     this.performanceStats.updates += 1;
     this.performanceStats.geometryMs = 0;
+    this.performanceStats.sourceQueryMs = 0;
+    this.performanceStats.normalizeMs = 0;
+    this.performanceStats.retentionMs = 0;
+    this.performanceStats.mergeMs = 0;
+    this.performanceStats.clusterMs = 0;
     this.performanceStats.supportMs = 0;
     this.performanceStats.sectionMs = 0;
     this.performanceStats.paintMs = 0;
+    this.performanceStats.terrainMs = 0;
+    this.performanceStats.terrainQueries = 0;
   }
 
   private recordJobDuration() {
@@ -3174,12 +3233,6 @@ export class BridgeModelLayer implements CustomLayerInterface {
     ) {
       if (!this.pendingElevation || now - this.jobStarted < PENDING_RETRY_MS) return;
     }
-    if (!viewChanged && !this.sourceContentDirty && !this.samplingJob && this.meshWrite) {
-      this.writeMeshes();
-      this.recordJobDuration();
-      map.triggerRepaint();
-      return;
-    }
     if (!visible) {
       this.cancelBridgeJobs();
       this.lastUpdateSignature = signature;
@@ -3203,6 +3256,21 @@ export class BridgeModelLayer implements CustomLayerInterface {
       map.triggerRepaint();
       return;
     }
+    if (!this.samplingJob && this.meshWrite) {
+      // Complete the atomic handoff before sampling another view. Otherwise a
+      // moving camera can start and discard bridge jobs on every upload frame,
+      // while the pending mesh write keeps render() calling back into here.
+      const queuedRefresh = viewChanged || this.sourceContentDirty;
+      if (viewChanged) {
+        this.sourceContentDirty = true;
+        this.pendingCommitViewChanged = true;
+      }
+      const complete = this.writeMeshes();
+      if (complete && queuedRefresh) this.refreshAfterMeshWrite = true;
+      this.recordJobDuration();
+      map.triggerRepaint();
+      return;
+    }
 
     this.lastUpdateSignature = signature;
     this.cancelDrapedHandoff();
@@ -3222,6 +3290,30 @@ export class BridgeModelLayer implements CustomLayerInterface {
     if (sampled.building) {
       this.recordJobDuration();
       map.triggerRepaint();
+      return;
+    }
+    if (this.terrainRefreshPending) {
+      // A DEM tile changed while this coherent sample was being built. Avoid
+      // committing elevations from a mixed tile generation, but wait for the
+      // coalescing scene scheduler before trying again.
+      this.terrainRefreshPending = false;
+      this.sourceRefreshPending = false;
+      this.viewRefreshPending = false;
+      this.elevationCache.clear();
+      this.pendingElevation = false;
+      this.sourceContentDirty = true;
+      this.recordJobDuration();
+      return;
+    }
+    if (this.viewRefreshPending) {
+      // The camera moved beyond this job's quantized coverage while it was
+      // yielding. Keep the previous complete scene and let the scheduler start
+      // one job for the latest view instead of restarting on every frame.
+      this.viewRefreshPending = false;
+      this.sourceRefreshPending = false;
+      this.sourceContentDirty = true;
+      this.pendingCommitViewChanged = true;
+      this.recordJobDuration();
       return;
     }
     if (sampled.pending) {
@@ -3249,17 +3341,25 @@ export class BridgeModelLayer implements CustomLayerInterface {
       )
     ) {
       // Keep the last complete scene; wait for a better tile set or camera move.
-      this.sourceContentDirty = false;
+      this.sourceContentDirty = this.sourceRefreshPending;
+      this.sourceRefreshPending = false;
       this.pendingCommitViewChanged = false;
       this.recordJobDuration();
       map.triggerRepaint();
       return;
     }
     this.pendingElevation = false;
-    this.sourceContentDirty = false;
+    this.sourceContentDirty = this.sourceRefreshPending;
+    this.sourceRefreshPending = false;
     this.pendingCommitViewChanged = false;
+    if (sampled.unchanged) {
+      this.recordJobDuration();
+      if (this.sourceContentDirty) map.triggerRepaint();
+      return;
+    }
     this.sampledBridges = sampled.bridges;
     this.acceptedViewSignature = signature;
+    this.acceptedTopologySignature = sampled.topologySignature;
     this.fallbackFeatures = ('fallbackFeatures' in sampled ? sampled.fallbackFeatures : undefined) ?? new Map();
     this.fallbackSignature = '';
     this.meshWrite = undefined;
@@ -3277,7 +3377,14 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const renderer = this.renderer;
     if (!map || !renderer) return;
     if (!this.userEnabled) return;
-    if (this.samplingJob || this.meshWrite || this.pendingElevation) this.updateBridges();
+    // Streaming source dirt is flushed by the coalescing scene scheduler. Do
+    // not turn tile event bursts into an update loop inside render().
+    if (this.refreshAfterMeshWrite) {
+      this.refreshAfterMeshWrite = false;
+      this.updateBridges();
+    } else if (this.samplingJob || this.meshWrite || this.pendingElevation) {
+      this.updateBridges();
+    }
     const view = this.currentView(map);
     if (!view.terrainEnabled || this.sampledBridges.length === 0) return;
     if (!shouldRenderBridgesForView(view)) {
@@ -3414,6 +3521,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const cached = this.cachedElevation(key);
     if (cached !== undefined) return cached;
     const sampled = map.queryTerrainElevation(new maplibregl.LngLat(longitude, latitude));
+    this.performanceStats.terrainQueries += 1;
     if (typeof sampled !== 'number' || !Number.isFinite(sampled)) return null;
     this.cacheElevation(key, sampled);
     return sampled;
@@ -3422,9 +3530,8 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private sampleVisibleBridges(map: MaplibreMap, view: BridgeViewState) {
     const viewKey = JSON.stringify(view);
     if (this.samplingJob && this.samplingJob.view !== viewKey) {
-      this.samplingJob = undefined;
+      this.viewRefreshPending = true;
       this.pendingCommitViewChanged = true;
-      this.beginPerformanceJob();
     }
     if (!this.samplingJob) {
       this.samplingJob = { generator: this.sampleBridgeJob(map, view), view: viewKey };
@@ -3447,6 +3554,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private *sampleBridgeJob(map: MaplibreMap, view: BridgeViewState): Generator<void, BridgeSampleResult, void> {
     if (!map.getSource(this.sourceId)) return { bridges: [] as SampledBridge[], pending: false };
     let features: SourceFeature[] = [];
+    const sourceStarted = performance.now();
     try {
       features = map.querySourceFeatures(this.sourceId, {
         sourceLayer: 'transportation',
@@ -3456,7 +3564,9 @@ export class BridgeModelLayer implements CustomLayerInterface {
       console.warn('Could not query bridge features', error);
       return { bridges: [], pending: false };
     }
+    this.performanceStats.sourceQueryMs += performance.now() - sourceStarted;
 
+    const normalizeStarted = performance.now();
     const uniqueLines = new Map<string, BridgeLine>();
     const fallbackFeatures = new Map<string, Feature>();
     const uniquePolygons = new Map<string, {
@@ -3494,9 +3604,32 @@ export class BridgeModelLayer implements CustomLayerInterface {
     }
 
     const parts = [...uniqueLines.values(), ...uniquePolygons.values()];
-    const retained = new Set(bridgePartsForView(parts, view));
+    this.performanceStats.normalizeMs += performance.now() - normalizeStarted;
+    const retentionStarted = performance.now();
+    const retained = new Set(bridgePartsForView(parts, view, MAX_RETAINED_BRIDGE_PARTS));
+    this.performanceStats.retentionMs += performance.now() - retentionStarted;
     this.performanceStats.sourceParts = parts.length;
     this.performanceStats.retainedParts = retained.size;
+    this.performanceStats.droppedParts = Math.max(0, parts.length - retained.size);
+    const topologySignature = JSON.stringify([
+      ...[...uniqueLines].filter(([, part]) => retained.has(part)).map(([key]) => key),
+      ...[...uniquePolygons].filter(([, part]) => retained.has(part)).map(([key]) => key),
+    ].sort());
+    if (
+      this.acceptedViewSignature === JSON.stringify(view)
+      && this.acceptedTopologySignature === topologySignature
+      && !this.pendingElevation
+    ) {
+      this.performanceStats.topologySkips += 1;
+      return {
+        bridges: this.sampledBridges,
+        pending: false,
+        fallbackFeatures,
+        topologySignature,
+        unchanged: true,
+      };
+    }
+    const mergeStarted = performance.now();
     const mergedLines = mergeBridgeLines([...uniqueLines.values()].filter((line) => retained.has(line)))
       .filter((line) => lineLengthMetres(line.coordinates) >= MIN_BRIDGE_LENGTH_METERS);
     const polygons = [...uniquePolygons.values()].filter((polygon) => {
@@ -3505,6 +3638,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       const holes = polygon.holes.map((hole) => toPlanPoints(hole));
       return deckAreaAllowed(outer, holes);
     });
+    this.performanceStats.mergeMs += performance.now() - mergeStarted;
 
     const seed = mergedLines[0]?.coordinates[0] ?? polygons[0]?.coordinates[0];
     if (!seed) {
@@ -3536,6 +3670,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       (view.west + view.east) / 2,
       (view.south + view.north) / 2,
     );
+    const clusterStarted = performance.now();
     const clusters = clusterBridgeDrawables(drawables)
       .map((members) => {
         // Tile enumeration may change the shared plan origin. Build each cluster
@@ -3565,6 +3700,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       // Admit bridges near the active area before spending capacity on distant spans.
       .sort((left, right) => left.distance - right.distance || right.span - left.span)
       .slice(0, MAX_BRIDGES);
+    this.performanceStats.clusterMs += performance.now() - clusterStarted;
 
     const terrainZoomBucket = Math.floor(view.zoom + 1e-6);
     const bridges: SampledBridge[] = [];
@@ -3580,7 +3716,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
       }
       yield;
     }
-    return { bridges, pending: this.pendingElevation, fallbackFeatures };
+    return { bridges, pending: this.pendingElevation, fallbackFeatures, topologySignature };
   }
 
   private buildClusterGeometry(cluster: BridgeDrawable[], surfaces: DeckSurface[], spanLength: number, origin: PlanOrigin) {
@@ -3726,7 +3862,10 @@ export class BridgeModelLayer implements CustomLayerInterface {
       north: point.north - Math.cos(azimuth) * SHADOW_OFFSET_METERS,
     }));
     const shadowCoordinates = shadowPlan.map((point) => planToLngLat(point, origin));
-    const shadowGround = this.sampleGround(map, shadowCoordinates, terrainZoomBucket);
+    // The shadow offset is only a little over a metre. Reuse the deck footprint
+    // samples and let the sparse clearance probes account for local terrain
+    // changes instead of querying every mesh vertex a second time.
+    const shadowGround = ground;
     const shadowProbes = bridgeClearanceProbes(shadowPlan, meshIndices, spanLength);
     const shadowProbeGround = this.sampleGround(map, shadowProbes.map((probe) => planToLngLat(probe.point, origin)), terrainZoomBucket);
     if (shadowGround === null || shadowProbeGround === null) {
@@ -3813,12 +3952,17 @@ export class BridgeModelLayer implements CustomLayerInterface {
   }
 
   private sampleGround(map: MaplibreMap, coordinates: Array<[number, number]>, terrainZoomBucket: number) {
+    const started = performance.now();
     const ground: number[] = [];
     for (const [longitude, latitude] of coordinates) {
       const elevation = this.sampleElevation(map, longitude, latitude, terrainZoomBucket);
-      if (elevation == null) return null;
+      if (elevation == null) {
+        this.performanceStats.terrainMs += performance.now() - started;
+        return null;
+      }
       ground.push(elevation);
     }
+    this.performanceStats.terrainMs += performance.now() - started;
     return ground;
   }
 
