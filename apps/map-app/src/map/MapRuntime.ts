@@ -6,6 +6,10 @@ import { globalMapStyleForBuildingMode } from './GlobalMapStyle';
 const DEFAULT_CENTER: [number, number] = [23.7609, 61.4981];
 const PROVIDER_ATTRIBUTION = [
   '<a href="https://digitransit.fi/" target="_blank" rel="noreferrer">Finnish transit data by Digitransit</a>',
+  '<a href="https://data.tampere.fi/data/en/dataset/tampereen-joukkoliikenteen-reaaliaikainen-rajapinta" target="_blank" rel="noreferrer">Tampere vehicle positions by Nysse / ITS Factory (CC BY 4.0)</a>',
+  '<a href="https://www.digitraffic.fi/en/railway-traffic/" target="_blank" rel="noreferrer">Finnish train positions by Fintraffic / Digitraffic (CC BY 4.0)</a>',
+  '<a href="https://www.hsl.fi/en/hsl/open-data" target="_blank" rel="noreferrer">HSL vehicle positions (CC BY 4.0)</a>',
+  '<a href="https://data.foli.fi/doc/index-en" target="_blank" rel="noreferrer">Föli vehicle positions (CC BY 4.0)</a>',
   '<a href="https://www.digitraffic.fi/en/road-traffic/" target="_blank" rel="noreferrer">Road weather, traffic and cameras by Fintraffic / Digitraffic</a>',
   '<a href="https://openchargemap.org/" target="_blank" rel="noreferrer">Charging locations by Open Charge Map</a>',
   '<a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo</a>',

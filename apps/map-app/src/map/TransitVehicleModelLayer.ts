@@ -618,7 +618,13 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
       );
       connector.rotation.y = Math.atan2(dx, dz);
       connector.rotation.x = (first.rotation.x + second.rotation.x) * 0.5;
-      connector.scale.z = Math.max(0.25, horizontalDistance);
+      // Only bridge the exposed articulation gap. Extending the connector
+      // across the full centre-to-centre distance lets the dark box show
+      // through adjacent car shells on bends and slopes.
+      connector.scale.z = Math.max(
+        0.25,
+        horizontalDistance - this.dimensions.length * 1.02,
+      );
     });
   }
 

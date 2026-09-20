@@ -56,10 +56,15 @@ export type TransitTripPlace = {
 
 export type TransitTripLeg = {
   provider?: TransitProviderId;
+  mode?: string;
   tripId?: string;
   serviceDate?: string;
+  routeId?: string;
+  directionId?: string;
   startTime?: string;
   endTime?: string;
+  scheduledStartTime?: string;
+  scheduledEndTime?: string;
   realTime?: boolean;
   from?: TransitTripPlace;
   to?: TransitTripPlace;
@@ -69,7 +74,23 @@ export type TransitTripLeg = {
 
 export type TransitTrip = {
   legs: TransitTripLeg[];
-  vehicleObservations?: TransitVehicleObservation[];
+};
+
+export type TransitVehicleJourneyIdentity = {
+  provider: TransitProviderId;
+  tripId: string;
+  mode?: string;
+  serviceDate?: string;
+  routeId?: string;
+  directionId?: string;
+  scheduledStartTime?: string;
+};
+
+export type TransitVehicleJourneyDescriptor = {
+  serviceDate: string;
+  routeId: string;
+  directionId: string;
+  scheduledStartTime: string;
 };
 
 export type TransitVehicleObservation = {
@@ -103,6 +124,8 @@ export type TransitRouteResult = {
     mode: string;
     geometry?: GeoJSON.LineString;
     tripId?: string;
+    routeId?: string;
+    directionId?: string;
     realTime?: boolean;
     cancelled?: boolean;
     delaySeconds?: number;
@@ -144,4 +167,11 @@ export interface TransitProvider {
     destination: [number, number],
     options?: TransitRouteOptions,
   ): Promise<TransitRouteResult[]>;
+}
+
+export interface TransitVehiclePositionProvider {
+  fetchObservations(
+    identity: TransitVehicleJourneyIdentity,
+    signal?: AbortSignal,
+  ): Promise<TransitVehicleObservation[]>;
 }

@@ -24,6 +24,7 @@ type MapCameraCoordinatorOptions = {
   routeCameraRequestRef: RefObject<number>;
   pendingSearchCameraRef: RefObject<[number, number] | null>;
   selectionCameraActiveRef: RefObject<boolean>;
+  vehicleFollowEnabledRef: RefObject<boolean>;
   selectedTransitStop: CameraSelection;
   selectedLocation: CameraSelection;
   positionInformation: CameraSelection;
@@ -48,6 +49,7 @@ export function useMapCameraCoordinator({
   routeCameraRequestRef,
   pendingSearchCameraRef,
   selectionCameraActiveRef,
+  vehicleFollowEnabledRef,
   selectedTransitStop,
   selectedLocation,
   positionInformation,
@@ -58,6 +60,16 @@ export function useMapCameraCoordinator({
   selectedRoadTrafficMessage,
   setRouteSheetCollapsed,
 }: MapCameraCoordinatorOptions) {
+  const selectionOwnsCamera = Boolean(
+    selectedTransitStop
+    || selectedLocation
+    || positionInformation
+    || selectedTrafficCamera
+    || selectedChargingStation
+    || selectedRoadWeather
+    || selectedRoadTraffic
+    || selectedRoadTrafficMessage,
+  );
   const cancelPendingCamera = useCallback(() => {
     routeCameraRequestRef.current += 1;
   }, [routeCameraRequestRef]);
@@ -107,6 +119,21 @@ export function useMapCameraCoordinator({
   }, [mapLoaded, routeOpen, routeResult, scheduleRouteFit]);
 
   useEffect(() => cancelPendingCamera, [cancelPendingCamera]);
+
+  useEffect(() => {
+    if (selectionOwnsCamera) cancelPendingCamera();
+  }, [
+    cancelPendingCamera,
+    positionInformation,
+    selectedChargingStation,
+    selectedLocation,
+    selectedRoadTraffic,
+    selectedRoadTrafficMessage,
+    selectedRoadWeather,
+    selectedTrafficCamera,
+    selectedTransitStop,
+    selectionOwnsCamera,
+  ]);
 
   useEffect(() => {
     const coordinates = pendingSearchCameraRef.current;
@@ -160,7 +187,7 @@ export function useMapCameraCoordinator({
     const updatePadding = () => {
       frame = undefined;
       if (immersiveActive) return;
-      if (routeOpen && routeResult) {
+      if (routeOpen && routeResult && !selectionOwnsCamera) {
         const padding = panelViewportPadding(map, 48, 24);
         const layout = [
           map.getContainer().clientWidth,
@@ -175,14 +202,14 @@ export function useMapCameraCoordinator({
         return;
       }
 
-      if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
+      if (pendingSearchCameraRef.current || selectionCameraActiveRef.current || vehicleFollowEnabledRef.current) return;
       const coordinates = selectedTransitStop?.coordinates
         ?? selectedLocation?.coordinates
         ?? positionInformation?.coordinates;
       if (!coordinates) return;
       if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
       recenterTimer = window.setTimeout(() => {
-        if (pendingSearchCameraRef.current || selectionCameraActiveRef.current) return;
+        if (pendingSearchCameraRef.current || selectionCameraActiveRef.current || vehicleFollowEnabledRef.current) return;
         map.easeTo({ center: coordinates, offset: selectionCameraOffset(map), duration: 250 });
       }, 120);
     };
@@ -212,10 +239,17 @@ export function useMapCameraCoordinator({
     routeResult,
     routeSheetCollapsed,
     scheduleRouteFit,
+    selectedChargingStation,
     selectedLocation,
+    selectedRoadTraffic,
+    selectedRoadTrafficMessage,
+    selectedRoadWeather,
+    selectedTrafficCamera,
     selectedTransitStop,
+    selectionOwnsCamera,
     selectionCameraActiveRef,
     transitDetailsOpen,
+    vehicleFollowEnabledRef,
   ]);
 
   return { cancelPendingCamera, fitRouteNow, scheduleRouteFit };

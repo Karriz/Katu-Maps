@@ -8,6 +8,7 @@ import type {
   TransitTrip,
   TransitTripPlace,
   TransitVehicleObservation,
+  TransitVehiclePositionProvider,
 } from './types';
 import { decodePolyline, finiteNumber, isoDurationSeconds } from './utils';
 import { apiHttpError, fetchWithTimeout } from '../ApiRequest';
@@ -157,7 +158,26 @@ const TRIP_QUERY = `
   query TripDetails($id: String!, $serviceDate: LocalDate!) {
     trip(id: $id) {
       gtfsId
+      directionId
+      route { gtfsId mode }
       tripGeometry { points length }
+      onServiceDate(date: $serviceDate) {
+        stopCalls {
+          stopLocation { ... on Stop { gtfsId name lat lon parentStation { gtfsId } } }
+          schedule { time { ... on ArrivalDepartureTime { arrival departure } } }
+          realTime {
+            arrival { time delay }
+            departure { time delay }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const VEHICLE_POSITIONS_QUERY = `
+  query TripVehiclePositions($id: String!, $serviceDate: LocalDate!) {
+    trip(id: $id) {
       pattern {
         vehiclePositions {
           vehicleId
@@ -169,16 +189,6 @@ const TRIP_QUERY = `
           trip {
             gtfsId
             onServiceDate(date: $serviceDate) { serviceDate }
-          }
-        }
-      }
-      onServiceDate(date: $serviceDate) {
-        stopCalls {
-          stopLocation { ... on Stop { gtfsId name lat lon parentStation { gtfsId } } }
-          schedule { time { ... on ArrivalDepartureTime { arrival departure } } }
-          realTime {
-            arrival { time delay }
-            departure { time delay }
           }
         }
       }
@@ -302,7 +312,7 @@ const planQuery = (directMode: 'WALK' | 'BICYCLE' | 'CAR', directOnly = false) =
             to { name lat lon stop { gtfsId parentStation { gtfsId } } }
             headsign
             trip { gtfsId }
-            route { shortName longName color textColor }
+            route { gtfsId shortName longName color textColor }
             legGeometry { points length }
           }
         }
@@ -331,7 +341,13 @@ type PlanLeg = {
   to?: PlanPlace | null;
   headsign?: unknown;
   trip?: { gtfsId?: unknown } | null;
-  route?: { shortName?: unknown; longName?: unknown; color?: unknown; textColor?: unknown } | null;
+  route?: {
+    gtfsId?: unknown;
+    shortName?: unknown;
+    longName?: unknown;
+    color?: unknown;
+    textColor?: unknown;
+  } | null;
   legGeometry?: { points?: unknown } | null;
 };
 
@@ -403,6 +419,7 @@ export function normalizeDigitransitRouteResults(itineraries: PlanItinerary[]): 
           ? { type: 'LineString', coordinates: legCoordinates[index] }
           : undefined,
         tripId: typeof leg.trip?.gtfsId === 'string' ? leg.trip.gtfsId : undefined,
+        routeId: typeof leg.route?.gtfsId === 'string' ? leg.route.gtfsId : undefined,
         realTime: leg.realTime === true,
         cancelled: leg.realtimeState === 'CANCELED',
         delaySeconds: isoDurationSeconds(leg.start?.estimated?.delay),
@@ -488,8 +505,9 @@ export const digitransitProvider: TransitProvider = {
     const resolvedServiceDate = serviceDate ?? finlandDate(new Date());
     const data = await graphQl<{
       trip?: {
+        directionId?: unknown;
+        route?: { gtfsId?: unknown; mode?: unknown } | null;
         tripGeometry?: { points?: unknown } | null;
-        pattern?: { vehiclePositions?: DigitransitVehiclePosition[] | null } | null;
         onServiceDate?: { stopCalls?: TripCall[] } | null;
       } | null;
     }>(TRIP_QUERY, { id: tripId, serviceDate: resolvedServiceDate }, signal);
@@ -506,19 +524,23 @@ export const digitransitProvider: TransitProvider = {
           ? [[place.lon, place.lat] as [number, number]]
           : []
       ));
-    const vehicleObservations = normalizeDigitransitVehicleObservations(
-      trip?.pattern?.vehiclePositions ?? [],
-    );
-    if (places.length < 2 || geometry.length < 2) return { legs: [], vehicleObservations };
+    if (places.length < 2 || geometry.length < 2) return { legs: [] };
     const first = places[0];
     const last = places[places.length - 1];
     return {
       legs: [{
         provider: 'digitransit',
+        mode: typeof trip?.route?.mode === 'string' ? trip.route.mode : undefined,
         tripId,
         serviceDate: resolvedServiceDate,
+        routeId: typeof trip?.route?.gtfsId === 'string' ? trip.route.gtfsId : undefined,
+        directionId: typeof trip?.directionId === 'string' ? trip.directionId : undefined,
         startTime: typeof first.departure === 'string' ? first.departure : undefined,
         endTime: typeof last.arrival === 'string' ? last.arrival : undefined,
+        scheduledStartTime: typeof first.scheduledDeparture === 'string'
+          ? first.scheduledDeparture : undefined,
+        scheduledEndTime: typeof last.scheduledArrival === 'string'
+          ? last.scheduledArrival : undefined,
         realTime: (trip?.onServiceDate?.stopCalls ?? []).some((call) => Boolean(
           call.realTime?.arrival?.time || call.realTime?.departure?.time,
         )),
@@ -527,7 +549,6 @@ export const digitransitProvider: TransitProvider = {
         intermediateStops: places.slice(1, -1),
         coordinates: geometry,
       }],
-      vehicleObservations,
     } satisfies TransitTrip;
   },
 
@@ -549,6 +570,19 @@ export const digitransitProvider: TransitProvider = {
     const itineraries = (data.planConnection?.edges ?? []).flatMap((edge) => edge.node ? [edge.node] : []);
     if (!itineraries.length) throw new Error('Digitransit could not find a transit route');
     return normalizeDigitransitRouteResults(itineraries);
+  },
+};
+
+export const digitransitVehiclePositionProvider: TransitVehiclePositionProvider = {
+  async fetchObservations(identity, signal) {
+    if (!identity.serviceDate) return [];
+    const data = await graphQl<{
+      trip?: { pattern?: { vehiclePositions?: DigitransitVehiclePosition[] | null } | null } | null;
+    }>(VEHICLE_POSITIONS_QUERY, {
+      id: identity.tripId,
+      serviceDate: identity.serviceDate,
+    }, signal);
+    return normalizeDigitransitVehicleObservations(data.trip?.pattern?.vehiclePositions ?? []);
   },
 };
 

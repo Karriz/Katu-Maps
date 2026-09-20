@@ -86,7 +86,16 @@ export function usePanelCoordinator({
     setContextMenuMarker(null);
     clearInfrastructureSelections();
     closeWeatherPanel();
-    if (window.innerWidth <= 760) cancelRoute();
+    if (window.innerWidth <= 760) {
+      cancelRoute();
+      return;
+    }
+    if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
+      rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
+      vehicleFollowEnabledRef.current = false;
+      vehicleFollowingRef.current = false;
+      setVehicleFollowing(false);
+    }
   }
 
   function preserveRouteVehicleForInfoPanel() {
@@ -100,7 +109,6 @@ export function usePanelCoordinator({
       if (routeResultRef.current) {
         // The selected stop gets its own vehicle context, but the planner's
         // selected route remains available for restoration when it closes.
-        rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
         transitStopsLayerRef.current?.selectSearchStopPreservingTrip(stop);
       }
     } else {
@@ -132,7 +140,6 @@ export function usePanelCoordinator({
     prepareInfoPanelOpen();
     clearLocationSelection();
     if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
-      rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
       transitStopsLayerRef.current?.clearStopSelection();
     } else {
       transitStopsLayerRef.current?.clearSelection();

@@ -1,19 +1,61 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { shouldPreserveRouteVehicleForInfoPanel, usePanelCoordinator } from './usePanelCoordinator';
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('panel coordinator route preservation', () => {
   it('preserves routed vehicles only for visible desktop routes', () => {
     expect(shouldPreserveRouteVehicleForInfoPanel(1280, true)).toBe(true);
     expect(shouldPreserveRouteVehicleForInfoPanel(760, true)).toBe(false);
     expect(shouldPreserveRouteVehicleForInfoPanel(1280, false)).toBe(false);
   });
+
+  it('pauses a preserved desktop route vehicle before an information panel takes the camera', () => {
+    vi.stubGlobal('window', { innerWidth: 1280 });
+    const result = { geometry: { coordinates: [] } } as any;
+    const vehicleFollowEnabledRef = { current: true };
+    const vehicleFollowingRef = { current: true };
+    const setVehicleFollowing = vi.fn();
+    const rememberRouteVehicle = vi.fn();
+    const coordinator = usePanelCoordinator({
+      routeVehicleViewRef: { current: true },
+      routeResultRef: { current: result },
+      vehicleFollowEnabledRef,
+      vehicleFollowingRef,
+      setVehicleFollowing,
+      setVehicleFollowAvailable: vi.fn(),
+      transitStopsLayerRef: { current: null },
+      setContextMenuMarker: vi.fn(),
+      closePositionInformation: vi.fn(),
+      setPositionInformation: vi.fn(),
+      clearLocationSelection: vi.fn(),
+      setSelectedTransitStop: vi.fn(),
+      trafficCamerasLayerRef: { current: null },
+      setSelectedTrafficCamera: vi.fn(),
+      chargingStationsLayerRef: { current: null },
+      setSelectedChargingStation: vi.fn(),
+      roadWeatherLayerRef: { current: null },
+      setSelectedRoadWeather: vi.fn(),
+      roadTrafficLayerRef: { current: null },
+      setSelectedRoadTraffic: vi.fn(),
+      setSelectedRoadTrafficMessage: vi.fn(),
+      closeWeatherPanel: vi.fn(),
+      cancelRoute: vi.fn(),
+      rememberRouteVehicle,
+    });
+
+    coordinator.prepareInfoPanelOpen();
+
+    expect(rememberRouteVehicle).toHaveBeenCalledWith(result, true);
+    expect(vehicleFollowEnabledRef.current).toBe(false);
+    expect(vehicleFollowingRef.current).toBe(false);
+    expect(setVehicleFollowing).toHaveBeenCalledWith(false);
+  });
 });
 
 describe('position information marker lifecycle', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it('keeps the marker at the coordinates owned by the open position panel', () => {
     vi.stubGlobal('window', { innerWidth: 1280 });
     const setContextMenuMarker = vi.fn();

@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import fixture from './__fixtures__/digitransit-vehicle-positions.json';
+import nysseIdentity from './__fixtures__/nysse-vehicle-identity.json';
+import nysseTramIdentity from './__fixtures__/nysse-tram-identity.json';
 import { normalizeDigitransitVehicleObservations } from './DigitransitProvider';
 import {
   beginObservedPositionTransition,
   LIVE_OBSERVATION_FUTURE_TOLERANCE_MS,
   LIVE_OBSERVATION_MAX_AGE_MS,
+  liveObservationSmoothingMs,
+  matchVehicleJourneyDescriptor,
   matchLiveObservation,
   observedPositionAt,
+  observedRouteDistanceAt,
+  resolvedVehicleJourneyIdentity,
   vehicleResponseIsCurrent,
   type VehiclePositionContext,
 } from './vehiclePosition';
@@ -15,6 +21,59 @@ const now = Date.parse('2026-08-31T15:00:20Z');
 const context: VehiclePositionContext = { ...fixture.selection, provider: 'digitransit' };
 
 describe('normalized live vehicle observations', () => {
+  it('builds the position-source identity from resolved trip data', () => {
+    expect(resolvedVehicleJourneyIdentity({
+      provider: 'digitransit',
+      tripId: 'tampere:exact-trip',
+      serviceDate: '2026-08-31',
+      routeId: 'tampere:13',
+      directionId: '1',
+      scheduledStartTime: '2026-08-31T14:30:00Z',
+      coordinates: [],
+    }, {
+      provider: 'digitransit',
+      tripId: 'tampere:exact-trip',
+      serviceDate: '2026-08-30',
+      routeId: 'stale-route',
+      directionId: '0',
+      scheduledStartTime: '2026-08-30T14:30:00Z',
+    })).toEqual({
+      provider: 'digitransit',
+      tripId: 'tampere:exact-trip',
+      serviceDate: '2026-08-31',
+      routeId: 'tampere:13',
+      directionId: '1',
+      scheduledStartTime: '2026-08-31T14:30:00Z',
+    });
+  });
+
+  it('matches one exact cross-feed journey identity and rejects ambiguity', () => {
+    const descriptor = nysseIdentity.positionFeed;
+    const identity = { ...nysseIdentity.digitransit, provider: 'digitransit' as const };
+    expect(matchVehicleJourneyDescriptor([descriptor], identity))
+      .toEqual(descriptor);
+    expect(matchVehicleJourneyDescriptor([descriptor, { ...descriptor }], identity))
+      .toBeUndefined();
+    expect(matchVehicleJourneyDescriptor([{ ...descriptor, directionId: '1' }], identity))
+      .toBeUndefined();
+  });
+
+  it('matches the captured tram identity', () => {
+    expect(matchVehicleJourneyDescriptor([nysseTramIdentity.positionFeed], {
+      ...nysseTramIdentity.digitransit,
+      provider: 'digitransit',
+    })).toEqual(nysseTramIdentity.positionFeed);
+  });
+
+  it('requires the full route, date, direction, and origin-time identity', () => {
+    const descriptor = nysseIdentity.positionFeed;
+    expect(matchVehicleJourneyDescriptor([descriptor], {
+      ...nysseIdentity.digitransit,
+      provider: 'digitransit',
+      directionId: undefined,
+    })).toBeUndefined();
+  });
+
   it('matches one fresh Digitransit observation to the exact dated trip', () => {
     const observations = normalizeDigitransitVehicleObservations(fixture.positions);
     expect(matchLiveObservation(observations, context, now)).toMatchObject({
@@ -64,6 +123,22 @@ describe('normalized live vehicle observations', () => {
       (61.4 + 61.4991) / 2,
     ]);
     expect(observedPositionAt(transition, now + 60_000)).toEqual(observation.coordinates);
+  });
+
+  it('smooths across the observed sampling interval with a safe cap', () => {
+    expect(liveObservationSmoothingMs(undefined, now)).toBe(5_000);
+    expect(liveObservationSmoothingMs(now - 12_000, now)).toBe(12_000);
+    expect(liveObservationSmoothingMs(now - 30_000, now)).toBe(15_000);
+    expect(liveObservationSmoothingMs(now - 2_000, now)).toBe(5_000);
+  });
+
+  it('interpolates route distance for smoothing along curved geometry', () => {
+    const [observation] = normalizeDigitransitVehicleObservations(fixture.positions);
+    const transition = beginObservedPositionTransition(
+      [23.7, 61.4], observation, now, 10_000, { from: 100, to: 260 },
+    );
+    expect(observedRouteDistanceAt(transition, now + 5_000)).toBe(180);
+    expect(observedRouteDistanceAt(transition, now + 60_000)).toBe(260);
   });
 
   it('snaps immediately when smoothing is disabled and handles time before the transition', () => {

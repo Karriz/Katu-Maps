@@ -104,7 +104,7 @@ export function createBrowserInstallOffer(listener: InstallOfferListener) {
     now: () => Date.now(),
     isStandalone: () => navigatorWithStandalone.standalone === true
       || window.matchMedia('(display-mode: standalone)').matches,
-    setTimer: (callback, delay) => window.setTimeout(callback, delay),
-    clearTimer: (timer) => window.clearTimeout(timer),
+    setTimer: (callback, delay) => setTimeout(callback, delay),
+    clearTimer: (timer) => clearTimeout(timer),
   }, listener);
 }

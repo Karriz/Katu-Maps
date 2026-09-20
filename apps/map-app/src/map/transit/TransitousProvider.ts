@@ -29,6 +29,9 @@ type RawStop = {
 type RawPlace = TransitTripPlace & { parentId?: string; lat?: number; lon?: number };
 type RawLeg = {
   tripId?: unknown;
+  routeId?: unknown;
+  directionId?: unknown;
+  serviceDate?: unknown;
   mode?: unknown;
   realTime?: unknown;
   cancelled?: unknown;
@@ -75,7 +78,7 @@ function absoluteTime(value: unknown) {
   return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString();
 }
 
-function tripLeg(raw: RawLeg) {
+function tripLeg(raw: RawLeg, fallbackServiceDate?: string) {
   const points = raw.legGeometry?.points;
   const precision = raw.legGeometry?.precision;
   const decodedCoordinates = typeof points === 'string' && typeof precision === 'number'
@@ -89,9 +92,15 @@ function tripLeg(raw: RawLeg) {
       .map((place) => [place.lon as number, place.lat as number] as [number, number]) : [];
   return {
     provider: 'transitous' as const,
+    mode: mode || undefined,
     tripId: text(raw.tripId) || undefined,
+    serviceDate: text(raw.serviceDate) || fallbackServiceDate,
+    routeId: text(raw.routeId) || undefined,
+    directionId: text(raw.directionId) || undefined,
     startTime: absoluteTime(raw.startTime),
     endTime: absoluteTime(raw.endTime),
+    scheduledStartTime: absoluteTime(raw.scheduledStartTime),
+    scheduledEndTime: absoluteTime(raw.scheduledEndTime),
     realTime: raw.realTime === true,
     from: raw.from,
     to: raw.to,
@@ -142,6 +151,9 @@ export function normalizeTransitousRouteResults(itineraries: TransitousItinerary
           ? { type: 'LineString', coordinates: legRoutes[index].coordinates }
           : undefined,
         tripId: text(leg.tripId) || undefined,
+        routeId: text(leg.routeId) || undefined,
+        directionId: text(leg.directionId) || undefined,
+        serviceDate: text(leg.serviceDate) || undefined,
         realTime: leg.realTime === true,
         cancelled: leg.cancelled === true,
         delaySeconds: finiteNumber(leg.delaySeconds) ? leg.delaySeconds : undefined,
@@ -236,7 +248,7 @@ export const transitousProvider: TransitProvider = {
     });
   },
 
-  async fetchTrip(tripId, _serviceDate, signal) {
+  async fetchTrip(tripId, serviceDate, signal) {
     const params = new URLSearchParams({
       tripId,
       detailedLegs: 'true',
@@ -244,7 +256,7 @@ export const transitousProvider: TransitProvider = {
       language: typeof navigator !== 'undefined' ? navigator.language : 'en',
     });
     const payload = await jsonRequest<{ legs?: RawLeg[] }>(`${serviceConfig.transitousApiRoot}/trip?${params}`, signal);
-    return { legs: (payload.legs ?? []).map(tripLeg) } satisfies TransitTrip;
+    return { legs: (payload.legs ?? []).map((leg) => tripLeg(leg, serviceDate)) } satisfies TransitTrip;
   },
 
   async fetchRoutes(origin, destination, options = {}) {

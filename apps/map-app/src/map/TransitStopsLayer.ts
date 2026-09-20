@@ -14,12 +14,14 @@ import { MAP_COLORS } from './MapPalette';
 import {
   fetchTransitStops,
   fetchTransitTrip,
+  fetchTransitVehicleObservations,
   type TransitProviderId,
   type TransitPositionStatus,
   type TransitStop,
   type TransitStopSelection,
   type TransitTripLeg,
   type TransitTripPlace,
+  type TransitVehicleObservation,
 } from './transit';
 import { resolveSelectedTripResult, tripIsDisplayableAt } from './transit/tripTimeline';
 import {
@@ -27,8 +29,11 @@ import {
   LIVE_OBSERVATION_FUTURE_TOLERANCE_MS,
   LIVE_OBSERVATION_MAX_AGE_MS,
   LIVE_POSITION_SMOOTHING_MS,
+  liveObservationSmoothingMs,
   matchLiveObservation,
   observedPositionAt,
+  observedRouteDistanceAt,
+  resolvedVehicleJourneyIdentity,
   vehicleResponseIsCurrent,
   type ObservedPositionTransition,
 } from './transit/vehiclePosition';
@@ -40,6 +45,7 @@ const SELECTED_STOP_SOURCE_ID = 'transit-selected-stop';
 const SELECTED_ROUTES_SOURCE_ID = 'transit-selected-routes';
 const ESTIMATED_VEHICLE_SOURCE_ID = 'transit-estimated-vehicle';
 const MIN_TRANSIT_ZOOM = 9;
+const INITIAL_LIVE_REFRESH_MS = 4_000;
 
 type TransitFeature = {
   type: 'Feature';
@@ -69,6 +75,9 @@ export type TransitVehicleTripSelection = {
   showRoute: boolean;
   provider: TransitProviderId;
   serviceDate?: string;
+  routeId?: string;
+  directionId?: string;
+  scheduledStartTime?: string;
   boardingStop?: { stopId: string; coordinates: [number, number]; departureTime: number; scheduledDeparture?: string };
 };
 
@@ -77,11 +86,14 @@ type SelectedTrip = TransitVehicleTripSelection;
 type TrackedTrip = {
   selection: SelectedTrip;
   estimatedLegs: EstimatedTripLeg[];
+  /** Route geometry for rendering an observation, even when stop times cannot support estimation. */
+  observedLeg?: EstimatedTripLeg;
   routeCoordinates?: [number, number][];
   boardingContextUsable: boolean;
   boardingDistance?: number;
   observedTransition?: ObservedPositionTransition;
   liveFallback?: { from: TransitVehiclePose; start: number; end: number; observationRecordedAt: number };
+  initialLiveRefreshTimer?: number;
   controller?: AbortController;
   lastFetchAt: number;
 };
@@ -320,7 +332,51 @@ function nearestPathIndex(
   return nearestIndex;
 }
 
-export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [number, number][]) {
+function nearestPathDistance(
+  coordinates: [number, number][],
+  distances: number[],
+  point: [number, number],
+  minimumDistance = 0,
+) {
+  let bestPathDistance = Math.max(0, minimumDistance);
+  let bestPointDistance = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const segmentStartDistance = distances[index - 1];
+    const segmentEndDistance = distances[index];
+    if (segmentEndDistance < minimumDistance) continue;
+    const from = coordinates[index - 1];
+    const to = coordinates[index];
+    const latitudeScale = Math.cos((from[1] + to[1] + point[1] * 2) * Math.PI / 720);
+    const segmentX = (to[0] - from[0]) * latitudeScale;
+    const segmentY = to[1] - from[1];
+    const pointX = (point[0] - from[0]) * latitudeScale;
+    const pointY = point[1] - from[1];
+    const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+    const minimumProgress = segmentEndDistance > segmentStartDistance
+      ? Math.max(0, Math.min(1, (minimumDistance - segmentStartDistance) / (segmentEndDistance - segmentStartDistance)))
+      : 0;
+    const projectedProgress = lengthSquared > 0
+      ? (pointX * segmentX + pointY * segmentY) / lengthSquared
+      : 0;
+    const progress = Math.max(minimumProgress, Math.min(1, projectedProgress));
+    const projected: [number, number] = [
+      from[0] + (to[0] - from[0]) * progress,
+      from[1] + (to[1] - from[1]) * progress,
+    ];
+    const pointDistance = distanceInMeters(projected, point);
+    if (pointDistance < bestPointDistance) {
+      bestPointDistance = pointDistance;
+      bestPathDistance = segmentStartDistance + (segmentEndDistance - segmentStartDistance) * progress;
+    }
+  }
+  return bestPathDistance;
+}
+
+export function buildEstimatedTripLeg(
+  leg: TransitTripLeg,
+  inputCoordinates: [number, number][],
+  allowMissingTimeline = false,
+) {
   let coordinates = inputCoordinates;
   if (coordinates.length < 2) return undefined;
   const intermediateStops = Array.isArray(leg.intermediateStops)
@@ -342,12 +398,12 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
   if (mappingError(reversed) < mappingError(coordinates)) coordinates = reversed;
   const distances = cumulativeDistances(coordinates);
   const anchors: Array<{ distance: number; time: number; stopId?: string; stopIndex?: number }> = [];
-  let pathIndex = 0;
+  let pathDistance = 0;
 
   places.forEach((place, placeIndex) => {
     const point = placeCoordinates(place);
     if (!point) return;
-    pathIndex = nearestPathIndex(coordinates, point, pathIndex);
+    pathDistance = nearestPathDistance(coordinates, distances, point, pathDistance);
     const arrival = timestamp(place?.arrival) ?? timestamp(place?.scheduledArrival);
     const departure = timestamp(place?.departure) ?? timestamp(place?.scheduledDeparture);
     const fallback = placeIndex === 0 ? timestamp(leg.startTime) : timestamp(leg.endTime);
@@ -358,7 +414,7 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
         : [arrival, departure];
     times.forEach((time) => {
       if (time !== undefined && (anchors.length === 0 || time >= anchors[anchors.length - 1].time)) {
-        anchors.push({ distance: distances[pathIndex], time, stopId: place?.stopId, stopIndex: placeIndex });
+        anchors.push({ distance: pathDistance, time, stopId: place?.stopId, stopIndex: placeIndex });
       }
     });
   });
@@ -366,11 +422,12 @@ export function buildEstimatedTripLeg(leg: TransitTripLeg, inputCoordinates: [nu
   if (anchors.length < 2) {
     const start = timestamp(leg.startTime);
     const end = timestamp(leg.endTime);
-    if (start === undefined || end === undefined || end <= start) return undefined;
-    anchors.splice(0, anchors.length,
-      { distance: 0, time: start },
-      { distance: distances[distances.length - 1], time: end },
-    );
+    if (start !== undefined && end !== undefined && end > start) {
+      anchors.splice(0, anchors.length,
+        { distance: 0, time: start },
+        { distance: distances[distances.length - 1], time: end },
+      );
+    } else if (!allowMissingTimeline) return undefined;
   }
 
   return {
@@ -409,9 +466,9 @@ export function estimatedDistance(
   const conservative = Math.min(interpolated, nextAnchor.distance - approachReserve);
   if (!boardingStop || time >= boardingStop.departureTime) return conservative;
   const stopAnchor = anchors.find((anchor) => anchor.stopId === boardingStop.stopId);
-  const boardingDistance = resolvedBoardingDistance ?? stopAnchor?.distance ?? leg.cumulativeDistances[
-    nearestPathIndex(leg.coordinates, boardingStop.coordinates, 0)
-  ];
+  const boardingDistance = resolvedBoardingDistance ?? stopAnchor?.distance ?? nearestPathDistance(
+    leg.coordinates, leg.cumulativeDistances, boardingStop.coordinates,
+  );
   return Math.min(conservative, boardingDistance);
 }
 
@@ -481,7 +538,7 @@ export function estimatedVehiclePose(
   };
 }
 
-function observedVehiclePose(
+export function observedVehiclePose(
   leg: EstimatedTripLeg,
   coordinates: [number, number],
   mode: string,
@@ -489,21 +546,38 @@ function observedVehiclePose(
   hasLeftStartingStop: boolean,
   headingDegrees?: number,
 ): TransitVehiclePose {
-  const pathIndex = nearestPathIndex(leg.coordinates, coordinates, 0);
-  const centerDistance = leg.cumulativeDistances[pathIndex];
+  const centerDistance = nearestPathDistance(leg.coordinates, leg.cumulativeDistances, coordinates);
+  return observedVehiclePoseAtDistance(
+    leg, centerDistance, mode, color, hasLeftStartingStop, headingDegrees,
+  );
+}
+
+function observedVehiclePoseAtDistance(
+  leg: EstimatedTripLeg,
+  centerDistance: number,
+  mode: string,
+  color: string,
+  hasLeftStartingStop: boolean,
+  _headingDegrees?: number,
+): TransitVehiclePose {
   const layout = vehiclePartLayout(mode);
   const spacing = layout.length + layout.gap;
+  const halfLength = spacing * (layout.count - 1) / 2;
+  const totalDistance = leg.cumulativeDistances[leg.cumulativeDistances.length - 1];
+  const articulatedCenterDistance = totalDistance > halfLength * 2
+    ? Math.max(halfLength, Math.min(totalDistance - halfLength, centerDistance))
+    : totalDistance / 2;
   const centerIndex = Math.floor(layout.count / 2);
-  const parts = Array.from({ length: layout.count }, (_, index) => (
-    index === centerIndex
-      ? {
-        coordinates,
-        heading: isNumber(headingDegrees)
-          ? headingDegrees * Math.PI / 180
-          : pathPoseAtDistance(leg, centerDistance).heading,
-      }
-      : pathPoseAtDistance(leg, centerDistance + (index - centerIndex) * spacing)
-  ));
+  const parts = Array.from({ length: layout.count }, (_, index) => {
+    const routePose = pathPoseAtDistance(
+      leg,
+      articulatedCenterDistance + (index - centerIndex) * spacing,
+    );
+    return {
+      coordinates: routePose.coordinates,
+      heading: routePose.heading,
+    };
+  });
   return { mode, color, status: 'live', hasLeftStartingStop, realTime: true, parts };
 }
 
@@ -967,7 +1041,10 @@ export class TransitStopsLayer {
   private async loadTrackedTrip(role: 'current' | 'next', tracked: TrackedTrip, force: boolean) {
     const { selection } = tracked;
     if (!this.map || this.trackedTrips[role] !== tracked) return;
-    if (!force && Date.now() - tracked.lastFetchAt < 10_000) return;
+    const refreshMs = selection.provider === 'transitous'
+      ? serviceConfig.transitousTripRefreshMs
+      : serviceConfig.transitTripRefreshMs;
+    if (!force && Date.now() - tracked.lastFetchAt < refreshMs) return;
     tracked.lastFetchAt = Date.now();
     tracked.controller?.abort();
     const controller = new AbortController();
@@ -1007,27 +1084,83 @@ export class TransitStopsLayer {
         provider: selection.provider, reason: resolution.reason,
       });
       const resolved = resolution.ok ? resolution.trip : undefined;
-      const estimatedLegs: EstimatedTripLeg[] = [];
+      let observations: TransitVehicleObservation[] = [];
       if (resolved) {
-        const estimatedLeg = buildEstimatedTripLeg(resolved.leg, resolved.leg.coordinates);
+        try {
+          observations = await fetchTransitVehicleObservations(resolvedVehicleJourneyIdentity(
+            resolved.leg,
+            {
+              provider: selection.provider,
+              tripId: selection.tripId,
+              mode: selection.mode,
+              serviceDate: selection.serviceDate,
+              routeId: selection.routeId,
+              directionId: selection.directionId,
+              scheduledStartTime: selection.scheduledStartTime,
+            },
+          ), controller.signal);
+        } catch (error) {
+          if ((error as { name?: string }).name === 'AbortError') return;
+          console.warn(`${selection.provider} vehicle position lookup failed.`, error);
+        }
+      }
+      if (
+        controller.signal.aborted
+        || !this.map
+        || !vehicleResponseIsCurrent(requestIdentity, {
+          generation: this.tripGeneration,
+          key: `${role}:${this.trackedTrips[role]?.selection.provider ?? ''}:${this.trackedTrips[role]?.selection.tripId ?? ''}:${this.trackedTrips[role]?.selection.serviceDate ?? ''}:${this.trackedTrips[role]?.selection.boardingStop?.stopId ?? ''}:${this.trackedTrips[role]?.selection.boardingStop?.scheduledDeparture ?? ''}`,
+        })
+        || this.trackedTrips[role] !== tracked
+      ) return;
+      const estimatedLegs: EstimatedTripLeg[] = [];
+      let observedLeg: EstimatedTripLeg | undefined;
+      if (resolved) {
+        const estimatedLeg = buildEstimatedTripLeg(resolved.leg, resolved.leg.coordinates, true);
+        observedLeg = estimatedLeg;
         if (estimatedLeg && resolved.vehicleTimelineUsable) estimatedLegs.push(estimatedLeg);
       }
       tracked.routeCoordinates = resolved?.leg.coordinates.length
         ? resolved.leg.coordinates : undefined;
       tracked.boardingContextUsable = resolved?.boardingContextUsable ?? false;
       tracked.estimatedLegs = estimatedLegs;
+      tracked.observedLeg = observedLeg;
       tracked.boardingDistance = resolved && estimatedLegs[0] && resolved.boardingStopIndex >= 0
         ? estimatedLegs[0].anchors.find((anchor) => anchor.stopIndex === resolved.boardingStopIndex)?.distance
         : undefined;
-      const observation = resolved?.boardingContextUsable
-        ? matchLiveObservation(payload.vehicleObservations ?? [], selection, Date.now())
+      const observation = resolved
+        ? matchLiveObservation(observations, selection, Date.now())
         : undefined;
       if (observation && observation.recordedAt > (tracked.observedTransition?.observation.recordedAt ?? 0)) {
+        const transitionNow = Date.now();
+        const previousRecordedAt = tracked.observedTransition?.observation.recordedAt;
         const currentCoordinates = tracked.observedTransition
-          ? observedPositionAt(tracked.observedTransition, Date.now())
+          ? observedPositionAt(tracked.observedTransition, transitionNow)
           : undefined;
-        tracked.observedTransition = beginObservedPositionTransition(currentCoordinates, observation, Date.now());
+        const targetRouteDistance = observedLeg
+          ? nearestPathDistance(observedLeg.coordinates, observedLeg.cumulativeDistances, observation.coordinates)
+          : undefined;
+        const currentRouteDistance = tracked.observedTransition
+          ? observedRouteDistanceAt(tracked.observedTransition, transitionNow)
+          : undefined;
+        tracked.observedTransition = beginObservedPositionTransition(
+          currentCoordinates,
+          observation,
+          transitionNow,
+          liveObservationSmoothingMs(previousRecordedAt, observation.recordedAt),
+          targetRouteDistance === undefined ? undefined : {
+            from: currentRouteDistance ?? targetRouteDistance,
+            to: targetRouteDistance,
+          },
+        );
         tracked.liveFallback = undefined;
+        if (previousRecordedAt === undefined && tracked.initialLiveRefreshTimer === undefined) {
+          tracked.initialLiveRefreshTimer = window.setTimeout(() => {
+            tracked.initialLiveRefreshTimer = undefined;
+            if (typeof document !== 'undefined' && document.hidden) return;
+            if (this.trackedTrips[role] === tracked) void this.loadTrackedTrip(role, tracked, true);
+          }, INITIAL_LIVE_REFRESH_MS);
+        }
       }
       this.updateSelectedRoutes();
       this.updateEstimatedVehicle();
@@ -1053,17 +1186,44 @@ export class TransitStopsLayer {
     this.selectedRoutesCallback?.(features);
   }
 
-  private poseForTrackedTrip(tracked: TrackedTrip, now: number) {
+  private poseForTrackedTrip(tracked: TrackedTrip, now: number, allowEstimate = true) {
+    const liveUsable = tracked.observedTransition
+      && tracked.observedTransition.observation.recordedAt >= now - LIVE_OBSERVATION_MAX_AGE_MS
+      && tracked.observedTransition.observation.recordedAt <= now + LIVE_OBSERVATION_FUTURE_TOLERANCE_MS;
+    if (liveUsable && tracked.observedLeg) {
+      tracked.liveFallback = undefined;
+      const routeDistance = observedRouteDistanceAt(tracked.observedTransition!, now);
+      const firstDeparture = tracked.observedLeg.anchors[0]?.time;
+      const hasLeftStartingStop = firstDeparture === undefined || now >= firstDeparture;
+      return {
+        pose: routeDistance === undefined
+          ? observedVehiclePose(
+            tracked.observedLeg,
+            observedPositionAt(tracked.observedTransition!, now),
+            tracked.selection.mode,
+            tracked.selection.color,
+            hasLeftStartingStop,
+            tracked.observedTransition!.observation.heading,
+          )
+          : observedVehiclePoseAtDistance(
+            tracked.observedLeg,
+            routeDistance,
+            tracked.selection.mode,
+            tracked.selection.color,
+            hasLeftStartingStop,
+            tracked.observedTransition!.observation.heading,
+          ),
+        leg: tracked.observedLeg,
+      };
+    }
+
+    if (!allowEstimate) return undefined;
     const activeLeg = tracked.estimatedLegs.find((leg) => (
       now >= leg.anchors[0].time && now <= leg.anchors[leg.anchors.length - 1].time
     )) ?? tracked.estimatedLegs.find((leg) => now < leg.anchors[0].time);
     const displayableLeg = activeLeg && tripIsDisplayableAt(activeLeg.anchors.map((anchor) => anchor.time), now)
       ? activeLeg : undefined;
     if (!displayableLeg) return undefined;
-    const liveUsable = tracked.observedTransition
-      && tracked.observedTransition.observation.recordedAt >= now - LIVE_OBSERVATION_MAX_AGE_MS
-      && tracked.observedTransition.observation.recordedAt <= now + LIVE_OBSERVATION_FUTURE_TOLERANCE_MS;
-    if (liveUsable) tracked.liveFallback = undefined;
     const estimatedPose = estimatedVehiclePose(
       displayableLeg,
       now,
@@ -1072,17 +1232,8 @@ export class TransitStopsLayer {
       tracked.boardingContextUsable ? tracked.selection.boardingStop : undefined,
       tracked.boardingDistance,
     );
-    let pose = liveUsable
-      ? observedVehiclePose(
-        displayableLeg,
-        observedPositionAt(tracked.observedTransition!, now),
-        tracked.selection.mode,
-        tracked.selection.color,
-        now >= displayableLeg.anchors[0].time,
-        tracked.observedTransition!.observation.heading,
-      )
-      : estimatedPose;
-    if (!liveUsable && estimatedPose && tracked.observedTransition) {
+    let pose = estimatedPose;
+    if (estimatedPose && tracked.observedTransition) {
       const recordedAt = tracked.observedTransition.observation.recordedAt;
       if (!tracked.liveFallback || tracked.liveFallback.observationRecordedAt !== recordedAt) {
         tracked.liveFallback = {
@@ -1117,8 +1268,9 @@ export class TransitStopsLayer {
     const now = Date.now();
     const current = this.trackedTrips.current
       ? this.poseForTrackedTrip(this.trackedTrips.current, now) : undefined;
-    const next = this.trackedTrips.next?.boardingContextUsable
-      ? this.poseForTrackedTrip(this.trackedTrips.next, now) : undefined;
+    const next = this.trackedTrips.next
+      ? this.poseForTrackedTrip(this.trackedTrips.next, now, this.trackedTrips.next.boardingContextUsable)
+      : undefined;
     const features = ([['current', current], ['next', next]] as const).flatMap(([role, positioned]) => {
       if (!positioned) return [];
       const tracked = this.trackedTrips[role];
@@ -1144,7 +1296,12 @@ export class TransitStopsLayer {
   }
 
   private clearSelectedTrip() {
-    Object.values(this.trackedTrips).forEach((tracked) => tracked?.controller?.abort());
+    Object.values(this.trackedTrips).forEach((tracked) => {
+      tracked?.controller?.abort();
+      if (tracked?.initialLiveRefreshTimer !== undefined) {
+        window.clearTimeout(tracked.initialLiveRefreshTimer);
+      }
+    });
     this.stopTripPolling();
     this.trackedTrips = {};
     this.journeyMode = false;

@@ -18,9 +18,10 @@ describe('transit route provider normalization', () => {
         {
           mode: 'TRAM', transitLeg: true,
           distance: 4_200,
+          trip: { gtfsId: 'tampere:trip-3' },
           from: { name: 'Start', lat: 61.49, lon: 23.76, stop: { gtfsId: 'digi:start' } },
           to: { name: 'Stop', lat: 61.50, lon: 23.77, stop: { gtfsId: 'digi:stop', parentStation: { gtfsId: 'digi:station' } } },
-          route: { shortName: '3', color: '1769E8', textColor: 'FFFFFF' },
+          route: { gtfsId: 'tampere:3', shortName: '3', color: '1769E8', textColor: 'FFFFFF' },
         },
         {
           mode: 'WALK', transitLeg: false,
@@ -36,6 +37,7 @@ describe('transit route provider normalization', () => {
     expect(result.transitLegs).toMatchObject([
       {
         mode: 'TRAM', route: '3', routeColor: '1769E8', routeTextColor: 'FFFFFF', distanceMeters: 4_200,
+        tripId: 'tampere:trip-3', routeId: 'tampere:3',
         from: { name: 'Start', stopId: 'digi:start', coordinates: [23.76, 61.49] },
         to: { name: 'Stop', stopId: 'digi:stop', parentStopId: 'digi:station', coordinates: [23.77, 61.50] },
         provider: 'digitransit',
@@ -62,6 +64,7 @@ describe('transit route provider normalization', () => {
         },
         {
           mode: 'BUS', routeShortName: 'M4', routeColor: '#167052', routeTextColor: '#FFFFFF',
+          tripId: 'vbb:trip-m4', routeId: 'vbb:route-m4', directionId: '0', serviceDate: '2026-08-30',
           from: { name: 'Stop', stopId: 'transitous:stop', lat: 52.51, lon: 13.41 },
           to: { name: 'End', stopId: 'transitous:end', lat: 52.52, lon: 13.42 },
         },
@@ -79,6 +82,7 @@ describe('transit route provider normalization', () => {
       },
       {
         mode: 'BUS', route: 'M4', routeColor: '#167052', routeTextColor: '#FFFFFF',
+        tripId: 'vbb:trip-m4', routeId: 'vbb:route-m4', directionId: '0', serviceDate: '2026-08-30',
         from: { name: 'Stop', stopId: 'transitous:stop', coordinates: [13.41, 52.51] },
         to: { name: 'End', stopId: 'transitous:end', coordinates: [13.42, 52.52] },
         provider: 'transitous',

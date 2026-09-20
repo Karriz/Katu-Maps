@@ -1479,6 +1479,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     routeCameraRequestRef,
     pendingSearchCameraRef,
     selectionCameraActiveRef,
+    vehicleFollowEnabledRef,
     selectedTransitStop,
     selectedLocation,
     positionInformation,
@@ -1523,6 +1524,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         showRoute: false,
         provider: leg.provider ?? 'transitous',
         serviceDate: leg.serviceDate,
+        routeId: leg.routeId,
+        directionId: leg.directionId,
+        scheduledStartTime: leg.scheduledStartTime,
         boardingStop: scheduledDeparture && leg.startTime && originCoordinates && leg.from?.stopId ? {
           stopId: leg.from.stopId,
           coordinates: originCoordinates,
@@ -2391,6 +2395,9 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         clearLocationSelection();
         if (preserveRouteVehicleForInfoPanel() && routeResultRef.current) {
           rememberRouteVehicle(routeResultRef.current, vehicleFollowingRef.current);
+          vehicleFollowEnabledRef.current = false;
+          vehicleFollowingRef.current = false;
+          setVehicleFollowing(false);
         }
         setSelectedTransitStop(stop);
       map.easeTo({

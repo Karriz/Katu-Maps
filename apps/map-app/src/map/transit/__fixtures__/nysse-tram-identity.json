@@ -1,0 +1,21 @@
+{
+  "capturedAt": "2026-09-20T20:10:00Z",
+  "digitransit": {
+    "provider": "digitransit",
+    "tripId": "tampere:131_21417_17997064",
+    "serviceDate": "2026-09-20",
+    "routeId": "tampere:3",
+    "directionId": "1",
+    "scheduledStartTime": "2026-09-20T20:06:00Z"
+  },
+  "positionFeed": {
+    "serviceDate": "2026-09-20",
+    "routeId": "tampere:3",
+    "directionId": "1",
+    "scheduledStartTime": "2026-09-20T20:06:00Z"
+  },
+  "notes": [
+    "Digitransit reported the scheduled origin as 2026-09-20T23:06:00+03:00.",
+    "The SIRI dated journey reference was 2306 and matched exactly one route 3 trip."
+  ]
+}

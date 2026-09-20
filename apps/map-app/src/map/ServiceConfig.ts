@@ -5,7 +5,7 @@ function configuredEndpoint(value: string | undefined, fallback: string) {
   if (!candidate) return '';
   try {
     const url = new URL(candidate);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return fallback;
+    if (!['https:', 'http:', 'wss:'].includes(url.protocol)) return fallback;
     return url.href.replace(/\/$/, '');
   } catch {
     return fallback;
@@ -27,10 +27,28 @@ export const serviceConfig = Object.freeze({
   transitousApiRoot: configuredEndpoint(import.meta.env.VITE_TRANSITOUS_API_ROOT, 'https://api.transitous.org/api/v6'),
   transitousRoutesEndpoint: configuredEndpoint(import.meta.env.VITE_TRANSITOUS_ROUTES_ENDPOINT, 'https://api.transitous.org/api/experimental/map/routes'),
   digitransitEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRANSIT_ENDPOINT, 'https://api.digitransit.fi/routing/v2/finland/gtfs/v1'),
+  nysseVehiclePositionsEndpoint: configuredEndpoint(
+    import.meta.env.VITE_NYSSE_VEHICLE_POSITIONS_ENDPOINT,
+    'https://data.itsfactory.fi/siriaccess/vm/json',
+  ),
+  digitrafficRailEndpoint: configuredEndpoint(
+    import.meta.env.VITE_DIGITRAFFIC_RAIL_ENDPOINT,
+    'https://rata.digitraffic.fi/api/v1',
+  ),
+  hslMqttEndpoint: configuredEndpoint(import.meta.env.VITE_HSL_MQTT_ENDPOINT, 'wss://mqtt.hsl.fi'),
+  foliVehiclePositionsEndpoint: configuredEndpoint(
+    import.meta.env.VITE_FOLI_VEHICLE_POSITIONS_ENDPOINT,
+    'https://data.foli.fi/siri/vm',
+  ),
   digitrafficRoadEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRAFFIC_ROAD_ENDPOINT, 'https://tie.digitraffic.fi'),
   digitrafficWeathercamEndpoint: configuredEndpoint(import.meta.env.VITE_DIGITRAFFIC_WEATHERCAM_ENDPOINT, 'https://weathercam.digitraffic.fi'),
   openChargeMapEndpoint: configuredEndpoint(import.meta.env.VITE_OPENCHARGEMAP_ENDPOINT, 'https://api.openchargemap.io/v3'),
   openChargeMapApiKey: import.meta.env.VITE_OPENCHARGEMAP_API_KEY?.trim() || '',
   openMeteoEndpoint: configuredEndpoint(import.meta.env.VITE_OPENMETEO_ENDPOINT, 'https://api.open-meteo.com'),
   transitTripRefreshMs: configuredInterval(import.meta.env.VITE_TRANSIT_TRIP_REFRESH_MS, 15_000, 15_000),
+  transitousTripRefreshMs: configuredInterval(
+    import.meta.env.VITE_TRANSITOUS_TRIP_REFRESH_MS,
+    60_000,
+    15_000,
+  ),
 });

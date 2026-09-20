@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-09-20T17:11:57Z",
+  "digitransit": {
+    "provider": "digitransit",
+    "tripId": "tampere:131_20801_18494554",
+    "serviceDate": "2026-09-20",
+    "routeId": "tampere:13",
+    "directionId": "0",
+    "scheduledStartTime": "2026-09-20T16:30:00Z"
+  },
+  "positionFeed": {
+    "serviceDate": "2026-09-20",
+    "routeId": "tampere:13",
+    "directionId": "0",
+    "scheduledStartTime": "2026-09-20T16:30:00Z"
+  },
+  "notes": [
+    "Digitransit reported the scheduled origin as 2026-09-20T19:30:00+03:00.",
+    "The public GTFS-Realtime feed reported start_time 16:30:00 and omitted trip_id and direction_id.",
+    "The raw GTFS-Realtime route_id 13 was normalized to the Digitransit feed-scoped ID tampere:13.",
+    "Direction 0 came from the SIRI record joined to GTFS-Realtime by vehicle ID."
+  ]
+}

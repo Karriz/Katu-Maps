@@ -160,7 +160,6 @@ export function TransitDeparturesPanel({
   const [routeStopsLoading, setRouteStopsLoading] = useState(false);
   const [routeStopsError, setRouteStopsError] = useState<string | null>(null);
   const [resolvedBoardingStopIndex, setResolvedBoardingStopIndex] = useState(-1);
-  const [vehicleTimelineUsable, setVehicleTimelineUsable] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const routeStopScrollRef = useRef<HTMLDivElement>(null);
@@ -174,7 +173,6 @@ export function TransitDeparturesPanel({
     setSelectedDeparture(null);
     setRouteStops([]);
     setResolvedBoardingStopIndex(-1);
-    setVehicleTimelineUsable(false);
     setShowAll(false);
   }, [stop]);
 
@@ -215,7 +213,6 @@ export function TransitDeparturesPanel({
     setRouteStopsLoading(true);
     setRouteStopsError(null);
     setResolvedBoardingStopIndex(-1);
-    setVehicleTimelineUsable(false);
     fetchTransitTrip(
       selectedDeparture.provider,
       tripId,
@@ -239,7 +236,6 @@ export function TransitDeparturesPanel({
         const resolved = resolution.trip;
         setRouteStops(resolved.stops);
         setResolvedBoardingStopIndex(resolved.boardingStopIndex);
-        setVehicleTimelineUsable(resolved.vehicleTimelineUsable);
       })
       .catch((requestError: unknown) => {
         if ((requestError as { name?: string }).name !== 'AbortError') setRouteStopsError('Route stops are temporarily unavailable.');
@@ -290,6 +286,7 @@ export function TransitDeparturesPanel({
   const detailDestination = selectedDeparture
     ? text(selectedDeparture.headsign, text(selectedDeparture.routeLongName, ''))
     : '';
+  const vehiclePositionAvailable = positionStatus !== 'unavailable';
   if (selectedDeparture) {
     const DetailIcon = modeIcon(detailMode);
     return (
@@ -303,7 +300,6 @@ export function TransitDeparturesPanel({
             setSelectedDeparture(null);
             setRouteStops([]);
             setResolvedBoardingStopIndex(-1);
-            setVehicleTimelineUsable(false);
           }}>
             <ArrowLeft aria-hidden="true" />
             <span>All departures</span>
@@ -326,13 +322,15 @@ export function TransitDeparturesPanel({
               <h2>{detailDestination || 'Route stops'}</h2>
               <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsLoading
                 ? 'Loading trip details'
-                : routeStopsError ? 'Position unavailable'
-                : !vehicleTimelineUsable || positionStatus === 'unavailable' ? 'Position unavailable · timetable shown'
+                : routeStopsError && vehiclePositionAvailable
+                  ? `${positionStatus === 'live' ? 'Live' : 'Estimated'} position · timetable unavailable`
+                : routeStopsError ? 'Trip details unavailable'
+                : !vehiclePositionAvailable ? 'Position unavailable · timetable shown'
                 : positionStatus === 'live' ? (isFollowing ? 'Live · following vehicle' : 'Live position · follow paused')
                 : (isFollowing ? 'Estimated · following vehicle' : 'Estimated position · follow paused')}</div>
-              <button className="transit-follow-button" disabled={Boolean(routeStopsError) || !vehicleTimelineUsable || positionStatus === 'unavailable'} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
+              <button className="transit-follow-button" disabled={!vehiclePositionAvailable} type="button" onClick={onFollowRequest} aria-pressed={isFollowing}>
                 <LocateFixed aria-hidden="true" />
-                {!vehicleTimelineUsable || positionStatus === 'unavailable'
+                {!vehiclePositionAvailable
                   ? 'Position unavailable'
                   : isFollowing ? `Following ${positionStatus}` : `Follow ${positionStatus} vehicle`}
               </button>
@@ -449,7 +447,6 @@ export function TransitDeparturesPanel({
                   hasPositionedRouteRef.current = false;
                   setRouteStops([]);
                   setResolvedBoardingStopIndex(-1);
-                  setVehicleTimelineUsable(false);
                   setSelectedDepartureKey(departureKey);
                   setSelectedDeparture(departure);
                   onDepartureSelect({

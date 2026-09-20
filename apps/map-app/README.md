@@ -21,6 +21,16 @@ are optional and need `VITE_OPENCHARGEMAP_API_KEY` from
 [Open Charge Map My apps](https://openchargemap.org/site/profile/applications).
 To enable Finnish transit data, copy `.env.example` to `.env.local`
 and set `VITE_DIGITRANSIT_SUBSCRIPTION_KEY` to a Digitransit developer API key.
+For exactly matched Tampere journeys, live vehicle coordinates come from the
+public Nysse / ITS Factory SIRI feed and fall back to Digitransit stop-time
+estimation when no fresh, unambiguous observation is available.
+Finnish rail journeys use fresh GPS coordinates from Fintraffic Digitraffic
+when the Digitransit rail trip ID exactly identifies the same train number and
+departure date; trains without a matching GPS fix use the same estimation
+fallback.
+HSL journeys use the public HFP MQTT/WebSocket stream, and Föli journeys use
+the public SIRI vehicle-monitoring feed. Both require an exact cross-feed
+journey match and otherwise retain the Digitransit estimate.
 The Vite variable is public at runtime because this is a static browser
 application; use a backend proxy if the deployment requires a secret
 credential.
