@@ -75,6 +75,7 @@ import { useDriveSimulator } from './drive/useDriveSimulator';
 import { useDriveModePresentation } from './drive/useDriveModePresentation';
 const TransitDeparturesPanel = lazy(() => import('./TransitDeparturesPanel').then((module) => ({ default: module.TransitDeparturesPanel })));
 import type { TransitStopSelection } from './TransitStopsLayer';
+import type { LiveVehicle } from './LiveVehicles';
 import { fetchValhallaRoute, type RouteMode, type RouteResult } from './ValhallaRouting';
 import { fetchTransitRoutes, type TransitRouteResult } from './TransitRouting';
 import {
@@ -505,6 +506,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const transitRouteOverlayRef = useRef<TransitRouteOverlay | null>(null);
   const selectedRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
+  const liveVehiclesLayerRef = useRef<import('./LiveVehicles').LiveVehiclesLayer | null>(null);
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('bridgeDebug') !== '1') return;
@@ -572,6 +574,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     transitRouteOverlay: transitRouteOverlayRef,
     selectedRouteDeck: selectedRouteDeckLayerRef,
     transitStopRouteDeck: transitStopRouteDeckLayerRef,
+    liveVehicles: liveVehiclesLayerRef,
   } satisfies MapLayerRuntimeRefs;
   const flightTreeLayerRef = useRef<FlightTreeModelLayer | null>(null);
   const flightActiveRef = useRef(false);
@@ -608,6 +611,8 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     closeRoadTrafficMessage,
   } = useInfoPanelState();
   const [transitDepartureDetailOpen, setTransitDepartureDetailOpen] = useState(false);
+  const [selectedLiveVehicle, setSelectedLiveVehicle] = useState<LiveVehicle | null>(null);
+  const [liveVehicleFollowing, setLiveVehicleFollowing] = useState(false);
   const [transitNavigationBackSignal, setTransitNavigationBackSignal] = useState(0);
   const {
     vehicleFollowEnabledRef,
@@ -779,6 +784,22 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   roadWeatherEnabledRef.current = layerToggles.roadWeather;
   const roadTrafficEnabledRef = useRef(layerToggles.roadTraffic);
   roadTrafficEnabledRef.current = layerToggles.roadTraffic;
+  const liveVehiclesEnabledRef = useRef(layerToggles.liveVehicles);
+  liveVehiclesEnabledRef.current = layerToggles.liveVehicles;
+
+  useEffect(() => {
+    const layer = liveVehiclesLayerRef.current;
+    const map = mapRef.current;
+    if (!mapLoaded || !layer || !map) return;
+    layer.setVisibility(layerToggles.liveVehicles);
+    if (!layerToggles.liveVehicles) {
+      setSelectedLiveVehicle(null);
+      setLiveVehicleFollowing(false);
+      return;
+    }
+    const bounds = map.getBounds();
+    void layer.update({ west: bounds.getWest(), south: bounds.getSouth(), east: bounds.getEast(), north: bounds.getNorth() }, map.getZoom());
+  }, [layerToggles.liveVehicles, mapLoaded]);
   const [dayNightUtcMs, setDayNightUtcMs] = useState(() => Date.now());
   const [dayNightFollowNow, setDayNightFollowNow] = useState(true);
   const flight = useFlightSimulator({
@@ -1896,7 +1917,12 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       if (Date.now() - lastUserInteractionRef.current < 400) return;
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
       smoothlyFollowVehicle(map, vehicle.coordinates);
-    });
+    }, (vehicle) => setSelectedLiveVehicle((current) => {
+      if (liveVehicleFollowing && current?.id === vehicle.id) {
+        map.easeTo({ center: vehicle.coordinates, duration: 900 });
+      }
+      return vehicle;
+    }));
     assignMapLayerRuntimeRefs(layerRuntime, mapLayerRuntimeRefs);
     const {
       tree: treeLayer,
@@ -1912,9 +1938,12 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       transitRouteOverlay,
       selectedRouteDeck: selectedRouteDeckLayer,
       transitStopRouteDeck: transitStopRouteDeckLayer,
+      liveVehicles: liveVehiclesLayer,
     } = layerRuntime;
     let disposeMapPatterns: (() => void) | undefined;
     let transitStopsTimer: number | undefined;
+    let liveVehiclesTimer: number | undefined;
+    let liveVehiclesInterval: number | undefined;
     let chargingStationsTimer: number | undefined;
     let initialLoadComplete = false;
     let roadWidthLatitude: number | undefined;
@@ -1997,6 +2026,20 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     const scheduleTransitStopsUpdate = () => {
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       transitStopsTimer = window.setTimeout(updateTransitStops, 220);
+    };
+    const updateLiveVehicles = () => {
+      liveVehiclesTimer = undefined;
+      if (!map.isStyleLoaded() || !liveVehiclesEnabledRef.current) return;
+      const bounds = map.getBounds();
+      void liveVehiclesLayer.update({
+        west: bounds.getWest(), south: bounds.getSouth(), east: bounds.getEast(), north: bounds.getNorth(),
+      }, map.getZoom()).catch((error) => {
+        if ((error as Error).name !== 'AbortError') console.warn('Live vehicle lookup failed.', error);
+      });
+    };
+    const scheduleLiveVehiclesUpdate = () => {
+      if (liveVehiclesTimer !== undefined) window.clearTimeout(liveVehiclesTimer);
+      liveVehiclesTimer = window.setTimeout(updateLiveVehicles, 260);
     };
     const updateChargingStations = () => {
       chargingStationsTimer = undefined;
@@ -2388,6 +2431,8 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         },
       });
       interactionController.installLayerCursors();
+      liveVehiclesLayer.install(map, () => measurementControllerRef.current !== null || Boolean(routePickingRef.current));
+      liveVehiclesLayer.setVisibility(liveVehiclesEnabledRef.current);
       void transitStopsLayer.install(map, (stop) => {
         if (!preserveRouteVehicleForInfoPanel()) setVehicleFollowAvailable(false);
         setPositionInformation(null);
@@ -2497,6 +2542,10 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       updateGlobalLabelDensity();
       scheduleTreeUpdate();
       scheduleTransitStopsUpdate();
+      if (liveVehiclesEnabledRef.current) scheduleLiveVehiclesUpdate();
+      liveVehiclesInterval = window.setInterval(() => {
+        if (liveVehiclesEnabledRef.current && !document.hidden) updateLiveVehicles();
+      }, 15_000);
       updateTransitRouteOverlay();
       initialLoadComplete = true;
       runtime.setLoaded(true);
@@ -2546,6 +2595,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       // Vehicle follow recenters the map several times per second. Those
       // camera-only moves must not trigger a fresh stop query on every moveend.
       if (!vehicleFollowEnabledRef.current) scheduleTransitStopsUpdate();
+      if (liveVehiclesEnabledRef.current) scheduleLiveVehiclesUpdate();
       updateTransitRouteOverlay();
       selectedRouteDeckLayer.rebuildFromCurrentFeatures();
       transitStopRouteDeckLayer.rebuildFromCurrentFeatures();
@@ -2609,6 +2659,8 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       measurementControllerRef.current?.dispose();
       measurementControllerRef.current = null;
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
+      if (liveVehiclesTimer !== undefined) window.clearTimeout(liveVehiclesTimer);
+      if (liveVehiclesInterval !== undefined) window.clearInterval(liveVehiclesInterval);
       if (chargingStationsTimer !== undefined) window.clearTimeout(chargingStationsTimer);
       modelRefresh.dispose();
       map.off('move', handleCameraMove);

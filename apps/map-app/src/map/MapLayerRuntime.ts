@@ -11,6 +11,7 @@ import { TransitRouteOverlay } from './TransitRouteOverlay';
 import { TransitStopsLayer, type TransitVehiclePose } from './TransitStopsLayer';
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
+import { LiveVehiclesLayer, type LiveVehicle } from './LiveVehicles';
 
 type RefSlot<T> = { current: T | null };
 
@@ -28,11 +29,15 @@ export type MapLayerRuntimeRefs = {
   transitRouteOverlay: RefSlot<TransitRouteOverlay>;
   selectedRouteDeck: RefSlot<RouteLineDeckLayer>;
   transitStopRouteDeck: RefSlot<RouteLineDeckLayer>;
+  liveVehicles: RefSlot<LiveVehiclesLayer>;
 };
 
 export type MapLayerRuntime = ReturnType<typeof createMapLayerRuntime>;
 
-export function createMapLayerRuntime(onVehiclePose: (pose: TransitVehiclePose | null) => void) {
+export function createMapLayerRuntime(
+  onVehiclePose: (pose: TransitVehiclePose | null) => void,
+  onLiveVehicleSelect: (vehicle: LiveVehicle) => void = () => undefined,
+) {
   const tree = new TreeModelLayer({
     sourceId: OPENFREEMAP_SOURCE_ID,
     waterLayers: ['water'],
@@ -55,6 +60,7 @@ export function createMapLayerRuntime(onVehiclePose: (pose: TransitVehiclePose |
   const transitRouteOverlay = new TransitRouteOverlay();
   const selectedRouteDeck = new RouteLineDeckLayer('selected-route-deck-3d');
   const transitStopRouteDeck = new RouteLineDeckLayer('transit-selected-route-deck-3d');
+  const liveVehicles = new LiveVehiclesLayer(onLiveVehicleSelect);
   selectedRouteDeck.setBridgeDeckSource(bridge);
   transitStopRouteDeck.setBridgeDeckSource(bridge);
   transitStops.onSelectedRoutes((features) => {
@@ -80,6 +86,7 @@ export function createMapLayerRuntime(onVehiclePose: (pose: TransitVehiclePose |
     transitRouteOverlay,
     selectedRouteDeck,
     transitStopRouteDeck,
+    liveVehicles,
   };
 }
 
@@ -91,6 +98,7 @@ export function assignMapLayerRuntimeRefs(runtime: MapLayerRuntime, refs: MapLay
 
 export function disposeMapLayerRuntime(runtime: MapLayerRuntime) {
   runtime.transitStops.dispose();
+  runtime.liveVehicles.dispose();
   runtime.transitRouteOverlay.dispose();
   runtime.trafficCameras.dispose();
   runtime.chargingStations.dispose();
