@@ -12,6 +12,7 @@ import { TransitStopsLayer, type TransitVehiclePose } from './TransitStopsLayer'
 import { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TreeModelLayer } from './TreeModelLayer';
 import { LiveVehiclesLayer, type LiveVehicle } from './LiveVehicles';
+import { LiveVehicleModelLayer } from './LiveVehicleModelLayer';
 
 type RefSlot<T> = { current: T | null };
 
@@ -30,6 +31,7 @@ export type MapLayerRuntimeRefs = {
   selectedRouteDeck: RefSlot<RouteLineDeckLayer>;
   transitStopRouteDeck: RefSlot<RouteLineDeckLayer>;
   liveVehicles: RefSlot<LiveVehiclesLayer>;
+  liveVehicleModels: RefSlot<LiveVehicleModelLayer>;
 };
 
 export type MapLayerRuntime = ReturnType<typeof createMapLayerRuntime>;
@@ -37,6 +39,7 @@ export type MapLayerRuntime = ReturnType<typeof createMapLayerRuntime>;
 export function createMapLayerRuntime(
   onVehiclePose: (pose: TransitVehiclePose | null) => void,
   onLiveVehicleSelect: (vehicle: LiveVehicle) => void = () => undefined,
+  onLiveVehiclePosition: (vehicle: LiveVehicle) => void = () => undefined,
 ) {
   const tree = new TreeModelLayer({
     sourceId: OPENFREEMAP_SOURCE_ID,
@@ -60,9 +63,15 @@ export function createMapLayerRuntime(
   const transitRouteOverlay = new TransitRouteOverlay();
   const selectedRouteDeck = new RouteLineDeckLayer('selected-route-deck-3d');
   const transitStopRouteDeck = new RouteLineDeckLayer('transit-selected-route-deck-3d');
-  const liveVehicles = new LiveVehiclesLayer(onLiveVehicleSelect);
+  const liveVehicleRouteDeck = new RouteLineDeckLayer('live-vehicle-selected-route-deck-3d');
+  const liveVehicles = new LiveVehiclesLayer(onLiveVehicleSelect, onLiveVehiclePosition);
+  const liveVehicleModels = new LiveVehicleModelLayer();
+  liveVehicleModels.setBridgeDeckSource(bridge);
+  liveVehicles.setModelLayer(liveVehicleModels);
+  liveVehicles.setRouteDeckLayer(liveVehicleRouteDeck);
   selectedRouteDeck.setBridgeDeckSource(bridge);
   transitStopRouteDeck.setBridgeDeckSource(bridge);
+  liveVehicleRouteDeck.setBridgeDeckSource(bridge);
   transitStops.onSelectedRoutes((features) => {
     transitStopRouteDeck.setFeatures(features.map((feature) => ({
       coordinates: feature.geometry.coordinates as Array<[number, number]>,
@@ -86,7 +95,9 @@ export function createMapLayerRuntime(
     transitRouteOverlay,
     selectedRouteDeck,
     transitStopRouteDeck,
+    liveVehicleRouteDeck,
     liveVehicles,
+    liveVehicleModels,
   };
 }
 
@@ -107,6 +118,7 @@ export function disposeMapLayerRuntime(runtime: MapLayerRuntime) {
   runtime.transitVehicle.setBridgeDeckSource(null);
   runtime.selectedRouteDeck.setBridgeDeckSource(null);
   runtime.transitStopRouteDeck.setBridgeDeckSource(null);
+  runtime.liveVehicleRouteDeck.setBridgeDeckSource(null);
 }
 
 export function releaseMapLayerRuntimeRefs(runtime: MapLayerRuntime, refs: MapLayerRuntimeRefs) {

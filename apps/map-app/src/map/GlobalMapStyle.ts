@@ -245,12 +245,16 @@ const BRIDGE_PATH_WIDTH_METRES: ExpressionSpecification = [
   1.8,
 ] as ExpressionSpecification;
 
-const BRIDGE_PATH_EDGE_COLOR: ExpressionSpecification = [
-  'case',
-  ['all', ['==', ['get', 'class'], 'path'], ['==', ['get', 'subclass'], 'cycleway']], '#b99a91',
-  ['==', ['get', 'class'], 'path_construction'], '#b5a997',
-  '#d8d4ca',
-] as ExpressionSpecification;
+export function bridgePathEdgeColor(cyclewayColor: string): ExpressionSpecification {
+  return [
+    'case',
+    ['all', ['==', ['get', 'class'], 'path'], ['==', ['get', 'subclass'], 'cycleway']], cyclewayColor,
+    ['==', ['get', 'class'], 'path_construction'], '#b5a997',
+    '#d8d4ca',
+  ] as ExpressionSpecification;
+}
+
+const BRIDGE_PATH_EDGE_COLOR = bridgePathEdgeColor('#b99a91');
 
 const PIER_AREA_FILTER: ExpressionSpecification = [
   'all',
@@ -3291,8 +3295,8 @@ export function applyMapTheme(
   const dark = true;
   const colors = dark ? {
     background: '#071525', land: '#10253a', green: '#17384a', park: '#163944',
-    water: '#0a2c46', waterEdge: '#164c66', road: '#b8aa80', roadCasing: '#625e53',
-    path: '#8b9e9d', rail: '#6b8295', building: '#293f53', buildingBand: '#625f52',
+    water: '#0a2c46', waterEdge: '#164c66', road: '#a99a75', roadCasing: '#625e53',
+    path: '#7f9190', rail: '#6b8295', building: '#293f53', buildingBand: '#625f52',
     label: '#d9e8f5', halo: '#10253a', shadow: '#061322', boundary: '#7391a5',
   } : {
     background: '#f3f4f1', land: '#c9e0b4', green: '#a8c88c', park: '#bfdda0',
@@ -3319,6 +3323,10 @@ export function applyMapTheme(
   GLOBAL_ROAD_CASING_COLOR_LAYER_IDS.forEach((id) => set(id, 'line-color', colors.roadCasing));
   GLOBAL_ROAD_COLOR_LAYER_IDS.forEach((id) => set(id, 'line-color', colors.road));
   ['global-path-casing', 'global-cycleway-casing', 'global-footways', 'global-steps', 'global-other-paths'].forEach((id) => set(id, 'line-color', colors.path));
+  set('global-cycleways', 'line-color', '#a58a82');
+  set('global-path-bridge-edge', 'line-color', bridgePathEdgeColor('#a58a82'));
+  set('global-cycling-path-casing', 'line-color', '#d8dfe1');
+  set('global-cycling-paths', 'line-color', ['match', ['get', 'surface'], 'unpaved', '#a94343', '#b84242']);
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => set(id, 'line-color', colors.rail));
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);
   set('global-railway-sleepers', 'line-color', RAIL_SLEEPER_NIGHT);

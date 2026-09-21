@@ -44,7 +44,7 @@ const DEGREES_TO_RADIANS = Math.PI / 180;
 // unrealistically. Road and railway gradients rarely exceed 10 degrees.
 const MAX_PITCH_RADIANS = 0.22;
 
-type VehicleDimensions = {
+export type VehicleDimensions = {
   length: number;
   width: number;
   height: number;
@@ -56,7 +56,7 @@ type LocalPartPose = {
   pitch: number;
 };
 
-function dimensionsForMode(mode: string): VehicleDimensions {
+export function dimensionsForMode(mode: string): VehicleDimensions {
   if (mode === 'TRAM') return { length: 8.4, width: 2.65, height: 3.35 };
   if (mode === 'SUBWAY') return { length: 16, width: 2.85, height: 3.55 };
   if (['RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL'].includes(mode)) {
@@ -218,7 +218,7 @@ function createTramSection(
   return root;
 }
 
-function createVehicleSection(
+export function createVehicleSection(
   dimensions: VehicleDimensions,
   color: string,
   mode: string,

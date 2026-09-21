@@ -3,6 +3,7 @@ import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import {
   Bike,
+  BusFront,
   Building2,
   Box,
   Camera,

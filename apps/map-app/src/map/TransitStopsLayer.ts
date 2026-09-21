@@ -627,7 +627,7 @@ export class TransitStopsLayer {
   async install(
     map: Map,
     onStopClick: (stop: TransitStopSelection) => void,
-    interactionBlocked: () => boolean = () => false,
+    interactionBlocked: (point?: Point) => boolean = () => false,
     preserveSelectedTrip: () => boolean = () => false,
   ) {
     this.map = map;
@@ -888,7 +888,7 @@ export class TransitStopsLayer {
       onStopClick(selection);
     };
     map.on('click', (event) => {
-      if (interactionBlocked()) return;
+      if (interactionBlocked(event.point)) return;
       selectFeature(map.queryRenderedFeatures(event.point, { layers: clickableLayerIds })[0], event.point);
     });
     hitLayers.forEach(({ id: layerId }) => {

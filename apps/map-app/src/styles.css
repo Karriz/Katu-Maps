@@ -164,6 +164,16 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   width: min(350px, calc(100% - 56px));
   z-index: 100;
 }
+.live-vehicle-panel .transit-panel-header { padding-right: 58px; }
+.live-vehicle-panel .transit-panel-close { position: absolute; right: 18px; top: 18px; }
+.live-vehicle-stops { min-height: 0; overflow-y: auto; padding: 18px 22px calc(20px + env(safe-area-inset-bottom, 0px)); }
+.live-vehicle-stops p { color: var(--color-ink-muted); font-size: 0.8rem; }
+.live-vehicle-stops ol { list-style: none; margin: 12px 0 0; padding: 0; }
+.live-vehicle-stops li { align-items: baseline; border-top: 1px solid var(--color-line); display: flex; font-size: 0.8rem; gap: 12px; justify-content: space-between; padding: 9px 0; }
+.live-vehicle-stops time { color: var(--color-ink-muted); flex: 0 0 auto; }
+@media (max-width: 640px) {
+  .live-vehicle-panel.mobile-bottom-sheet > .transit-panel-header .transit-panel-close { display: flex; }
+}
 .transit-panel-header { border-bottom: 1px solid var(--color-line); padding: 22px 104px 20px 22px; position: relative; }
 .transit-panel-back { align-items: center; background: transparent; border: 0; color: var(--color-accent); cursor: pointer; display: inline-flex; font: inherit; font-size: 0.72rem; font-weight: 750; gap: 5px; margin: -6px 0 15px; padding: 4px 0; }
 .transit-panel-back:hover { color: #0e4fae; }
