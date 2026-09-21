@@ -11,6 +11,14 @@ const RAIL_MODES = new Set([
   'TRAM', 'SUBWAY', 'RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL', 'FUNICULAR',
 ]);
 const MAX_RAIL_SEGMENT_METERS = 2_000;
+const VIEWPORT_PREFETCH_MARGIN = 0.5;
+
+export type TransitRouteBounds = {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+};
 
 type EncodedPolyline = { points?: unknown; precision?: unknown };
 type TransitRoute = {
@@ -101,12 +109,30 @@ function emptyCollection() {
   return { type: 'FeatureCollection' as const, features: [] as OverlayFeature[] };
 }
 
+/** Fetch beyond the screen so a short pan can keep using the current route response. */
+export function transitRouteRequestBounds(bounds: TransitRouteBounds): TransitRouteBounds {
+  const latitudeMargin = (bounds.north - bounds.south) * VIEWPORT_PREFETCH_MARGIN;
+  const longitudeMargin = (bounds.east - bounds.west) * VIEWPORT_PREFETCH_MARGIN;
+  return {
+    south: Math.max(-90, bounds.south - latitudeMargin),
+    west: Math.max(-180, bounds.west - longitudeMargin),
+    north: Math.min(90, bounds.north + latitudeMargin),
+    east: Math.min(180, bounds.east + longitudeMargin),
+  };
+}
+
+export function transitRouteBoundsContain(container: TransitRouteBounds, bounds: TransitRouteBounds) {
+  return bounds.south >= container.south && bounds.west >= container.west
+    && bounds.north <= container.north && bounds.east <= container.east;
+}
+
 export class TransitRouteOverlay {
   private map: Map | null = null;
   private controller: AbortController | null = null;
   private requestVersion = 0;
   private visible = false;
-  private lastRequestKey = '';
+  private loadedCoverage: { zoom: number; bounds: TransitRouteBounds } | null = null;
+  private pendingCoverage: { zoom: number; bounds: TransitRouteBounds } | null = null;
 
   install(map: Map) {
     this.map = map;
@@ -146,17 +172,23 @@ export class TransitRouteOverlay {
   async update(bounds: { getSouth(): number; getWest(): number; getNorth(): number; getEast(): number }, zoom: number) {
     if (!this.map || !this.visible) return;
     const zoomBucket = Math.max(4, Math.floor(zoom));
-    const key = [zoomBucket, bounds.getSouth().toFixed(3), bounds.getWest().toFixed(3), bounds.getNorth().toFixed(3), bounds.getEast().toFixed(3)].join(':');
-    if (key === this.lastRequestKey) return;
-    this.lastRequestKey = key;
+    const viewport = {
+      south: bounds.getSouth(), west: bounds.getWest(),
+      north: bounds.getNorth(), east: bounds.getEast(),
+    };
+    const coversViewport = (coverage: typeof this.loadedCoverage) => coverage?.zoom === zoomBucket
+      && transitRouteBoundsContain(coverage.bounds, viewport);
+    if (coversViewport(this.loadedCoverage) || coversViewport(this.pendingCoverage)) return;
+    const requestBounds = transitRouteRequestBounds(viewport);
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
+    this.pendingCoverage = { zoom: zoomBucket, bounds: requestBounds };
     const requestVersion = ++this.requestVersion;
     const params = new URLSearchParams({
       zoom: String(zoomBucket),
-      min: `${bounds.getSouth()},${bounds.getWest()}`,
-      max: `${bounds.getNorth()},${bounds.getEast()}`,
+      min: `${requestBounds.south},${requestBounds.west}`,
+      max: `${requestBounds.north},${requestBounds.east}`,
       language: typeof navigator === 'undefined' ? 'en' : navigator.language,
     });
     try {
@@ -167,19 +199,23 @@ export class TransitRouteOverlay {
       if (!response.ok) throw apiHttpError(response, 'Transitous');
       const payload = await response.json() as TransitousMapRoutes;
       if (this.map !== null && requestVersion === this.requestVersion) {
+        this.loadedCoverage = { zoom: zoomBucket, bounds: requestBounds };
+        this.pendingCoverage = null;
         (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData({
           type: 'FeatureCollection',
           features: railRouteFeatures(payload),
         });
       }
     } catch (error) {
+      if (requestVersion === this.requestVersion) this.pendingCoverage = null;
       if ((error as Error).name !== 'AbortError') console.warn('Transit route overlay request failed.', error);
     }
   }
 
   clear() {
     this.controller?.abort();
-    this.lastRequestKey = '';
+    this.loadedCoverage = null;
+    this.pendingCoverage = null;
     (this.map?.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(emptyCollection());
   }
 
