@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as maplibregl from 'maplibre-gl';
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MaplibreMap } from 'maplibre-gl';
-import { routeSectionPoses, type LiveVehicle } from './LiveVehicles';
+import { routeSectionPoses, snapToGeometry, type LiveVehicle } from './LiveVehicles';
 import { createVehicleSection, dimensionsForMode, type BridgeDeckSource } from './TransitVehicleModelLayer';
 import { CARTOON_SUN_COLOR, CARTOON_SUN_AZIMUTH_DEGREES, CARTOON_SUN_POLAR_DEGREES, sunCartesian } from './CartoonLighting';
 
@@ -31,6 +31,7 @@ type VehicleModel = {
   color: string;
   dimensions: ReturnType<typeof dimensionsForMode>;
   lastTerrainSample: number;
+  trackGeometry?: [number, number][];
 };
 
 function disposeModel(root: THREE.Object3D) {
@@ -38,7 +39,10 @@ function disposeModel(root: THREE.Object3D) {
     if (!(child instanceof THREE.Mesh)) return;
     child.geometry.dispose();
     const materials = Array.isArray(child.material) ? child.material : [child.material];
-    materials.forEach((material) => material.dispose());
+    materials.forEach((material) => {
+      if (material instanceof THREE.MeshBasicMaterial) material.alphaMap?.dispose();
+      material.dispose();
+    });
   });
 }
 
@@ -61,6 +65,7 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
   private readonly transform = new THREE.Matrix4();
   private readonly transformScale = new THREE.Vector3();
   private readonly models = new Map<string, VehicleModel>();
+  private readonly fallbackCoordinates = new Map<string, [number, number]>();
   private origin = new maplibregl.LngLat(23.7609, 61.4981);
   private originElevation = 0;
   private hasOrigin = false;
@@ -68,6 +73,8 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
   private darkMode = false;
   private currentVehicles: LiveVehicle[] = [];
   private bridgeDeckSource: BridgeDeckSource | null = null;
+
+  fallbackCoordinateFor(id: string) { return this.fallbackCoordinates.get(id); }
 
   setBridgeDeckSource(source: BridgeDeckSource | null) {
     this.bridgeDeckSource = source;
@@ -78,6 +85,28 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
       () => map.queryTerrainElevation(new maplibregl.LngLat(lng, lat)), this.originElevation);
   }
 
+  private railGeometryAt(map: MaplibreMap, coordinates: [number, number]) {
+    const point = map.project(coordinates);
+    const radius = 56;
+    const layers = ['global-railways', 'global-railway-bridges'].filter((id) => map.getLayer(id));
+    if (!layers.length) return undefined;
+    const candidates = map.queryRenderedFeatures([
+      [point.x - radius, point.y - radius],
+      [point.x + radius, point.y + radius],
+    ], { layers }).flatMap((feature) => {
+      if (feature.geometry.type === 'LineString') return [feature.geometry.coordinates as [number, number][]];
+      if (feature.geometry.type === 'MultiLineString') return feature.geometry.coordinates as [number, number][][];
+      return [];
+    }).filter((geometry) => geometry.length >= 2 && snapToGeometry(coordinates, geometry));
+    if (!candidates.length) return undefined;
+    const metersPerLng = 111_320 * Math.cos(coordinates[1] * Math.PI / 180);
+    const length = (geometry: [number, number][]) => geometry.slice(1).reduce((total, point, index) => (
+      total + Math.hypot((point[0] - geometry[index][0]) * metersPerLng,
+        (point[1] - geometry[index][1]) * 111_320)
+    ), 0);
+    return candidates.sort((a, b) => length(b) - length(a))[0];
+  }
+
   setTheme(dark: boolean) {
     if (this.darkMode === dark) return;
     this.darkMode = dark;
@@ -85,7 +114,7 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
     this.setVehicles(this.currentVehicles);
   }
 
-  setVehicles(vehicles: LiveVehicle[]) {
+  setVehicles(vehicles: LiveVehicle[], snap = false) {
     this.currentVehicles = vehicles;
     const map = this.map;
     if (!map) return new Set<string>();
@@ -121,6 +150,7 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
       this.scene.remove(model.root);
       disposeModel(model.root);
       this.models.delete(id);
+      this.fallbackCoordinates.delete(id);
     }
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.origin);
     const units = originMercator.meterInMercatorCoordinateUnits();
@@ -160,7 +190,18 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
       }
       const layout = sectionLayout(vehicle.kind);
       const spacing = dimensionsForMode(MODES[vehicle.kind]).length + layout.gap;
-      const poses = routeSectionPoses(vehicle.coordinates, vehicle.geometry, layout.count, spacing, vehicle.heading ?? 0);
+      let geometry = vehicle.geometry;
+      if (vehicle.kind === 'train' && !geometry) {
+        if (!model.trackGeometry || !snapToGeometry(vehicle.coordinates, model.trackGeometry)) {
+          model.trackGeometry = this.railGeometryAt(map, vehicle.coordinates);
+        }
+        geometry = model.trackGeometry;
+      }
+      const fallbackCoordinate = vehicle.kind === 'train' && !vehicle.geometry
+        ? snapToGeometry(vehicle.coordinates, geometry) : undefined;
+      if (fallbackCoordinate) this.fallbackCoordinates.set(vehicle.id, fallbackCoordinate);
+      else this.fallbackCoordinates.delete(vehicle.id);
+      const poses = routeSectionPoses(vehicle.coordinates, geometry, layout.count, spacing, vehicle.heading ?? 0);
       const sampleTerrain = performance.now() - model.lastTerrainSample >= 250 || !model.targets.length;
       model.targets = poses.map((pose, index) => {
         const coordinate = maplibregl.MercatorCoordinate.fromLngLat(pose.coordinates);
@@ -182,7 +223,7 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
         heading, pitch };
       });
       if (sampleTerrain) model.lastTerrainSample = performance.now();
-      if (model.sections[0].position.lengthSq() === 0) model.sections.forEach((section, index) => {
+      if (snap || model.sections[0].position.lengthSq() === 0) model.sections.forEach((section, index) => {
         section.position.copy(model.targets[index].position);
         section.rotation.y = model.targets[index].heading;
         section.rotation.x = model.targets[index].pitch;
@@ -198,6 +239,7 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
       disposeModel(model.root);
     }
     this.models.clear();
+    this.fallbackCoordinates.clear();
   }
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {

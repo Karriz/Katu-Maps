@@ -1,4 +1,5 @@
 import type { GeoJSONSource, Map as MaplibreMap, Point } from 'maplibre-gl';
+import type { MqttClient } from 'mqtt';
 import { apiHttpError, fetchWithTimeout } from './ApiRequest';
 import { serviceConfig } from './ServiceConfig';
 import type { LiveVehicleModelLayer } from './LiveVehicleModelLayer';
@@ -7,10 +8,11 @@ import { liveObservationSmoothingMs } from './transit/vehiclePosition';
 import type { RouteLineDeckLayer } from './RouteLineDeckLayer';
 
 export type LiveVehicleKind = 'bus' | 'tram' | 'metro' | 'train';
+export type LiveVehicleProvider = 'hsl' | 'nysse' | 'foli' | 'digitraffic';
 
 export type LiveVehicle = {
   id: string;
-  provider: 'hsl' | 'nysse' | 'foli' | 'digitraffic';
+  provider: LiveVehicleProvider;
   coordinates: [number, number];
   recordedAt: number;
   route: string;
@@ -41,6 +43,25 @@ const NYSSE_BOUNDS: Bounds = { west: 23.2, south: 61.2, east: 24.5, north: 62.0 
 const FOLI_BOUNDS: Bounds = { west: 21.8, south: 60.2, east: 23.0, north: 60.8 };
 const MAX_TRIP_LOOKUPS = 12;
 const TRIP_CACHE_MS = 30 * 60_000;
+const TRAIN_POSITION_MIN_SMOOTHING_MS = 15_000;
+const TRAIN_POSITION_MAX_SMOOTHING_MS = 60_000;
+const LIVE_VEHICLE_MAX_AGE_MS = 90_000;
+const PASSENGER_TRAIN_CATEGORIES = new Set(['commuter', 'long-distance']);
+type DigitrafficTrainMetadata = {
+  trainNumber?: unknown;
+  departureDate?: unknown;
+  trainType?: unknown;
+  trainCategory?: unknown;
+  commuterLineID?: unknown;
+};
+let digitrafficMetadata: DigitrafficTrainMetadata[] = [];
+let digitrafficMetadataExpires = 0;
+let digitrafficMetadataRequest: Promise<DigitrafficTrainMetadata[]> | undefined;
+let hslClient: MqttClient | undefined;
+let hslConnection: Promise<MqttClient> | undefined;
+let hslConnectionGeneration = 0;
+let hslStartedAt = 0;
+const hslVehicles = new Map<string, LiveVehicle>();
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -105,12 +126,14 @@ export function normalizeNysseFleet(payload: unknown): LiveVehicle[] {
     const recordedAt = epochMs(activity.RecordedAtTime);
     if (!id || !route || !finite(lng) || !finite(lat) || recordedAt === undefined) return [];
     const mode = text(journey?.VehicleMode)?.toLowerCase();
+    const kind = mode === 'tram' || (route === '1' || route === '3')
+      && String((journey?.OperatorRef as UnknownRecord | undefined)?.value) === '56920'
+      ? 'tram' as const : 'bus' as const;
     return [{
       id: `nysse:${id}`, provider: 'nysse' as const, coordinates: [lng, lat] as [number, number],
       recordedAt, route, destination: text((journey?.DestinationName as UnknownRecord | undefined)?.value),
       heading: finite(journey?.Bearing) ? journey.Bearing : undefined,
-      kind: mode === 'tram' || (route === '1' || route === '3') && String((journey?.OperatorRef as UnknownRecord | undefined)?.value) === '56920'
-        ? 'tram' as const : 'bus' as const,
+      kind, color: kind === 'tram' ? '#C92F40' : undefined,
       serviceDate: text(((journey?.FramedVehicleJourneyRef as UnknownRecord | undefined)?.DataFrameRef as UnknownRecord | undefined)?.value),
       routeId: `tampere:${text((journey?.LineRef as UnknownRecord | undefined)?.value) ?? route}`,
       direction: Number((journey?.DirectionRef as UnknownRecord | undefined)?.value),
@@ -146,7 +169,9 @@ export function normalizeFoliFleet(payload: unknown): LiveVehicle[] {
   });
 }
 
-export function normalizeDigitrafficFleet(payload: unknown): LiveVehicle[] {
+export function normalizeDigitrafficFleet(payload: unknown, metadata: DigitrafficTrainMetadata[] = [],
+  passengerOnly = false): LiveVehicle[] {
+  const metadataByTrain = new Map(metadata.map((train) => [`${text(train.departureDate)}:${train.trainNumber}`, train]));
   const features = (payload as { features?: Array<{ geometry?: { coordinates?: unknown }; properties?: UnknownRecord }> }).features ?? [];
   return features.flatMap((feature) => {
     const coordinates = feature.geometry?.coordinates;
@@ -156,8 +181,11 @@ export function normalizeDigitrafficFleet(payload: unknown): LiveVehicle[] {
     const recordedAt = epochMs(properties.timestamp);
     if (properties.isGpsLocation !== true || !Array.isArray(coordinates) || !finite(coordinates[0]) || !finite(coordinates[1])
       || trainNumber === undefined || !departureDate || recordedAt === undefined) return [];
-    const commuter = text(properties.commuterLineID);
-    const type = text(properties.trainType);
+    const train = metadataByTrain.get(`${departureDate}:${trainNumber}`);
+    const category = text(train?.trainCategory ?? properties.trainCategory)?.toLowerCase();
+    if ((category && !PASSENGER_TRAIN_CATEGORIES.has(category)) || (passengerOnly && !category)) return [];
+    const commuter = text(train?.commuterLineID ?? properties.commuterLineID);
+    const type = text(train?.trainType ?? properties.trainType);
     return [{
       id: `digitraffic:${departureDate}:${trainNumber}`, provider: 'digitraffic' as const,
       coordinates: [coordinates[0], coordinates[1]] as [number, number], recordedAt,
@@ -168,7 +196,84 @@ export function normalizeDigitrafficFleet(payload: unknown): LiveVehicle[] {
   });
 }
 
-export function normalizeHslMessage(payload: unknown): LiveVehicle | undefined {
+async function currentDigitrafficMetadata() {
+  if (digitrafficMetadataExpires > Date.now() && digitrafficMetadata.length) return digitrafficMetadata;
+  const graphqlEndpoint = new URL('../v2/graphql/graphql', serviceConfig.digitrafficRailEndpoint + '/').toString();
+  digitrafficMetadataRequest ??= fetchWithTimeout(graphqlEndpoint, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Digitraffic-User': serviceConfig.clientId },
+    body: JSON.stringify({ query: '{ currentlyRunningTrains { trainNumber departureDate commuterLineid trainType { name trainCategory { name } } } }' }),
+  }, 10_000).then((response) => jsonResponse(response, 'Digitraffic train metadata'))
+    .then((payload) => ((payload as { data?: { currentlyRunningTrains?: Array<{
+      trainNumber?: unknown; departureDate?: unknown; commuterLineid?: unknown;
+      trainType?: { name?: unknown; trainCategory?: { name?: unknown } };
+    }> } }).data?.currentlyRunningTrains ?? []).map((train) => ({
+      trainNumber: train.trainNumber,
+      departureDate: train.departureDate,
+      commuterLineID: train.commuterLineid,
+      trainType: train.trainType?.name,
+      trainCategory: train.trainType?.trainCategory?.name,
+    } satisfies DigitrafficTrainMetadata)));
+  try {
+    const metadata = await digitrafficMetadataRequest;
+    if (!metadata.length) throw new Error('Digitraffic train metadata is empty.');
+    digitrafficMetadata = metadata;
+    digitrafficMetadataExpires = Date.now() + 60_000;
+  } catch (error) {
+    if (!digitrafficMetadata.length) throw error;
+  } finally {
+    digitrafficMetadataRequest = undefined;
+  }
+  return digitrafficMetadata;
+}
+
+async function collectDigitraffic(bounds: Bounds, signal?: AbortSignal) {
+  const metadata = await currentDigitrafficMetadata();
+  const bbox = `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`;
+  const headers = { 'Digitraffic-User': serviceConfig.clientId };
+  let payload: unknown;
+  try {
+    payload = await fetchJson(
+      `${serviceConfig.digitrafficRailEndpoint}/train-locations.geojson/latest?bbox=${encodeURIComponent(bbox)}`,
+      'Digitraffic train locations',
+      signal,
+      headers,
+    );
+  } catch (error) {
+    if (signal?.aborted || (error as Error).name === 'AbortError') throw error;
+    payload = await fetchJson(
+      `${serviceConfig.digitrafficRailEndpoint}/train-locations.geojson/latest`,
+      'Digitraffic train locations',
+      signal,
+      headers,
+    );
+  }
+  return normalizeDigitrafficFleet(payload, metadata, true);
+}
+
+type HslTopicJourney = {
+  mode?: string; routeId?: string; direction?: number; headsign?: string; startSeconds?: number;
+};
+
+export function hslJourneyFromTopic(topic: string): HslTopicJourney {
+  const parts = topic.split('/');
+  const index = parts.indexOf('vp');
+  if (index < 0) return {};
+  return {
+    mode: text(parts[index + 1])?.toLowerCase(),
+    routeId: text(parts[index + 4]),
+    direction: finite(Number(parts[index + 5])) ? Number(parts[index + 5]) - 1 : undefined,
+    headsign: text(parts[index + 6]),
+    startSeconds: hhmmSeconds(parts[index + 7], !parts[index + 7]?.includes(':')),
+  };
+}
+
+export function hslModeFromTopic(topic: string) {
+  return hslJourneyFromTopic(topic).mode;
+}
+
+export function normalizeHslMessage(payload: unknown, topicMode?: string, topic?: string): LiveVehicle | undefined {
+  const journey = topic ? hslJourneyFromTopic(topic) : {};
   const position = (payload as { VP?: UnknownRecord }).VP;
   const lng = position?.long;
   const lat = position?.lat;
@@ -177,15 +282,17 @@ export function normalizeHslMessage(payload: unknown): LiveVehicle | undefined {
   const recordedAt = epochMs(position?.tst);
   if (!vehicle || !route || !finite(lng) || !finite(lat) || recordedAt === undefined) return undefined;
   const operator = position && (typeof position.oper === 'string' || finite(position.oper)) ? String(position.oper) : '';
-  const mode = text(position?.mode)?.toLowerCase();
+  const mode = topicMode?.toLowerCase() ?? text(position?.mode)?.toLowerCase();
+  if (mode === 'ferry') return undefined;
   return {
     id: `hsl:${operator}:${vehicle}`, provider: 'hsl', coordinates: [lng, lat], recordedAt, route,
-    destination: text(position?.dest), heading: finite(position?.hdg) ? position.hdg : undefined,
-    kind: mode === 'tram' ? 'tram' : mode === 'metro' ? 'metro' : mode === 'train' ? 'train' : 'bus',
+    destination: text(position?.dest) ?? journey.headsign, heading: finite(position?.hdg) ? position.hdg : undefined,
+    kind: mode === 'tram' ? 'tram' : mode === 'metro' || mode === 'subway' ? 'metro'
+      : mode === 'train' || mode === 'rail' ? 'train' : 'bus',
     serviceDate: text(position?.oday),
-    routeId: position && text(position.route) ? `HSL:${text(position.route)}` : undefined,
-    direction: finite(position?.dir) ? position.dir - 1 : undefined,
-    startSeconds: hhmmSeconds(position?.start),
+    routeId: journey.routeId || text(position?.route) ? `HSL:${journey.routeId || text(position?.route)}` : undefined,
+    direction: finite(position?.dir) ? position.dir - 1 : journey.direction,
+    startSeconds: hhmmSeconds(position?.start) ?? journey.startSeconds,
   };
 }
 
@@ -193,55 +300,131 @@ async function fetchJson(url: string, label: string, signal?: AbortSignal, heade
   return jsonResponse(await fetchWithTimeout(url, { signal, headers: { Accept: 'application/json', ...headers } }, 10_000), label);
 }
 
-async function collectHsl(signal?: AbortSignal) {
-  const { default: mqtt } = await import('mqtt');
-  const client = await mqtt.connectAsync(serviceConfig.hslMqttEndpoint, { protocolVersion: 4, reconnectPeriod: 0, connectTimeout: 5_000 });
-  const vehicles = new Map<string, LiveVehicle>();
-  try {
-    await client.subscribeAsync('/hfp/v2/journey/ongoing/vp/+/+/+/+/+/+/+/#', { qos: 0 });
-    await new Promise<void>((resolve) => {
-      const finish = () => { clearTimeout(timer); signal?.removeEventListener('abort', finish); resolve(); };
-      const timer = window.setTimeout(finish, 2_000);
-      signal?.addEventListener('abort', finish, { once: true });
-      client.on('message', (_topic, message) => {
-        try {
-          const vehicle = normalizeHslMessage(JSON.parse(message.toString()));
-          if (vehicle) vehicles.set(vehicle.id, vehicle);
-        } catch { /* Ignore malformed broker messages. */ }
-      });
+function abortError() {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function waitFor(milliseconds: number, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    };
+    const abort = () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(abortError());
+    };
+    const timer = window.setTimeout(finish, milliseconds);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+function stopHslFeed() {
+  hslConnectionGeneration += 1;
+  const client = hslClient;
+  hslClient = undefined;
+  hslConnection = undefined;
+  hslStartedAt = 0;
+  if (client) void client.endAsync().catch(() => undefined);
+}
+
+async function ensureHslFeed() {
+  if (hslClient?.connected) return hslClient;
+  if (hslConnection) return hslConnection;
+  const generation = hslConnectionGeneration;
+  hslConnection = (async () => {
+    const { default: mqtt } = await import('mqtt');
+    const client = await mqtt.connectAsync(serviceConfig.hslMqttEndpoint, {
+      protocolVersion: 4, reconnectPeriod: 0, connectTimeout: 5_000,
     });
+    if (generation !== hslConnectionGeneration) {
+      await client.endAsync();
+      throw abortError();
+    }
+    client.on('error', () => undefined);
+    client.on('message', (topic, message) => {
+      try {
+        const vehicle = normalizeHslMessage(JSON.parse(message.toString()), hslModeFromTopic(topic), topic);
+        if (vehicle && vehicle.kind !== 'train') hslVehicles.set(vehicle.id, vehicle);
+      } catch { /* Ignore malformed broker messages. */ }
+    });
+    client.on('close', () => {
+      if (hslClient === client) {
+        hslClient = undefined;
+        hslStartedAt = 0;
+      }
+    });
+    await client.subscribeAsync('/hfp/v2/journey/ongoing/vp/+/+/+/+/+/+/+/#', { qos: 0 });
+    hslClient = client;
+    hslStartedAt = Date.now();
+    return client;
+  })();
+  try {
+    return await hslConnection;
   } finally {
-    await client.endAsync();
+    if (generation === hslConnectionGeneration) hslConnection = undefined;
   }
-  return [...vehicles.values()];
+}
+
+async function collectHsl(signal?: AbortSignal) {
+  await ensureHslFeed();
+  await waitFor(Math.max(0, hslStartedAt + 2_000 - Date.now()), signal);
+  const cutoff = Date.now() - LIVE_VEHICLE_MAX_AGE_MS;
+  for (const [id, vehicle] of hslVehicles) {
+    if (vehicle.recordedAt < cutoff) hslVehicles.delete(id);
+  }
+  return [...hslVehicles.values()];
+}
+
+type ProviderRequest = { provider: LiveVehicleProvider; request: Promise<LiveVehicle[]> };
+type LiveVehicleFetchResult = {
+  vehicles: LiveVehicle[];
+  requestedProviders: Set<LiveVehicleProvider>;
+  successfulProviders: Set<LiveVehicleProvider>;
+};
+
+async function fetchLiveVehicleSnapshot(bounds: Bounds, zoom: number, signal?: AbortSignal): Promise<LiveVehicleFetchResult> {
+  const requests: ProviderRequest[] = [];
+  if (zoom >= 4 && overlaps(bounds, FINLAND_BOUNDS)) {
+    requests.push({ provider: 'digitraffic', request: collectDigitraffic(bounds, signal) });
+  }
+  if (zoom >= 9 && overlaps(bounds, HSL_BOUNDS)) {
+    requests.push({ provider: 'hsl', request: collectHsl(signal) });
+  } else {
+    stopHslFeed();
+  }
+  if (zoom >= 9 && overlaps(bounds, NYSSE_BOUNDS)) {
+    requests.push({ provider: 'nysse',
+      request: fetchJson(serviceConfig.nysseVehiclePositionsEndpoint, 'Nysse vehicle positions', signal).then(normalizeNysseFleet) });
+  }
+  if (zoom >= 9 && overlaps(bounds, FOLI_BOUNDS)) {
+    requests.push({ provider: 'foli',
+      request: fetchJson(serviceConfig.foliVehiclePositionsEndpoint, 'Föli vehicle positions', signal).then(normalizeFoliFleet) });
+  }
+  const settled = await Promise.allSettled(requests.map(({ request }) => request));
+  const successfulProviders = new Set<LiveVehicleProvider>();
+  const vehicles = settled.flatMap((result, index) => {
+    if (result.status !== 'fulfilled') return [];
+    successfulProviders.add(requests[index].provider);
+    return result.value;
+  }).filter((vehicle) => inside(vehicle, bounds) && vehicle.recordedAt >= Date.now() - LIVE_VEHICLE_MAX_AGE_MS);
+  return { vehicles, successfulProviders, requestedProviders: new Set(requests.map(({ provider }) => provider)) };
 }
 
 export async function fetchLiveVehicles(bounds: Bounds, zoom: number, signal?: AbortSignal) {
-  const requests: Array<Promise<LiveVehicle[]>> = [];
-  if (zoom >= 4 && overlaps(bounds, FINLAND_BOUNDS)) {
-    requests.push(fetchJson(`${serviceConfig.digitrafficRailEndpoint}/train-locations.geojson/latest`, 'Digitraffic train locations', signal, {
-      'Digitraffic-User': serviceConfig.clientId,
-    }).then(normalizeDigitrafficFleet));
-  }
-  if (zoom >= 9 && overlaps(bounds, HSL_BOUNDS)) requests.push(collectHsl(signal));
-  if (zoom >= 9 && overlaps(bounds, NYSSE_BOUNDS)) {
-    requests.push(fetchJson(serviceConfig.nysseVehiclePositionsEndpoint, 'Nysse vehicle positions', signal).then(normalizeNysseFleet));
-  }
-  if (zoom >= 9 && overlaps(bounds, FOLI_BOUNDS)) {
-    requests.push(fetchJson(serviceConfig.foliVehiclePositionsEndpoint, 'Föli vehicle positions', signal).then(normalizeFoliFleet));
-  }
-  const settled = await Promise.allSettled(requests);
-  return settled.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-    .filter((vehicle) => inside(vehicle, bounds) && vehicle.recordedAt >= Date.now() - 90_000);
+  return (await fetchLiveVehicleSnapshot(bounds, zoom, signal)).vehicles;
 }
 
-function collection(vehicles: LiveVehicle[], detailed = new Set<string>()): GeoJSON.FeatureCollection {
+function collection(vehicles: LiveVehicle[], detailed = new Set<string>(), hideDetailed = false): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: vehicles.map((vehicle) => ({
       type: 'Feature', id: vehicle.id, geometry: { type: 'Point', coordinates: vehicle.coordinates },
       properties: { id: vehicle.id, route: vehicle.route, kind: vehicle.kind,
-        color: vehicle.color, detailed: detailed.has(vehicle.id) },
+        color: vehicle.color, detailed: hideDetailed && detailed.has(vehicle.id) },
     })),
   };
 }
@@ -289,6 +472,15 @@ export function interpolatedCoordinates(from: [number, number], to: [number, num
   const t = Math.max(0, Math.min(1, fraction));
   return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
 }
+export function liveFleetSmoothingMs(previous: LiveVehicle, next: LiveVehicle) {
+  if (next.kind !== 'train') return liveObservationSmoothingMs(previous.recordedAt, next.recordedAt);
+  const observationInterval = next.recordedAt - previous.recordedAt;
+  if (!Number.isFinite(observationInterval) || observationInterval <= 0) return TRAIN_POSITION_MIN_SMOOTHING_MS;
+  return Math.max(TRAIN_POSITION_MIN_SMOOTHING_MS,
+    Math.min(TRAIN_POSITION_MAX_SMOOTHING_MS, observationInterval));
+}
+
+
 
 export function interpolateOnRoute(from: [number, number], to: [number, number], geometry: [number, number][] | undefined, fraction: number) {
   if (!geometry || geometry.length < 2) return interpolatedCoordinates(from, to, fraction);
@@ -393,10 +585,13 @@ export class LiveVehiclesLayer {
   private deckGeometry: [number, number][] | undefined;
   private deckColor: string | undefined;
   private detailedIds = new Set<string>();
+  private zoomPresentation: 0 | 1 | 2 | undefined;
   private visible = false;
   private tripCache = new Map<string, { expires: number; value?: Awaited<ReturnType<typeof fetchLiveFuzzyTrip>> }>();
+  private providerSnapshots = new Map<LiveVehicleProvider, LiveVehicle[]>();
   private animationFrame = 0;
   private lastPaint = 0;
+  private snapNextCommit = false;
   private transitions = new Map<string, { from: [number, number]; to: [number, number]; started: number; duration: number;
     geometry?: [number, number][] }>();
 
@@ -406,6 +601,21 @@ export class LiveVehiclesLayer {
   setModelLayer(layer: LiveVehicleModelLayer) { this.modelLayer = layer; }
 
   setRouteDeckLayer(layer: RouteLineDeckLayer) { this.routeDeckLayer = layer; }
+
+  snapToNextPositions() { this.snapNextCommit = true; }
+
+  updateZoomPresentation() {
+    if (!this.map || !this.visible) return;
+    const zoom = this.map.getZoom();
+    const zoomPresentation = zoom < 15 ? 0 : zoom < 16 ? 1 : 2;
+    if (zoomPresentation === this.zoomPresentation) return;
+    this.zoomPresentation = zoomPresentation;
+    const display = this.displayedVehicles.size
+      ? [...this.displayedVehicles.values()]
+      : [...this.vehicles.values()];
+    this.detailedIds = this.modelLayer?.setVehicles(display) ?? new Set<string>();
+    (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(collection(display, this.detailedIds, zoomPresentation === 2));
+  }
 
   clearSelection() {
     this.selectedId = null;
@@ -474,7 +684,9 @@ export class LiveVehiclesLayer {
     map.addLayer({ id: LIVE_VEHICLE_LAYER_IDS[2], type: 'symbol', source: SOURCE_ID, minzoom: 7, layout: {
       'text-field': ['get', 'route'], 'text-font': ['Noto Sans Bold', 'Open Sans Bold'],
       'text-size': ['interpolate', ['linear'], ['zoom'], 7, 9, 16, 12], 'text-offset': [0, 1.25],
-      'text-anchor': 'top', 'text-optional': true, 'text-allow-overlap': false,
+      'text-anchor': 'top', 'text-optional': true,
+      'text-allow-overlap': ['step', ['zoom'], false, 16, true],
+      'text-ignore-placement': ['step', ['zoom'], false, 16, true],
     }, paint: { 'text-color': '#17324d', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } }, before);
     const select = (point: Point) => {
       if (interactionBlocked()) return;
@@ -504,17 +716,42 @@ export class LiveVehiclesLayer {
     }
   }
 
-  async update(bounds: Bounds, zoom: number) {
+  async update(bounds: Bounds, zoom: number, preserveExisting = false) {
     if (!this.map) return;
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
-    const vehicles = await fetchLiveVehicles(bounds, zoom, controller.signal);
+    const snapshot = await fetchLiveVehicleSnapshot(bounds, zoom, controller.signal);
     if (controller.signal.aborted || !this.map) return;
+    const now = Date.now();
+    const byProvider = new Map<LiveVehicleProvider, LiveVehicle[]>();
+    for (const vehicle of snapshot.vehicles) {
+      const group = byProvider.get(vehicle.provider) ?? [];
+      group.push(vehicle);
+      byProvider.set(vehicle.provider, group);
+    }
+    for (const provider of ['digitraffic', 'hsl', 'nysse', 'foli'] as const) {
+      if (snapshot.successfulProviders.has(provider)) {
+        const current = byProvider.get(provider) ?? [];
+        const previous = preserveExisting ? this.providerSnapshots.get(provider) ?? [] : [];
+        this.providerSnapshots.set(provider, [...new Map([...previous, ...current]
+          .map((vehicle) => [vehicle.id, vehicle])).values()]);
+      } else if (!snapshot.requestedProviders.has(provider) && !preserveExisting) {
+        this.providerSnapshots.delete(provider);
+      }
+    }
+    const vehicles = [...this.providerSnapshots.values()].flat()
+      .filter((vehicle) => vehicle.recordedAt >= now - LIVE_VEHICLE_MAX_AGE_MS
+        && (preserveExisting || inside(vehicle, bounds)));
     this.commitVehicles(vehicles);
     const center = this.map.getCenter();
     const candidates = zoom >= 12 ? vehicles : vehicles.filter((vehicle) => vehicle.provider === 'digitraffic');
     const ranked = [...candidates].sort((a, b) => {
+      // Rail models need trip geometry to snap every carriage to the track and
+      // articulate through curves. Keep nearby buses from exhausting the
+      // limited enrichment budget before visible trains receive that shape.
+      const providerPriority = Number(a.provider !== 'digitraffic') - Number(b.provider !== 'digitraffic');
+      if (providerPriority) return providerPriority;
       const distance = (v: LiveVehicle) => (v.coordinates[0] - center.lng) ** 2 + (v.coordinates[1] - center.lat) ** 2;
       return distance(a) - distance(b);
     }).slice(0, MAX_TRIP_LOOKUPS);
@@ -564,6 +801,8 @@ export class LiveVehiclesLayer {
 
   private commitVehicles(vehicles: LiveVehicle[]) {
     if (!this.map) return;
+    const snap = this.snapNextCommit;
+    this.snapNextCommit = false;
     const now = performance.now();
     const previous = this.vehicles;
     for (const vehicle of vehicles) {
@@ -594,11 +833,14 @@ export class LiveVehiclesLayer {
       const from = priorTransition ? interpolateOnRoute(priorTransition.from, priorTransition.to, priorTransition.geometry,
         priorTransition.duration > 0 ? (now - priorTransition.started) / priorTransition.duration : 1)
         : prior?.coordinates ?? vehicle.coordinates;
-      const duration = !prior ? 0 : liveObservationSmoothingMs(
-        sameObservation ? undefined : prior.recordedAt, vehicle.recordedAt);
+      const duration = snap || !prior ? 0 : sameObservation
+        ? liveObservationSmoothingMs(undefined, vehicle.recordedAt)
+        : liveFleetSmoothingMs(prior, vehicle);
       return [vehicle.id, { from, to: vehicle.coordinates, started: now, duration, geometry: vehicle.geometry }];
     }));
-    this.detailedIds = this.modelLayer?.setVehicles(vehicles) ?? new Set<string>();
+    this.detailedIds = this.modelLayer?.setVehicles(vehicles, snap) ?? new Set<string>();
+    const zoom = this.map.getZoom();
+    this.zoomPresentation = zoom < 15 ? 0 : zoom < 16 ? 1 : 2;
     cancelAnimationFrame(this.animationFrame);
     this.lastPaint = 0;
     this.paintAnimated();
@@ -625,7 +867,7 @@ export class LiveVehiclesLayer {
       return { ...vehicle, coordinates: interpolateOnRoute(transition.from, transition.to, transition.geometry, fraction) };
     });
     this.displayedVehicles = new Map(display.map((vehicle) => [vehicle.id, vehicle]));
-    (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(collection(display, this.detailedIds));
+    (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(collection(display, this.detailedIds, this.map.getZoom() >= 16));
     this.modelLayer?.setVehicles(display);
     if (this.selectedId) {
       const selected = display.find((vehicle) => vehicle.id === this.selectedId);
@@ -642,13 +884,20 @@ export class LiveVehiclesLayer {
     for (const id of LIVE_VEHICLE_LAYER_IDS) {
       if (this.map?.getLayer(id)) this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
     }
-    if (!visible) this.controller?.abort();
+    if (!visible) { this.controller?.abort(); stopHslFeed(); }
     this.routeDeckLayer?.setVisible(visible && Boolean(this.deckGeometry));
     if (!visible) this.selectedController?.abort();
     if (!visible) cancelAnimationFrame(this.animationFrame);
-    if (visible && this.vehicles.size) this.paintAnimated();
+    if (visible && this.vehicles.size) {
+      this.zoomPresentation = undefined;
+      this.updateZoomPresentation();
+      this.paintAnimated();
+    }
     if (!visible) this.modelLayer?.setVehicles([]);
-    if (!visible) this.detailedIds.clear();
+    if (!visible) {
+      this.detailedIds.clear();
+      this.zoomPresentation = undefined;
+    }
     if (!visible) this.clearSelection();
   }
 
@@ -658,11 +907,13 @@ export class LiveVehiclesLayer {
     cancelAnimationFrame(this.animationFrame);
     this.map = null;
     this.vehicles.clear();
+    this.providerSnapshots.clear();
     this.displayedVehicles.clear();
     this.detailedIds.clear();
     this.modelLayer = null;
     this.routeDeckLayer?.setFeatures([]);
     this.routeDeckLayer?.setVisible(false);
     this.routeDeckLayer = null;
+    stopHslFeed();
   }
 }

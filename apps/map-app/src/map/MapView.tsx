@@ -1973,6 +1973,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     let disposeMapPatterns: (() => void) | undefined;
     let transitStopsTimer: number | undefined;
     let liveVehiclesTimer: number | undefined;
+    let liveVehiclesMoveTimer: number | undefined;
     let liveVehiclesInterval: number | undefined;
     let liveVehiclesEarlyTimer: number | undefined;
     let liveVehiclesEarlyRefreshPending = true;
@@ -1982,6 +1983,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     let roadWidthMaxZoom: number | undefined;
     let globalLabelDensitySignature: string | undefined;
     let previousOrientationChanged = false;
+    let liveVehiclesCamera: { lng: number; lat: number; zoom: number; longitudeSpan: number; latitudeSpan: number } | undefined;
 
     const updateGlobalPhysicalWidths = () => {
       const latitude = map.getCenter().lat;
@@ -2059,13 +2061,20 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       transitStopsTimer = window.setTimeout(updateTransitStops, 220);
     };
-    const updateLiveVehicles = () => {
+    const updateLiveVehicles = (preserveExisting = map.isMoving()) => {
       liveVehiclesTimer = undefined;
       if (!map.isStyleLoaded() || !liveVehiclesEnabledRef.current) return;
       const bounds = map.getBounds();
+      liveVehiclesCamera = {
+        lng: map.getCenter().lng,
+        lat: map.getCenter().lat,
+        zoom: map.getZoom(),
+        longitudeSpan: Math.abs(bounds.getEast() - bounds.getWest()),
+        latitudeSpan: Math.abs(bounds.getNorth() - bounds.getSouth()),
+      };
       void liveVehiclesLayer.update({
         west: bounds.getWest(), south: bounds.getSouth(), east: bounds.getEast(), north: bounds.getNorth(),
-      }, map.getZoom()).then(() => {
+      }, map.getZoom(), preserveExisting).then(() => {
         if (!liveVehiclesEarlyRefreshPending) return;
         liveVehiclesEarlyRefreshPending = false;
         liveVehiclesEarlyTimer = window.setTimeout(() => {
@@ -2080,6 +2089,27 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       if (liveVehiclesTimer !== undefined) window.clearTimeout(liveVehiclesTimer);
       liveVehiclesTimer = window.setTimeout(updateLiveVehicles, 260);
     };
+    const scheduleLiveVehiclesUpdateDuringMove = () => {
+      if (liveVehiclesMoveTimer !== undefined || !liveVehiclesCamera
+        || !liveVehiclesEnabledRef.current || liveVehicleFollowingRef.current) return;
+      const center = map.getCenter();
+      const longitudeMoved = Math.abs(center.lng - liveVehiclesCamera.lng);
+      const latitudeMoved = Math.abs(center.lat - liveVehiclesCamera.lat);
+      const zoomMoved = Math.abs(map.getZoom() - liveVehiclesCamera.zoom);
+      if (longitudeMoved < liveVehiclesCamera.longitudeSpan * 0.25
+        && latitudeMoved < liveVehiclesCamera.latitudeSpan * 0.25
+        && zoomMoved < 0.5) return;
+      liveVehiclesMoveTimer = window.setTimeout(() => {
+        liveVehiclesMoveTimer = undefined;
+        if (!document.hidden && !liveVehicleFollowingRef.current) updateLiveVehicles(true);
+      }, 350);
+    };
+    const refreshLiveVehiclesOnForeground = () => {
+      if (document.hidden || !liveVehiclesEnabledRef.current) return;
+      liveVehiclesLayer.snapToNextPositions();
+      updateLiveVehicles();
+    };
+    document.addEventListener('visibilitychange', refreshLiveVehiclesOnForeground);
     const updateChargingStations = () => {
       chargingStationsTimer = undefined;
       if (!map.isStyleLoaded() || !chargingStationsEnabledRef.current) return;
@@ -2635,6 +2665,10 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     cancelTerrainCameraEase = () => terrainCameraFollower.cancel();
     const handleMoveEnd = (event?: unknown) => {
       if ((flightActiveRef.current || driveActiveRef.current) || isTerrainCameraFollowEvent(event)) return;
+      if (liveVehiclesMoveTimer !== undefined) {
+        window.clearTimeout(liveVehiclesMoveTimer);
+        liveVehiclesMoveTimer = undefined;
+      }
       persistCamera();
       updateGlobalPhysicalWidths();
       scheduleTreeUpdate();
@@ -2678,6 +2712,8 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
         userEnabled: terrainEnabledRef.current,
         source: terrainSourceRef.current,
       });
+      liveVehiclesLayer.updateZoomPresentation();
+      scheduleLiveVehiclesUpdateDuringMove();
     };
     const stopLiveVehicleFollowOnGesture = () => {
       if (!liveVehicleFollowingRef.current) return;
@@ -2714,8 +2750,10 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       measurementControllerRef.current = null;
       if (transitStopsTimer !== undefined) window.clearTimeout(transitStopsTimer);
       if (liveVehiclesTimer !== undefined) window.clearTimeout(liveVehiclesTimer);
+      if (liveVehiclesMoveTimer !== undefined) window.clearTimeout(liveVehiclesMoveTimer);
       if (liveVehiclesEarlyTimer !== undefined) window.clearTimeout(liveVehiclesEarlyTimer);
       if (liveVehiclesInterval !== undefined) window.clearInterval(liveVehiclesInterval);
+      document.removeEventListener('visibilitychange', refreshLiveVehiclesOnForeground);
       if (chargingStationsTimer !== undefined) window.clearTimeout(chargingStationsTimer);
       modelRefresh.dispose();
       map.off('move', handleCameraMove);

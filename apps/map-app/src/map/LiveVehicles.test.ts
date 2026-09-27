@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanceToSegment, interpolateOnRoute, interpolatedCoordinates, normalizeDigitrafficFleet, normalizeFoliFleet, normalizeHslMessage, normalizeNysseFleet, routeSectionPoses, selectedLiveVehicleRoute, snapToGeometry, type LiveVehicle } from './LiveVehicles';
+import { distanceToSegment, hslJourneyFromTopic, hslModeFromTopic, interpolateOnRoute, interpolatedCoordinates, liveFleetSmoothingMs, normalizeDigitrafficFleet, normalizeFoliFleet, normalizeHslMessage, normalizeNysseFleet, routeSectionPoses, selectedLiveVehicleRoute, snapToGeometry, type LiveVehicle } from './LiveVehicles';
 
 describe('live fleet normalization', () => {
   it('hit-tests along a detailed vehicle, not only at its GPS centre', () => {
@@ -20,6 +20,13 @@ describe('live fleet normalization', () => {
     expect(poses[0].heading).toBeCloseTo(90);
     expect(poses[2].heading).toBeCloseTo(0);
   });
+  it('smooths sparse train observations until the next likely update', () => {
+    const prior: LiveVehicle = { id: 'train', provider: 'digitraffic', coordinates: [23, 61], recordedAt: 1_000,
+      route: 'IC 1', kind: 'train' };
+    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 11_000 })).toBe(15_000);
+    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 46_000 })).toBe(45_000);
+    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 91_000 })).toBe(60_000);
+  });
   it('shows only the selected trip geometry with its route color', () => {
     const vehicle: LiveVehicle = { id: 'hsl:1:2', provider: 'hsl', coordinates: [24.9, 60.2],
       recordedAt: 1, route: '1', kind: 'bus', color: '#123456', geometry: [[24.9, 60.2], [25, 60.3]] };
@@ -37,7 +44,9 @@ describe('live fleet normalization', () => {
         VehicleLocation: { Longitude: 23.76, Latitude: 61.5 }, VehicleRef: { value: '56920_11' },
       },
     }] }] } } });
-    expect(vehicles[0]).toMatchObject({ id: 'nysse:56920_11', route: '3', destination: 'Hervantajärvi', kind: 'tram' });
+    expect(vehicles[0]).toMatchObject({
+      id: 'nysse:56920_11', route: '3', destination: 'Hervantajärvi', kind: 'tram', color: '#C92F40',
+    });
   });
 
   it('uses Föli onward calls for a selected vehicle', () => {
@@ -54,12 +63,41 @@ describe('live fleet normalization', () => {
       trainNumber: 9, departureDate: '2026-09-21', timestamp: '2026-09-21T18:14:52Z', isGpsLocation: true,
     } };
     expect(normalizeDigitrafficFleet({ features: [feature] })[0]).toMatchObject({ id: 'digitraffic:2026-09-21:9', route: '9' });
+    expect(normalizeDigitrafficFleet({ features: [feature] }, [], true)).toEqual([]);
+    expect(normalizeDigitrafficFleet({ features: [feature] }, [{
+      trainNumber: 9, departureDate: '2026-09-21', trainType: 'IC', trainCategory: 'Long-distance',
+    }])[0]).toMatchObject({ route: 'IC 9' });
+    expect(normalizeDigitrafficFleet({ features: [feature] }, [{
+      trainNumber: 9, departureDate: '2026-09-21', commuterLineID: 'R', trainType: 'HL', trainCategory: 'Commuter',
+    }])[0]).toMatchObject({ route: 'R' });
+    expect(normalizeDigitrafficFleet({ features: [feature] }, [{
+      trainNumber: 9, departureDate: '2026-09-21', trainType: 'T', trainCategory: 'Cargo',
+    }])).toEqual([]);
+    expect(normalizeDigitrafficFleet({ features: [feature] }, [{
+      trainNumber: 9, departureDate: '2026-09-21', trainType: 'VET', trainCategory: 'Locomotive',
+    }], true)).toEqual([]);
+    expect(normalizeDigitrafficFleet({ features: [feature] }, [{
+      trainNumber: 9, departureDate: '2026-09-21', trainType: 'IC', trainCategory: 'Long-distance',
+    }], true)).toHaveLength(1);
     expect(normalizeDigitrafficFleet({ features: [{ ...feature, properties: { ...feature.properties, isGpsLocation: false } }] })).toEqual([]);
   });
 
   it('normalizes HSL positions and rejects malformed messages', () => {
     expect(normalizeHslMessage({ VP: { oper: 6, veh: 42, route: '550', long: 25, lat: 60, tst: '2026-09-21T18:14:52Z' } }))
       .toMatchObject({ id: 'hsl:6:42', route: '550' });
+    const topic = '/hfp/v2/journey/ongoing/vp/tram/6/42/1001/1/Center/1200/1234/0/abcd';
+    expect(hslModeFromTopic(topic)).toBe('tram');
+    expect(hslJourneyFromTopic(topic)).toMatchObject({
+      mode: 'tram', routeId: '1001', direction: 0, headsign: 'Center', startSeconds: 43_200,
+    });
+    expect(normalizeHslMessage({ VP: { oper: 6, veh: 42, route: '1', long: 25, lat: 60,
+      tst: '2026-09-21T18:14:52Z', oday: '2026-09-21' } }, hslModeFromTopic(topic), topic)).toMatchObject({ kind: 'tram', destination: 'Center', routeId: 'HSL:1001', direction: 0, startSeconds: 43_200 });
+    expect(normalizeHslMessage({ VP: { oper: 6, veh: 43, route: 'M1', long: 25, lat: 60,
+      tst: '2026-09-21T18:14:52Z' } }, 'metro')).toMatchObject({ kind: 'metro' });
+    expect(normalizeHslMessage({ VP: { oper: 6, veh: 44, route: 'R', long: 25, lat: 60,
+      tst: '2026-09-21T18:14:52Z' } }, 'train')).toMatchObject({ kind: 'train' });
+    expect(normalizeHslMessage({ VP: { oper: 6, veh: 45, route: '19', long: 25, lat: 60,
+      tst: '2026-09-21T18:14:52Z' } }, 'ferry')).toBeUndefined();
     expect(normalizeHslMessage({ VP: { route: '550' } })).toBeUndefined();
   });
 });

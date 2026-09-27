@@ -288,7 +288,6 @@ export function TransitDeparturesPanel({
     : '';
   const vehiclePositionAvailable = positionStatus !== 'unavailable';
   if (selectedDeparture) {
-    const DetailIcon = modeIcon(detailMode);
     return (
       <aside className={cn("transit-departures-panel transit-trip-panel mobile-bottom-sheet", sheet.dragging && "is-dragging")} style={sheet.style} data-snap={sheet.snap} aria-label={`${detailRoute} route details`}>
         <MobileSheetHandle {...sheet} closeLabel="Close departures" onClose={onClose} />
@@ -314,11 +313,6 @@ export function TransitDeparturesPanel({
               {detailRoute}
             </div>
             <div>
-              <div className="transit-panel-eyebrow" style={{ color: modeColor(detailMode) }}>
-                <DetailIcon aria-hidden="true" />
-                <span>{modeLabel(detailMode)} · {positionStatus === 'live'
-                  ? 'Live' : positionStatus === 'estimated' ? 'Estimated' : 'Trip timetable'}</span>
-              </div>
               <h2>{detailDestination || 'Route stops'}</h2>
               <div className="transit-panel-status"><span aria-hidden="true" />{routeStopsLoading
                 ? 'Loading trip details'

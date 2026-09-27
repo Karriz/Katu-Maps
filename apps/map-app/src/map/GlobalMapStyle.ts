@@ -2578,7 +2578,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         'line-color': [
           'match', ['get', 'subclass'],
           'subway', '#e06b2f',
-          'tram', '#c84059',
+          'tram', '#8554c7',
           'light_rail', '#7565bb',
           'monorail', '#16878c',
           'funicular', '#b77932',
@@ -2604,7 +2604,7 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       ],
       layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': ['to-color', ['get', 'route_1_colour'], '#c84059'],
+        'line-color': ['to-color', ['get', 'route_1_colour'], '#8554c7'],
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.4, 12, 3, 16, 5],
         'line-opacity': 0.98,
       },
