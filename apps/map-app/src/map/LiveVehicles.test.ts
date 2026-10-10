@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanceToSegment, hslJourneyFromTopic, hslModeFromTopic, interpolateOnRoute, interpolatedCoordinates, liveFleetSmoothingMs, normalizeDigitrafficFleet, normalizeFoliFleet, normalizeHslMessage, normalizeNysseFleet, routeSectionPoses, selectedLiveVehicleRoute, snapToGeometry, type LiveVehicle } from './LiveVehicles';
+import { advanceAlongRoute, distanceToSegment, hslJourneyFromTopic, hslModeFromTopic, interpolateOnRoute, interpolatedCoordinates, liveFleetSmoothingMs, normalizeDigitrafficFleet, normalizeFoliFleet, normalizeHslMessage, normalizeNysseFleet, routeSectionPoses, selectedLiveVehicleRoute, snapToGeometry, type LiveVehicle } from './LiveVehicles';
 
 describe('live fleet normalization', () => {
   it('hit-tests along a detailed vehicle, not only at its GPS centre', () => {
@@ -20,12 +20,15 @@ describe('live fleet normalization', () => {
     expect(poses[0].heading).toBeCloseTo(90);
     expect(poses[2].heading).toBeCloseTo(0);
   });
-  it('smooths sparse train observations until the next likely update', () => {
+  it('predicts trains along route geometry and corrects new observations quickly', () => {
     const prior: LiveVehicle = { id: 'train', provider: 'digitraffic', coordinates: [23, 61], recordedAt: 1_000,
       route: 'IC 1', kind: 'train' };
-    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 11_000 })).toBe(15_000);
-    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 46_000 })).toBe(45_000);
-    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 91_000 })).toBe(60_000);
+    expect(liveFleetSmoothingMs(prior, { ...prior, recordedAt: 46_000 })).toBe(2_500);
+    const route: [number, number][] = [[23, 61], [23.01, 61], [23.01, 61.01]];
+    const predicted = advanceAlongRoute([23.005, 61], route, 400);
+    expect(predicted[0]).toBeGreaterThan(23.005);
+    expect(predicted[1]).toBeCloseTo(61);
+    expect(advanceAlongRoute([23.005, 61.01], route, 400)).toEqual([23.005, 61.01]);
   });
   it('shows only the selected trip geometry with its route color', () => {
     const vehicle: LiveVehicle = { id: 'hsl:1:2', provider: 'hsl', coordinates: [24.9, 60.2],
@@ -60,9 +63,9 @@ describe('live fleet normalization', () => {
 
   it('requires GPS coordinates for Digitraffic trains', () => {
     const feature = { geometry: { coordinates: [25, 61] }, properties: {
-      trainNumber: 9, departureDate: '2026-09-21', timestamp: '2026-09-21T18:14:52Z', isGpsLocation: true,
+      trainNumber: 9, departureDate: '2026-09-21', timestamp: '2026-09-21T18:14:52Z', isGpsLocation: true, speed: 120,
     } };
-    expect(normalizeDigitrafficFleet({ features: [feature] })[0]).toMatchObject({ id: 'digitraffic:2026-09-21:9', route: '9' });
+    expect(normalizeDigitrafficFleet({ features: [feature] })[0]).toMatchObject({ id: 'digitraffic:2026-09-21:9', route: '9', speedKmh: 120 });
     expect(normalizeDigitrafficFleet({ features: [feature] }, [], true)).toEqual([]);
     expect(normalizeDigitrafficFleet({ features: [feature] }, [{
       trainNumber: 9, departureDate: '2026-09-21', trainType: 'IC', trainCategory: 'Long-distance',

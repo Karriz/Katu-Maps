@@ -18,6 +18,7 @@ export type LiveVehicle = {
   route: string;
   destination?: string;
   heading?: number;
+  speedKmh?: number;
   kind: LiveVehicleKind;
   tripId?: string;
   serviceDate?: string;
@@ -43,8 +44,8 @@ const NYSSE_BOUNDS: Bounds = { west: 23.2, south: 61.2, east: 24.5, north: 62.0 
 const FOLI_BOUNDS: Bounds = { west: 21.8, south: 60.2, east: 23.0, north: 60.8 };
 const MAX_TRIP_LOOKUPS = 12;
 const TRIP_CACHE_MS = 30 * 60_000;
-const TRAIN_POSITION_MIN_SMOOTHING_MS = 15_000;
-const TRAIN_POSITION_MAX_SMOOTHING_MS = 60_000;
+const TRAIN_CORRECTION_MS = 2_500;
+const TRAIN_PREDICTION_MAX_SECONDS = 30;
 const LIVE_VEHICLE_MAX_AGE_MS = 90_000;
 const PASSENGER_TRAIN_CATEGORIES = new Set(['commuter', 'long-distance']);
 type DigitrafficTrainMetadata = {
@@ -192,6 +193,7 @@ export function normalizeDigitrafficFleet(payload: unknown, metadata: Digitraffi
       route: commuter || `${type ? `${type} ` : ''}${trainNumber}`, kind: 'train' as const,
       tripId: `${trainNumber}_${departureDate.replaceAll('-', '')}`, serviceDate: departureDate,
       heading: finite(properties.heading) ? properties.heading : undefined,
+      speedKmh: finite(properties.speed) && properties.speed >= 0 ? properties.speed : undefined,
     }];
   });
 }
@@ -473,11 +475,8 @@ export function interpolatedCoordinates(from: [number, number], to: [number, num
   return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
 }
 export function liveFleetSmoothingMs(previous: LiveVehicle, next: LiveVehicle) {
-  if (next.kind !== 'train') return liveObservationSmoothingMs(previous.recordedAt, next.recordedAt);
-  const observationInterval = next.recordedAt - previous.recordedAt;
-  if (!Number.isFinite(observationInterval) || observationInterval <= 0) return TRAIN_POSITION_MIN_SMOOTHING_MS;
-  return Math.max(TRAIN_POSITION_MIN_SMOOTHING_MS,
-    Math.min(TRAIN_POSITION_MAX_SMOOTHING_MS, observationInterval));
+  return next.kind === 'train' ? TRAIN_CORRECTION_MS
+    : liveObservationSmoothingMs(previous.recordedAt, next.recordedAt);
 }
 
 
@@ -518,6 +517,33 @@ export function interpolateOnRoute(from: [number, number], to: [number, number],
   const index = Math.max(1, lengths.findIndex((length) => length >= target));
   const segment = lengths[index] - lengths[index - 1];
   return interpolatedCoordinates(geometry[index - 1], geometry[index], segment ? (target - lengths[index - 1]) / segment : 0);
+}
+
+export function advanceAlongRoute(coordinates: [number, number], geometry: [number, number][] | undefined, meters: number) {
+  if (!geometry || geometry.length < 2 || !Number.isFinite(meters) || meters <= 0) return coordinates;
+  const metersPerLng = 111_320 * Math.cos(coordinates[1] * Math.PI / 180);
+  const lengths = [0];
+  let closest = { distance: Infinity, progress: 0 };
+  for (let index = 1; index < geometry.length; index += 1) {
+    const a = geometry[index - 1];
+    const b = geometry[index];
+    const dx = (b[0] - a[0]) * metersPerLng;
+    const dy = (b[1] - a[1]) * 111_320;
+    const segment = Math.hypot(dx, dy);
+    lengths.push(lengths[index - 1] + segment);
+    if (segment < 0.01) continue;
+    const fraction = Math.max(0, Math.min(1, ((coordinates[0] - a[0]) * metersPerLng * dx
+      + (coordinates[1] - a[1]) * 111_320 * dy) / (segment * segment)));
+    const distance = Math.hypot((coordinates[0] - a[0]) * metersPerLng - dx * fraction,
+      (coordinates[1] - a[1]) * 111_320 - dy * fraction);
+    if (distance < closest.distance) closest = { distance, progress: lengths[index - 1] + segment * fraction };
+  }
+  if (closest.distance > 65) return coordinates;
+  const target = Math.min(lengths[lengths.length - 1], closest.progress + meters);
+  const index = Math.max(1, lengths.findIndex((length) => length >= target));
+  const segment = lengths[index] - lengths[index - 1];
+  return interpolatedCoordinates(geometry[index - 1], geometry[index],
+    segment > 0 ? (target - lengths[index - 1]) / segment : 0);
 }
 
 export function routeSectionPoses(center: [number, number], geometry: [number, number][] | undefined,
@@ -580,6 +606,7 @@ export class LiveVehiclesLayer {
   private selectedVehicle: LiveVehicle | null = null;
   private vehicles = new Map<string, LiveVehicle>();
   private displayedVehicles = new Map<string, LiveVehicle>();
+  private animatedVehicles = new Map<string, LiveVehicle>();
   private modelLayer: LiveVehicleModelLayer | null = null;
   private routeDeckLayer: RouteLineDeckLayer | null = null;
   private deckGeometry: [number, number][] | undefined;
@@ -604,16 +631,25 @@ export class LiveVehiclesLayer {
 
   snapToNextPositions() { this.snapNextCommit = true; }
 
+  private presentationVehicles(vehicles: LiveVehicle[]) {
+    return vehicles.map((vehicle) => {
+      const coordinates = this.modelLayer?.fallbackCoordinateFor(vehicle.id);
+      return coordinates ? { ...vehicle, coordinates } : vehicle;
+    });
+  }
+
   updateZoomPresentation() {
     if (!this.map || !this.visible) return;
     const zoom = this.map.getZoom();
     const zoomPresentation = zoom < 15 ? 0 : zoom < 16 ? 1 : 2;
     if (zoomPresentation === this.zoomPresentation) return;
     this.zoomPresentation = zoomPresentation;
-    const display = this.displayedVehicles.size
-      ? [...this.displayedVehicles.values()]
+    const animated = this.animatedVehicles.size
+      ? [...this.animatedVehicles.values()]
       : [...this.vehicles.values()];
-    this.detailedIds = this.modelLayer?.setVehicles(display) ?? new Set<string>();
+    this.detailedIds = this.modelLayer?.setVehicles(animated) ?? new Set<string>();
+    const display = this.presentationVehicles(animated);
+    this.displayedVehicles = new Map(display.map((vehicle) => [vehicle.id, vehicle]));
     (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(collection(display, this.detailedIds, zoomPresentation === 2));
   }
 
@@ -830,9 +866,11 @@ export class LiveVehiclesLayer {
       const sameTarget = priorTransition?.to[0] === vehicle.coordinates[0]
         && priorTransition.to[1] === vehicle.coordinates[1];
       if (sameObservation && sameTarget && priorTransition) return [vehicle.id, priorTransition];
-      const from = priorTransition ? interpolateOnRoute(priorTransition.from, priorTransition.to, priorTransition.geometry,
-        priorTransition.duration > 0 ? (now - priorTransition.started) / priorTransition.duration : 1)
-        : prior?.coordinates ?? vehicle.coordinates;
+      const displayedPrior = this.displayedVehicles.get(vehicle.id);
+      const from = displayedPrior?.coordinates ?? (priorTransition
+        ? interpolateOnRoute(priorTransition.from, priorTransition.to, priorTransition.geometry,
+          priorTransition.duration > 0 ? (now - priorTransition.started) / priorTransition.duration : 1)
+        : prior?.coordinates ?? vehicle.coordinates);
       const duration = snap || !prior ? 0 : sameObservation
         ? liveObservationSmoothingMs(undefined, vehicle.recordedAt)
         : liveFleetSmoothingMs(prior, vehicle);
@@ -853,22 +891,31 @@ export class LiveVehiclesLayer {
   private paintAnimated = () => {
     if (!this.map || !this.visible) return;
     const now = performance.now();
+    const wallNow = Date.now();
     if (now - this.lastPaint < 80) {
       this.animationFrame = requestAnimationFrame(this.paintAnimated);
       return;
     }
     this.lastPaint = now;
     let moving = false;
-    const display = [...this.vehicles.values()].map((vehicle) => {
+    const animated = [...this.vehicles.values()].map((vehicle) => {
       const transition = this.transitions.get(vehicle.id);
-      if (!transition) return vehicle;
-      const fraction = transition.duration > 0 ? (now - transition.started) / transition.duration : 1;
-      if (fraction < 1) moving = true;
-      return { ...vehicle, coordinates: interpolateOnRoute(transition.from, transition.to, transition.geometry, fraction) };
+      const fraction = transition?.duration ? (now - transition.started) / transition.duration : 1;
+      const predictionAgeSeconds = vehicle.kind === 'train' && vehicle.geometry && vehicle.speedKmh !== undefined
+        ? Math.max(0, Math.min(TRAIN_PREDICTION_MAX_SECONDS, (wallNow - vehicle.recordedAt) / 1_000)) : 0;
+      const predicted = predictionAgeSeconds > 0 && vehicle.speedKmh! > 1
+        ? advanceAlongRoute(vehicle.coordinates, vehicle.geometry, vehicle.speedKmh! / 3.6 * predictionAgeSeconds)
+        : vehicle.coordinates;
+      if (predictionAgeSeconds > 0 && predictionAgeSeconds < TRAIN_PREDICTION_MAX_SECONDS && vehicle.speedKmh! > 1) moving = true;
+      if (!transition || fraction >= 1) return predicted === vehicle.coordinates ? vehicle : { ...vehicle, coordinates: predicted };
+      moving = true;
+      return { ...vehicle, coordinates: interpolateOnRoute(transition.from, predicted, transition.geometry, fraction) };
     });
+    this.animatedVehicles = new Map(animated.map((vehicle) => [vehicle.id, vehicle]));
+    this.detailedIds = this.modelLayer?.setVehicles(animated) ?? new Set<string>();
+    const display = this.presentationVehicles(animated);
     this.displayedVehicles = new Map(display.map((vehicle) => [vehicle.id, vehicle]));
     (this.map.getSource(SOURCE_ID) as GeoJSONSource | undefined)?.setData(collection(display, this.detailedIds, this.map.getZoom() >= 16));
-    this.modelLayer?.setVehicles(display);
     if (this.selectedId) {
       const selected = display.find((vehicle) => vehicle.id === this.selectedId);
       if (selected) this.onAnimatedPosition(selected);
@@ -908,6 +955,7 @@ export class LiveVehiclesLayer {
     this.map = null;
     this.vehicles.clear();
     this.providerSnapshots.clear();
+    this.animatedVehicles.clear();
     this.displayedVehicles.clear();
     this.detailedIds.clear();
     this.modelLayer = null;
