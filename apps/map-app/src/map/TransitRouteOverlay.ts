@@ -178,7 +178,15 @@ export class TransitRouteOverlay {
     };
     const coversViewport = (coverage: typeof this.loadedCoverage) => coverage?.zoom === zoomBucket
       && transitRouteBoundsContain(coverage.bounds, viewport);
-    if (coversViewport(this.loadedCoverage) || coversViewport(this.pendingCoverage)) return;
+    if (coversViewport(this.loadedCoverage)) {
+      if (this.pendingCoverage && !coversViewport(this.pendingCoverage)) {
+        this.controller?.abort();
+        this.requestVersion += 1;
+        this.pendingCoverage = null;
+      }
+      return;
+    }
+    if (coversViewport(this.pendingCoverage)) return;
     const requestBounds = transitRouteRequestBounds(viewport);
     this.controller?.abort();
     const controller = new AbortController();

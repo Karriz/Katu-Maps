@@ -360,6 +360,10 @@ async function ensureHslFeed() {
       }
     });
     await client.subscribeAsync('/hfp/v2/journey/ongoing/vp/+/+/+/+/+/+/+/#', { qos: 0 });
+    if (generation !== hslConnectionGeneration) {
+      await client.endAsync();
+      throw abortError();
+    }
     hslClient = client;
     hslStartedAt = Date.now();
     return client;
@@ -622,7 +626,7 @@ export class LiveVehiclesLayer {
   private transitions = new Map<string, { from: [number, number]; to: [number, number]; started: number; duration: number;
     geometry?: [number, number][] }>();
 
-  constructor(private readonly onSelect: (vehicle: LiveVehicle) => void,
+  constructor(private readonly onSelect: (vehicle: LiveVehicle | null) => void,
     private readonly onAnimatedPosition: (vehicle: LiveVehicle) => void = () => undefined) {}
 
   setModelLayer(layer: LiveVehicleModelLayer) { this.modelLayer = layer; }
@@ -718,7 +722,7 @@ export class LiveVehiclesLayer {
       'circle-opacity': ['case', ['get', 'detailed'], 0.01, 1],
     } }, before);
     map.addLayer({ id: LIVE_VEHICLE_LAYER_IDS[2], type: 'symbol', source: SOURCE_ID, minzoom: 7, layout: {
-      'text-field': ['get', 'route'], 'text-font': ['Noto Sans Bold', 'Open Sans Bold'],
+      'text-field': ['get', 'route'], 'text-font': ['Noto Sans Regular'],
       'text-size': ['interpolate', ['linear'], ['zoom'], 7, 9, 16, 12], 'text-offset': [0, 1.25],
       'text-anchor': 'top', 'text-optional': true,
       'text-allow-overlap': ['step', ['zoom'], false, 16, true],
@@ -857,7 +861,13 @@ export class LiveVehiclesLayer {
       vehicle.coordinates = snapToGeometry(vehicle.coordinates, vehicle.geometry) ?? vehicle.coordinates;
     }
     this.vehicles = new Map(vehicles.map((vehicle) => [vehicle.id, { ...vehicle }]));
-    if (this.selectedId) this.selectedVehicle = this.vehicles.get(this.selectedId) ?? this.selectedVehicle;
+    if (this.selectedId) {
+      this.selectedVehicle = this.vehicles.get(this.selectedId) ?? this.selectedVehicle;
+      if (!this.selectedVehicle || this.selectedVehicle.recordedAt < Date.now() - LIVE_VEHICLE_MAX_AGE_MS) {
+        this.clearSelection();
+        this.onSelect(null);
+      }
+    }
     this.updateSelectedRoute();
     this.transitions = new Map(vehicles.map((vehicle) => {
       const prior = previous.get(vehicle.id);

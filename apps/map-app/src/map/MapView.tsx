@@ -1610,6 +1610,10 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     setSearchQuery('');
     setHighlightedSearchResults([]);
     if (isMobile) {
+      liveVehicleFollowingRef.current = false;
+      setLiveVehicleFollowing(false);
+      liveVehiclesLayerRef.current?.clearSelection();
+      setSelectedLiveVehicle(null);
       viewedWeather.closePanel();
       transitStopsLayerRef.current?.clearSelection();
       setSelectedTransitStop(null);
@@ -1945,7 +1949,11 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       const vehicle = pose.parts[Math.floor(pose.parts.length / 2)];
       smoothlyFollowVehicle(map, vehicle.coordinates);
     }, (vehicle) => {
-      if (selectedLiveVehicleRef.current?.id !== vehicle.id) prepareInfrastructurePanelOpen();
+      if (vehicle && selectedLiveVehicleRef.current?.id !== vehicle.id) prepareInfrastructurePanelOpen();
+      if (!vehicle) {
+        liveVehicleFollowingRef.current = false;
+        setLiveVehicleFollowing(false);
+      }
       setSelectedLiveVehicle(vehicle);
     }, (vehicle) => {
       if (!liveVehicleFollowingRef.current || selectedLiveVehicleRef.current?.id !== vehicle.id) return;

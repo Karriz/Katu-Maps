@@ -38,7 +38,7 @@ export type MapLayerRuntime = ReturnType<typeof createMapLayerRuntime>;
 
 export function createMapLayerRuntime(
   onVehiclePose: (pose: TransitVehiclePose | null) => void,
-  onLiveVehicleSelect: (vehicle: LiveVehicle) => void = () => undefined,
+  onLiveVehicleSelect: (vehicle: LiveVehicle | null) => void = () => undefined,
   onLiveVehiclePosition: (vehicle: LiveVehicle) => void = () => undefined,
 ) {
   const tree = new TreeModelLayer({
