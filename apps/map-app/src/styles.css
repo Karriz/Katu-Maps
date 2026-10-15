@@ -1,5 +1,6 @@
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@config "../tailwind.config.cjs";
 
 @font-face {
   font-family: 'Quicksand';
