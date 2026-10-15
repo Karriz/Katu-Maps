@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { railRouteFeatures } from './TransitRouteOverlay';
+import {
+  railRouteFeatures,
+  transitRouteBoundsContain,
+  transitRouteRequestBounds,
+} from './TransitRouteOverlay';
 
 function encodePolyline(coordinates: [number, number][], precision = 5) {
   const factor = 10 ** precision;
@@ -25,6 +29,23 @@ function encodePolyline(coordinates: [number, number][], precision = 5) {
 }
 
 describe('TransitRouteOverlay', () => {
+  it('prefetches a half viewport margin around route requests', () => {
+    const requestBounds = transitRouteRequestBounds({ south: 60, west: 24, north: 61, east: 26 });
+
+    expect(requestBounds).toEqual({ south: 59.5, west: 23, north: 61.5, east: 27 });
+    expect(transitRouteBoundsContain(requestBounds, {
+      south: 60.25, west: 25, north: 61.25, east: 27,
+    })).toBe(true);
+    expect(transitRouteBoundsContain(requestBounds, {
+      south: 60.25, west: 25, north: 61.25, east: 27.01,
+    })).toBe(false);
+  });
+
+  it('keeps padded request coordinates within geographic limits', () => {
+    expect(transitRouteRequestBounds({ south: -89, west: -179, north: 89, east: 179 }))
+      .toEqual({ south: -90, west: -180, north: 90, east: 180 });
+  });
+
   it('keeps only rail-based route polylines and preserves their route color', () => {
     const features = railRouteFeatures({
       routes: [
