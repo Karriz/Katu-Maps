@@ -44,7 +44,7 @@ const DEGREES_TO_RADIANS = Math.PI / 180;
 // unrealistically. Road and railway gradients rarely exceed 10 degrees.
 const MAX_PITCH_RADIANS = 0.22;
 
-type VehicleDimensions = {
+export type VehicleDimensions = {
   length: number;
   width: number;
   height: number;
@@ -56,7 +56,7 @@ type LocalPartPose = {
   pitch: number;
 };
 
-function dimensionsForMode(mode: string): VehicleDimensions {
+export function dimensionsForMode(mode: string): VehicleDimensions {
   if (mode === 'TRAM') return { length: 8.4, width: 2.65, height: 3.35 };
   if (mode === 'SUBWAY') return { length: 16, width: 2.85, height: 3.55 };
   if (['RAIL', 'SUBURBAN', 'REGIONAL_RAIL', 'LONG_DISTANCE', 'HIGHSPEED_RAIL'].includes(mode)) {
@@ -93,6 +93,46 @@ function addBusWheel(parent: THREE.Object3D, x: number, z: number) {
   hub.rotation.z = Math.PI / 2;
   hub.position.copy(tire.position);
   parent.add(hub);
+}
+
+function createVehicleShadowTexture() {
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const normalizedX = Math.abs((x + 0.5) / size * 2 - 1);
+      const normalizedY = Math.abs((y + 0.5) / size * 2 - 1);
+      const roundedDistance = Math.hypot(
+        Math.max(0, normalizedX - 0.72),
+        Math.max(0, normalizedY - 0.82),
+      );
+      const edgeDistance = Math.max(normalizedX - 0.72, normalizedY - 0.82, roundedDistance);
+      const strength = THREE.MathUtils.smoothstep(0.28 - edgeDistance, 0, 0.28);
+      const offset = (y * size + x) * 4;
+      const value = Math.round(strength * 255);
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function addVehicleShadow(parent: THREE.Object3D, width: number, length: number) {
+  const shadowMaterial = new THREE.MeshBasicMaterial({
+    alphaMap: createVehicleShadowTexture(),
+    color: 0x172824,
+    depthWrite: false,
+    opacity: 0.27,
+    transparent: true,
+  });
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.22, length * 1.06), shadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.035;
+  parent.add(shadow);
 }
 
 function roundedShellGeometry(width: number, height: number, length: number) {
@@ -204,21 +244,11 @@ function createTramSection(
     roofMaterial,
   );
 
-  const shadowMaterial = new THREE.MeshBasicMaterial({
-    color: 0x21332e,
-    transparent: true,
-    opacity: 0.2,
-    depthWrite: false,
-  });
-  const shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20), shadowMaterial);
-  shadow.scale.set(width * 0.67, length * 0.45, 1);
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.035;
-  root.add(shadow);
+  addVehicleShadow(root, width, length);
   return root;
 }
 
-function createVehicleSection(
+export function createVehicleSection(
   dimensions: VehicleDimensions,
   color: string,
   mode: string,
@@ -317,20 +347,7 @@ function createVehicleSection(
     roofMaterial,
   );
 
-  const shadowMaterial = new THREE.MeshBasicMaterial({
-    color: 0x21332e,
-    transparent: true,
-    opacity: 0.2,
-    depthWrite: false,
-  });
-  const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(1, 20),
-    shadowMaterial,
-  );
-  shadow.scale.set(width * 0.68, length * 0.44, 1);
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.035;
-  root.add(shadow);
+  addVehicleShadow(root, width, length);
   return root;
 }
 
@@ -339,7 +356,10 @@ function disposeObject(object: THREE.Object3D | undefined) {
     if (!(child instanceof THREE.Mesh)) return;
     child.geometry.dispose();
     const materials = Array.isArray(child.material) ? child.material : [child.material];
-    materials.forEach((material) => material.dispose());
+    materials.forEach((material) => {
+      if (material instanceof THREE.MeshBasicMaterial) material.alphaMap?.dispose();
+      material.dispose();
+    });
   });
 }
 

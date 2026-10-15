@@ -148,6 +148,28 @@ describe('RouteLineDeckLayer off-center bridge crossing', () => {
     expect(deck.lineGroup.children.length).toBe(0);
   });
 
+  it('defers country-scale route sampling until bridge ribbons can be seen', () => {
+    const bridge = makeBridgeLayer();
+    const sample = vi.spyOn(bridge, 'deckPlacementAt');
+    const deck = makeDeck(bridge);
+    deck.map.getZoom = () => 5;
+    deck.setFeatures([{ coordinates: [[centerLng, centerLat - latOff(30)], [centerLng, centerLat + latOff(30)]],
+      color: '#ff0000', widthPixels: 4.5, casingWidthPixels: 8 }]);
+    expect(deck.lineGroup).toBeUndefined();
+    expect(sample).not.toHaveBeenCalled();
+  });
+
+  it('does not sample off-screen portions of a long selected trip', () => {
+    const bridge = makeBridgeLayer();
+    const sample = vi.spyOn(bridge, 'deckPlacementAt');
+    const deck = makeDeck(bridge);
+    deck.map.getBounds = () => ({ getWest: () => centerLng - lngOff(100), getEast: () => centerLng + lngOff(100),
+      getSouth: () => centerLat - latOff(100), getNorth: () => centerLat + latOff(100) });
+    deck.setFeatures([{ coordinates: [[centerLng + 2, centerLat], [centerLng + 2, centerLat + 0.01]],
+      color: '#ff0000', widthPixels: 4.5, casingWidthPixels: 8 }]);
+    expect(sample).not.toHaveBeenCalled();
+  });
+
   it('does not lift a parallel street that runs under the deck', () => {
     const deck = makeDeck(makeBridgeLayer());
     deck.setFeatures([{

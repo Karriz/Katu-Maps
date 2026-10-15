@@ -164,6 +164,10 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
   width: min(350px, calc(100% - 56px));
   z-index: 100;
 }
+.live-vehicle-panel .transit-panel-header { padding-right: 58px; }
+@media (max-width: 640px) {
+  .live-vehicle-panel.mobile-bottom-sheet > .transit-panel-header .transit-panel-close { display: flex; }
+}
 .transit-panel-header { border-bottom: 1px solid var(--color-line); padding: 22px 104px 20px 22px; position: relative; }
 .transit-panel-back { align-items: center; background: transparent; border: 0; color: var(--color-accent); cursor: pointer; display: inline-flex; font: inherit; font-size: 0.72rem; font-weight: 750; gap: 5px; margin: -6px 0 15px; padding: 4px 0; }
 .transit-panel-back:hover { color: #0e4fae; }
@@ -171,7 +175,9 @@ button, input, summary { -webkit-tap-highlight-color: transparent; }
 .transit-trip-summary { align-items: center; display: flex; gap: 12px; min-width: 0; }
 .transit-trip-summary > div:last-child { min-width: 0; }
 .transit-trip-summary .transit-panel-eyebrow { font-size: 0.64rem; }
-.transit-trip-summary h2 { margin-top: 8px; }
+.transit-trip-panel .transit-panel-header { padding-bottom: 14px; padding-top: 14px; }
+.transit-trip-panel .transit-panel-back { margin-bottom: 8px; }
+.transit-trip-summary h2 { margin: 0 0 6px; }
 .transit-follow-button { align-items: center; background: var(--color-accent-soft); border: 1px solid #b9d4fb; border-radius: 8px; color: var(--color-accent); cursor: pointer; display: inline-flex; font: inherit; font-size: 0.68rem; font-weight: 750; gap: 5px; margin-top: 10px; padding: 7px 9px; }
 .transit-follow-button:hover { background: #dceaff; }
 .transit-follow-button[aria-pressed='true'] { background: #dff7e8; border-color: #a9dfbc; color: #17804a; }

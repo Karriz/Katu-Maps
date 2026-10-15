@@ -175,6 +175,69 @@ const TRIP_QUERY = `
   }
 `;
 
+const LIVE_FUZZY_TRIP_QUERY = `
+  query LiveFuzzyTrip($route: String!, $date: String!, $time: Int!, $direction: Int!, $serviceDate: LocalDate!) {
+    fuzzyTrip(route: $route, date: $date, time: $time, direction: $direction) {
+      gtfsId
+      route { color shortName }
+      tripGeometry { points }
+      onServiceDate(date: $serviceDate) {
+        stopCalls {
+          stopLocation { ... on Stop { name } }
+          schedule { time { ... on ArrivalDepartureTime { arrival departure } } }
+          realTime { arrival { time } departure { time } }
+        }
+      }
+    }
+  }
+`;
+
+const LIVE_TRIP_BY_ID_QUERY = LIVE_FUZZY_TRIP_QUERY
+  .replace('query LiveFuzzyTrip($route: String!, $date: String!, $time: Int!, $direction: Int!, $serviceDate: LocalDate!)',
+    'query LiveTripById($id: String!, $serviceDate: LocalDate!)')
+  .replace('fuzzyTrip(route: $route, date: $date, time: $time, direction: $direction)', 'trip(id: $id)');
+
+type LiveTripResponse = {
+  gtfsId?: string;
+  route?: { color?: string; shortName?: string };
+  tripGeometry?: { points?: string };
+  onServiceDate?: { stopCalls?: TripCall[] };
+};
+
+function liveTripDetail(trip?: LiveTripResponse | null) {
+  if (!trip?.gtfsId) return undefined;
+  return {
+    tripId: trip.gtfsId,
+    route: trip.route?.shortName,
+    color: typeof trip.route?.color === 'string' && /^[0-9a-fA-F]{6}$/.test(trip.route.color)
+      ? `#${trip.route.color}` : undefined,
+    geometry: typeof trip.tripGeometry?.points === 'string'
+      ? decodePolyline(trip.tripGeometry.points, 5) : undefined,
+    stops: (trip.onServiceDate?.stopCalls ?? []).flatMap((call) => {
+      const name = call.stopLocation?.name;
+      if (typeof name !== 'string') return [];
+      const time = call.realTime?.departure?.time ?? call.realTime?.arrival?.time
+        ?? call.schedule?.time?.departure ?? call.schedule?.time?.arrival;
+      return [{ name, time: typeof time === 'string' ? time : undefined }];
+    }),
+  };
+}
+
+export async function fetchLiveTripById(id: string, serviceDate: string, signal?: AbortSignal) {
+  const data = await graphQl<{ trip?: LiveTripResponse | null }>(LIVE_TRIP_BY_ID_QUERY, { id, serviceDate }, signal);
+  return liveTripDetail(data.trip);
+}
+
+export async function fetchLiveFuzzyTrip(identity: {
+  routeId: string; serviceDate: string; startSeconds: number; direction: number;
+}, signal?: AbortSignal) {
+  const data = await graphQl<{ fuzzyTrip?: LiveTripResponse | null }>(LIVE_FUZZY_TRIP_QUERY, {
+    route: identity.routeId, date: identity.serviceDate, time: identity.startSeconds,
+    direction: identity.direction, serviceDate: identity.serviceDate,
+  }, signal);
+  return liveTripDetail(data.fuzzyTrip);
+}
+
 const VEHICLE_POSITIONS_QUERY = `
   query TripVehiclePositions($id: String!, $serviceDate: LocalDate!) {
     trip(id: $id) {

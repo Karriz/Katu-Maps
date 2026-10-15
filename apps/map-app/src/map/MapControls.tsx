@@ -3,6 +3,7 @@ import { useMobileBottomSheet } from '../lib/useMobileBottomSheet';
 import { MobileSheetHandle } from '../components/MobileSheetHandle';
 import {
   Bike,
+  BusFront,
   Building2,
   Box,
   Camera,
@@ -54,6 +55,7 @@ export type MapLayerKey =
   | 'hiking'
   | 'transit'
   | 'transitLines'
+  | 'liveVehicles'
   | 'transitModels'
   | 'trafficCameras'
   | 'chargingStations'
@@ -98,6 +100,7 @@ export function defaultMapLayerState(): MapLayerState {
     hiking: false,
     transit: true,
     transitLines: false,
+    liveVehicles: false,
     transitModels: true,
     trafficCameras: false,
     chargingStations: false,
@@ -174,6 +177,7 @@ const layerGroups: LayerGroup[] = [
     label: 'Transit',
     layers: [
       { key: 'transitLines', label: 'Transit lines', description: 'Colored metro, tram & rail', icon: TrainTrack },
+      { key: 'liveVehicles', label: 'Live vehicles', description: 'HSL, Nysse, Föli & Finnish trains', icon: BusFront },
       { key: 'transit', label: 'Transit stops', description: 'Interactive stops & departures', icon: TrainFront },
     ],
   },

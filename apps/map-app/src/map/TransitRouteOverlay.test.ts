@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Map } from 'maplibre-gl';
+import { fetchWithTimeout } from './ApiRequest';
 import {
+  TransitRouteOverlay,
   railRouteFeatures,
   transitRouteBoundsContain,
   transitRouteRequestBounds,
@@ -97,5 +100,50 @@ describe('TransitRouteOverlay', () => {
       secondFragment,
     ]);
     expect(features.map((feature) => feature.id)).toEqual(['0:0:0', '0:0:1']);
+  });
+});
+
+vi.mock('./ApiRequest', async (original) => ({
+  ...await original<typeof import('./ApiRequest')>(),
+  fetchWithTimeout: vi.fn(),
+}));
+
+afterEach(() => vi.resetAllMocks());
+
+describe('transit route request lifecycle', () => {
+  it('invalidates an unrelated pending response when returning to loaded coverage', async () => {
+    const setData = vi.fn();
+    const map = {
+      addSource: vi.fn(), addLayer: vi.fn(), getLayer: () => undefined,
+      getSource: () => ({ setData }),
+    } as unknown as Map;
+    const overlay = new TransitRouteOverlay();
+    overlay.install(map);
+    overlay.setVisibility(true);
+    const bounds = (west: number) => ({
+      getWest: () => west, getEast: () => west + 1, getSouth: () => 60, getNorth: () => 61,
+    });
+    const response = { ok: true, json: async () => ({}) } as Response;
+    let finishPending!: (value: Response) => void;
+    vi.mocked(fetchWithTimeout).mockResolvedValueOnce(response)
+      .mockImplementationOnce(() => new Promise((resolve) => { finishPending = resolve; }));
+    await overlay.update(bounds(20), 9);
+    expect(setData).toHaveBeenCalledTimes(1);
+    const pending = overlay.update(bounds(25), 9);
+    const signal = vi.mocked(fetchWithTimeout).mock.calls[1][1]?.signal;
+    await overlay.update(bounds(20), 9);
+    expect(signal?.aborted).toBe(true);
+    // Even a response already being decoded when aborted must not replace the source.
+    finishPending(response);
+    await pending;
+    expect(setData).toHaveBeenCalledTimes(1);
+    await overlay.update(bounds(20), 9);
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(2);
+    // The cancelled coverage remains fetchable on a later visit.
+    vi.mocked(fetchWithTimeout).mockResolvedValueOnce(response);
+    await overlay.update(bounds(25), 9);
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(3);
+    expect(setData).toHaveBeenCalledTimes(2);
+    overlay.dispose();
   });
 });

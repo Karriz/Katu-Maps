@@ -12,10 +12,11 @@ import {
   GLOBAL_ROAD_CASING_COLOR_LAYER_IDS,
   GLOBAL_ROAD_COLOR_LAYER_IDS,
   applyMapTheme,
+  bridgePathEdgeColor,
   buildingColorPaint,
 } from './GlobalMapStyle';
 import type { DayNightAppearance, DayNightPalette } from './DayNightAppearance';
-import { localStyleMix, nightFactor } from './DayNightAppearance';
+import { localStyleMix, mixHex, nightFactor } from './DayNightAppearance';
 import { Color } from 'three';
 import { RAIL_BED_DAY, RAIL_BED_NIGHT, RAIL_SLEEPER_DAY, RAIL_SLEEPER_NIGHT } from './RailwayAppearance';
 import { MAP_COLORS } from './MapPalette';
@@ -81,6 +82,14 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
     'global-path-casing', 'global-cycleway-casing', 'global-footways',
     'global-steps', 'global-other-paths',
   ].forEach((id) => setPaint(map, id, 'line-color', colors.path));
+  setPaint(map, 'global-cycleways', 'line-color', mixHex('#b99a91', '#a58a82', night));
+  setPaint(map, 'global-path-bridge-edge', 'line-color', bridgePathEdgeColor(mixHex('#b99a91', '#a58a82', night)));
+  setPaint(map, 'global-cycling-path-casing', 'line-color', mixHex('#f5fbff', '#d8dfe1', night));
+  setPaint(map, 'global-cycling-paths', 'line-color', [
+    'match', ['get', 'surface'],
+    'unpaved', mixHex('#b44a4a', '#a94343', night),
+    mixHex('#c94a4a', '#b84242', night),
+  ]);
   ['global-tracks', 'global-railways', 'global-overview-railways'].forEach((id) => {
     setPaint(map, id, 'line-color', colors.rail);
   });

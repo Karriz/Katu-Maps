@@ -49,6 +49,7 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
   private features: RouteLineFeature[] = [];
   private lineGroup?: THREE.Group;
   private visible = false;
+  private emptyRetryTimer?: ReturnType<typeof setTimeout>;
 
   constructor(id: string) {
     this.id = id;
@@ -60,6 +61,10 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
 
   setFeatures(features: RouteLineFeature[]) {
     this.features = features;
+    if (features.length === 0 && this.emptyRetryTimer) {
+      clearTimeout(this.emptyRetryTimer);
+      this.emptyRetryTimer = undefined;
+    }
     if (this.map) this.rebuild();
   }
 
@@ -70,6 +75,10 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
 
   setVisible(visible: boolean) {
     this.visible = visible;
+    if (!visible && this.emptyRetryTimer) {
+      clearTimeout(this.emptyRetryTimer);
+      this.emptyRetryTimer = undefined;
+    }
     // Rebuild if transitioning to visible but geometry was never built (features
     // arrived while the layer was hidden). If already built, just toggle.
     if (visible && !this.lineGroup && this.features.length > 0) {
@@ -95,6 +104,8 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
   }
 
   onRemove() {
+    if (this.emptyRetryTimer) clearTimeout(this.emptyRetryTimer);
+    this.emptyRetryTimer = undefined;
     this.disposeGeometry();
     this.scene.clear();
     this.renderer?.dispose();
@@ -139,6 +150,9 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
     if (!map) return;
     this.disposeGeometry();
     if (this.features.length === 0) return;
+    // Country-scale selected trips can be very long; bridge ribbons are only
+    // visible at close zooms, so defer sampling until they can be drawn.
+    if (map.getZoom() < MIN_ZOOM) return;
 
     // Use the map center as origin for local coordinates.
     const center = map.getCenter();
@@ -166,6 +180,9 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
     const map = this.map;
     if (!map || !this.lineGroup) return;
     const coords = feature.coordinates;
+    const bounds = typeof map.getBounds === 'function' ? map.getBounds() : undefined;
+    const marginLng = bounds ? (bounds.getEast() - bounds.getWest()) * 0.25 : 0;
+    const marginLat = bounds ? (bounds.getNorth() - bounds.getSouth()) * 0.25 : 0;
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.origin);
     const units = originMercator.meterInMercatorCoordinateUnits();
 
@@ -208,6 +225,16 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
 
     for (let i = 0; i < coords.length; i++) {
       const [lng, lat] = coords[i];
+      if (bounds) {
+        const previous = coords[Math.max(0, i - 1)];
+        if (Math.max(previous[0], lng) < bounds.getWest() - marginLng
+          || Math.min(previous[0], lng) > bounds.getEast() + marginLng
+          || Math.max(previous[1], lat) < bounds.getSouth() - marginLat
+          || Math.min(previous[1], lat) > bounds.getNorth() + marginLat) {
+          flushStrip();
+          continue;
+        }
+      }
       const heading = headingAt(i);
       const deckElev = this.sampleDeckElevation(lng, lat, heading);
 
@@ -296,22 +323,23 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
   render(_gl: WebGLRenderingContext | WebGL2RenderingContext, options: CustomRenderMethodInput) {
     const map = this.map;
     if (!map || !this.renderer || !this.visible || map.getZoom() < MIN_ZOOM) return;
+    if (!this.lineGroup && this.features.length > 0) this.rebuild();
     const zoom = map.getZoom();
     // Rebuild when zoom changes by more than 1 level so ribbon widths stay
     // proportional to the native line layer's pixel-based widths.
     if (this.lineGroup && this.lineGroup.children.length > 0 && Math.abs(zoom - this.lastRebuildZoom) > 1) {
       this.rebuild();
     }
-    // Retry building bridge segments if features exist but no geometry was
-    // produced yet (bridges may not have been sampled when features arrived).
-    // Only retry when the bridge source has bridges available.
-    if (this.features.length > 0 && (!this.lineGroup || this.lineGroup.children.length === 0)) {
-      if (this.bridgeDeckSource?.hasBridges()) this.rebuild();
-    }
     if (!this.lineGroup || this.lineGroup.children.length === 0) {
-      // Keep the repaint loop alive so the retry can fire on the next frame
-      // once bridges finish sampling.
-      if (this.features.length > 0) map.triggerRepaint();
+      // Bridge samples may arrive later. Retry without forcing a continuous
+      // render loop for a route that currently has no visible bridge span.
+      if (this.features.length > 0 && !this.emptyRetryTimer) {
+        this.emptyRetryTimer = setTimeout(() => {
+          this.emptyRetryTimer = undefined;
+          if (!this.map || !this.visible) return;
+          this.rebuild();
+        }, 1_500);
+      }
       return;
     }
     const origin = maplibregl.MercatorCoordinate.fromLngLat(this.origin, this.originElevation);
@@ -323,6 +351,5 @@ export class RouteLineDeckLayer implements CustomLayerInterface {
     this.camera.projectionMatrixInverse.copy(this.projectionMatrix).invert();
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
-    map.triggerRepaint();
   }
 }
