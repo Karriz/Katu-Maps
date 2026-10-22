@@ -72,10 +72,6 @@ export type TerrainGestureMap = {
     isActive?: () => boolean;
     reset?: () => void;
   };
-  _handlers?: {
-    _terrainMovement?: boolean;
-    _terrainGestureAnchorElevation?: number | null;
-  };
   _camera?: {
     elevationFreeze?: boolean;
   };
@@ -90,21 +86,11 @@ export type TerrainGestureMap = {
  * handles the pan so the new gesture captures a fresh anchor.
  */
 export function clearStaleTerrainGesture(map: TerrainGestureMap): boolean {
-  const handlers = map._handlers;
   const camera = map._camera;
   const scrollActive = Boolean(map.scrollZoom?.isActive?.());
-  const hadStale = Boolean(
-    handlers?._terrainMovement
-    || handlers?._terrainGestureAnchorElevation != null
-    || camera?.elevationFreeze
-    || scrollActive,
-  );
+  const hadStale = Boolean(camera?.elevationFreeze || scrollActive);
   if (!hadStale) return false;
 
-  if (handlers) {
-    handlers._terrainMovement = false;
-    handlers._terrainGestureAnchorElevation = null;
-  }
   if (camera) {
     camera.elevationFreeze = false;
   }

@@ -109,18 +109,12 @@ describe('terrain elevation smoothing', () => {
     };
     const map = {
       scrollZoom,
-      _handlers: {
-        _terrainMovement: true,
-        _terrainGestureAnchorElevation: 1840 as number | null,
-      },
       _camera: {
         elevationFreeze: true,
       },
     };
 
     expect(clearStaleTerrainGesture(map)).toBe(true);
-    expect(map._handlers._terrainMovement).toBe(false);
-    expect(map._handlers._terrainGestureAnchorElevation).toBeNull();
     expect(map._camera.elevationFreeze).toBe(false);
     expect(scrollZoom.reset).toHaveBeenCalled();
     expect(clearStaleTerrainGesture(map)).toBe(false);

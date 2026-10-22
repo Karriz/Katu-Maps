@@ -14,26 +14,14 @@ const CURSOR_LAYER_IDS = ['location-poi-icons', 'location-poi-labels', 'global-h
 
 export function installMapInteractions(map: Map, options: MapInteractionOptions) {
   const canvas = map.getCanvas();
-  let longPressTimer: number | undefined;
-  let longPressStart: { x: number; y: number } | undefined;
-  const activeLongPressPointers = new Set<number>();
-  let multiPointerGestureActive = false;
-  let lastTouchOrPenInteractionAt = 0;
   let cursorHandlersInstalled = false;
 
-  const supportsLongPress = (event: PointerEvent) => event.pointerType === 'touch' || event.pointerType === 'pen';
-  const cancelLongPressTimer = () => {
-    if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-    longPressTimer = undefined;
-    longPressStart = undefined;
-  };
   const handleMapClick = (event: MapMouseEvent) => options.onMapClick(event);
+  // MapLibre fires `contextmenu` both for right clicks and for a touch
+  // long press, so one handler covers mouse, pen and keyboard paths.
   const handleMapContextMenu = (event: MapMouseEvent) => {
     event.originalEvent.preventDefault();
     if (options.isBlocked() || options.isMeasurementActive()) return;
-    if (('pointerType' in event.originalEvent
-        && (event.originalEvent.pointerType === 'touch' || event.originalEvent.pointerType === 'pen'))
-      || Date.now() - lastTouchOrPenInteractionAt < 1000) return;
     options.onContextMenu(event.point, [event.lngLat.lng, event.lngLat.lat]);
   };
   const handleMapKeyDown = (event: KeyboardEvent) => {
@@ -60,51 +48,13 @@ export function installMapInteractions(map: Map, options: MapInteractionOptions)
   const handlePointerDown = (event: PointerEvent) => {
     if (options.isBlocked()) return;
     options.onUserInteraction();
-    if (options.isMeasurementActive() || !supportsLongPress(event)) return;
-    lastTouchOrPenInteractionAt = Date.now();
-    activeLongPressPointers.add(event.pointerId);
-    if (activeLongPressPointers.size > 1) {
-      multiPointerGestureActive = true;
-      cancelLongPressTimer();
-      return;
-    }
-    multiPointerGestureActive = false;
-    longPressStart = { x: event.clientX, y: event.clientY };
-    longPressTimer = window.setTimeout(() => {
-      if (multiPointerGestureActive || activeLongPressPointers.size !== 1) {
-        cancelLongPressTimer();
-        return;
-      }
-      const rect = canvas.getBoundingClientRect();
-      const point = new Point(event.clientX - rect.left, event.clientY - rect.top);
-      const lngLat = map.unproject(point);
-      options.onContextMenu(point, [lngLat.lng, lngLat.lat]);
-      longPressTimer = undefined;
-    }, 600);
   };
   const handleWheel = () => {
     if (options.isBlocked()) return;
-    cancelLongPressTimer();
     options.onUserInteraction();
-  };
-  const handlePointerEnd = (event: PointerEvent) => {
-    if (supportsLongPress(event) && event.type === 'pointermove' && activeLongPressPointers.size > 1) {
-      multiPointerGestureActive = true;
-      cancelLongPressTimer();
-    } else if (longPressStart && Math.hypot(event.clientX - longPressStart.x, event.clientY - longPressStart.y) > 12) {
-      cancelLongPressTimer();
-    }
-    if (event.type !== 'pointermove') {
-      if (supportsLongPress(event)) activeLongPressPointers.delete(event.pointerId);
-      if (activeLongPressPointers.size === 0) {
-        multiPointerGestureActive = false;
-        cancelLongPressTimer();
-      }
-    }
   };
   const handleGestureStart = () => {
     if (options.isBlocked()) return;
-    cancelLongPressTimer();
     options.onGestureStart();
   };
   const handleBeforePan = () => {
@@ -123,9 +73,6 @@ export function installMapInteractions(map: Map, options: MapInteractionOptions)
   canvas.addEventListener('keydown', handleMapKeyDown);
   canvas.addEventListener('pointerdown', handlePointerDown);
   canvas.addEventListener('wheel', handleWheel, { passive: true });
-  canvas.addEventListener('pointermove', handlePointerEnd);
-  canvas.addEventListener('pointerup', handlePointerEnd);
-  canvas.addEventListener('pointercancel', handlePointerEnd);
 
   return {
     installLayerCursors() {
@@ -138,7 +85,6 @@ export function installMapInteractions(map: Map, options: MapInteractionOptions)
       });
     },
     dispose() {
-      cancelLongPressTimer();
       map.off('click', handleMapClick);
       map.off('contextmenu', handleMapContextMenu);
       map.off('zoomstart', handleGestureStart);
@@ -148,9 +94,6 @@ export function installMapInteractions(map: Map, options: MapInteractionOptions)
       canvas.removeEventListener('keydown', handleMapKeyDown);
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('wheel', handleWheel);
-      canvas.removeEventListener('pointermove', handlePointerEnd);
-      canvas.removeEventListener('pointerup', handlePointerEnd);
-      canvas.removeEventListener('pointercancel', handlePointerEnd);
       if (cursorHandlersInstalled) CURSOR_LAYER_IDS.forEach((layerId) => {
         if (!map.getLayer(layerId)) return;
         map.off('mouseenter', layerId, showPointerCursor);
