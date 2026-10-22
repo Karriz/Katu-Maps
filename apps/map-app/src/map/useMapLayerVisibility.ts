@@ -4,6 +4,7 @@ import type { TreeModelLayer } from './TreeModelLayer';
 import type { BridgeModelLayer } from './BridgeModelLayer';
 import type { RoofModelLayer } from './RoofModelLayer';
 import type { FacadeModelLayer } from './FacadeModelLayer';
+import type { ShadowCatcherLayer } from './ShadowCatcherLayer';
 import type { TransitRouteOverlay } from './TransitRouteOverlay';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import { TRANSIT_VEHICLE_ICON_HIDE_ZOOM } from './TransitVehicleModelLayer';
@@ -28,6 +29,7 @@ type LayerRefs = {
   bridgeLayerRef: RefObject<BridgeModelLayer | null>;
   roofLayerRef: RefObject<RoofModelLayer | null>;
   facadeLayerRef: RefObject<FacadeModelLayer | null>;
+  shadowCatcherLayerRef: RefObject<ShadowCatcherLayer | null>;
   transitRouteOverlayRef: RefObject<TransitRouteOverlay | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   selectedRouteDeckLayerRef: RefObject<RouteLineDeckLayer | null>;
@@ -86,7 +88,7 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, bridgeLayerRef, roofLayerRef, facadeLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef, treeRefreshRef,
+  treeLayerRef, bridgeLayerRef, roofLayerRef, facadeLayerRef, shadowCatcherLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef, treeRefreshRef,
   terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
@@ -175,13 +177,14 @@ export function useMapLayerVisibility({
     bridgeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     roofLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     facadeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    shadowCatcherLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     applyGroundPatternTheme(map, resolvedTheme);
     if (flightActive || flightActiveRef.current || dayNightEnabled) return;
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
   }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme,
-    bridgeLayerRef, roofLayerRef, facadeLayerRef, transitVehicleLayerRef, treeLayerRef]);
+    bridgeLayerRef, roofLayerRef, facadeLayerRef, shadowCatcherLayerRef, transitVehicleLayerRef, treeLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;

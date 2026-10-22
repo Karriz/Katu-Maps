@@ -68,6 +68,8 @@ export function installModelRefresh({
     layers.tree.invalidateTerrain();
     layers.roof.invalidateSource();
     layers.facade.invalidateSource();
+    layers.shadowCatcher.invalidateTerrain();
+    layers.shadowCatcher.invalidateSource();
     dataRevision += 1;
     schedule();
   };
@@ -79,6 +81,7 @@ export function installModelRefresh({
         layers.tree.invalidateTerrain();
         layers.roof.invalidateSource();
         layers.facade.invalidateSource();
+        layers.shadowCatcher.invalidateTerrain();
         dataRevision += 1;
         schedule();
       } else {
@@ -96,6 +99,7 @@ export function installModelRefresh({
     layers.tree.cancelTreeJobs();
     layers.roof.invalidateSource();
     layers.facade.invalidateSource();
+    layers.shadowCatcher.invalidateSource();
     dataRevision += 1;
     schedule();
   };
@@ -105,6 +109,7 @@ export function installModelRefresh({
     cancelIdleJobs = scheduleSceneJobs([
       () => { if (layers.roof.updateRoofs()) map.triggerRepaint(); },
       () => { if (layers.facade.updateFacades()) map.triggerRepaint(); },
+      () => { if (layers.shadowCatcher.updateShadowCatcher()) map.triggerRepaint(); },
       schedule,
     ], () => { cancelIdleJobs = undefined; });
   };

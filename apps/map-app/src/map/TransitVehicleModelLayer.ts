@@ -132,7 +132,15 @@ function addVehicleShadow(parent: THREE.Object3D, width: number, length: number)
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.22, length * 1.06), shadowMaterial);
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.035;
+  shadow.userData.decalShadow = true;
   parent.add(shadow);
+}
+
+/** Retires the under-body blob decals while the shadow catcher is active. */
+export function setVehicleDecalShadowsEnabled(root: THREE.Object3D, enabled: boolean) {
+  root.traverse((child) => {
+    if (child.userData.decalShadow) child.visible = enabled;
+  });
 }
 
 function roundedShellGeometry(width: number, height: number, length: number) {
@@ -398,9 +406,33 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
   private nightMix = 0;
   private dayNightPalette: DayNightPalette | null = null;
   private bridgeDeckSource: BridgeDeckSource | null = null;
+  private decalShadowsEnabled = true;
 
   setBridgeDeckSource(source: BridgeDeckSource | null) {
     this.bridgeDeckSource = source;
+  }
+
+  /** Retires the blob decals while the shared shadow catcher owns ground shadows. */
+  setDecalShadowsEnabled(enabled: boolean) {
+    if (this.decalShadowsEnabled === enabled) return;
+    this.decalShadowsEnabled = enabled;
+    if (this.modelGroup) setVehicleDecalShadowsEnabled(this.modelGroup, enabled);
+    this.map?.triggerRepaint();
+  }
+
+  /** Scene whose meshes cast directional shadows in the shared shadow pass. */
+  shadowCasterScene(): THREE.Scene | undefined {
+    return this.renderer ? this.scene : undefined;
+  }
+
+  /** Origin of the local metre frame used by the shadow caster scene. */
+  shadowCasterOrigin() {
+    if (!this.hasOrigin) return undefined;
+    return {
+      longitude: this.origin.lng,
+      latitude: this.origin.lat,
+      elevation: this.originElevation,
+    };
   }
 
   setTheme(dark: boolean) {
@@ -537,6 +569,7 @@ export class TransitVehicleModelLayer implements CustomLayerInterface {
       this.sectionRoots.push(section);
     });
     this.applyWindowLighting();
+    if (!this.decalShadowsEnabled) setVehicleDecalShadowsEnabled(this.modelGroup, false);
     this.modelKey = `${pose.mode}:${pose.color}:${pose.parts.length}:${this.darkMode}`;
     this.currentInitialized = false;
   }

@@ -18,6 +18,7 @@ import {
   CARTOON_SUN_DAY_INTENSITY,
   CARTOON_SUN_POLAR_DEGREES,
   sunCartesian,
+  treeShadowOpacity,
 } from './CartoonLighting';
 import { treeBiomeProfile, visibleBiome } from './TreeBiomes';
 
@@ -310,11 +311,6 @@ function displayedTreeKey(tree: TreeInstance) {
   // to the rounded world position prevents that refresh from removing and
   // re-adding the tree during a zoom.
   return `${tree.longitude.toFixed(6)}:${tree.latitude.toFixed(6)}`;
-}
-
-function treeShadowOpacity(zoom: number) {
-  if (zoom <= 14) return 0.1 + Math.max(0, zoom - TREE_MIN_ZOOM) * 0.04;
-  return Math.min(0.33, 0.2 + (zoom - 14) * 0.05);
 }
 
 function treeGrowth(start: number, now: number) {
@@ -780,6 +776,7 @@ export class TreeModelLayer implements CustomLayerInterface {
   private shadowMesh?: THREE.InstancedMesh;
   private shadowTexture?: THREE.DataTexture;
   private shadowsEnabled = true;
+  private decalShadowsEnabled = true;
   private growthAnimationActive = false;
   private darkMode = false;
   private hemisphereLight?: THREE.HemisphereLight;
@@ -891,8 +888,30 @@ export class TreeModelLayer implements CustomLayerInterface {
 
   setShadowsEnabled(enabled: boolean) {
     this.shadowsEnabled = enabled;
-    if (this.shadowMesh) this.shadowMesh.visible = enabled;
+    if (this.shadowMesh) this.shadowMesh.visible = enabled && this.decalShadowsEnabled;
     this.map?.triggerRepaint();
+  }
+
+  /** Retires the blob decals while the shared shadow catcher owns ground shadows. */
+  setDecalShadowsEnabled(enabled: boolean) {
+    if (this.decalShadowsEnabled === enabled) return;
+    this.decalShadowsEnabled = enabled;
+    if (this.shadowMesh) this.shadowMesh.visible = this.shadowsEnabled && enabled;
+    this.map?.triggerRepaint();
+  }
+
+  /** Scene whose meshes cast directional shadows in the shared shadow pass. */
+  shadowCasterScene(): THREE.Scene | undefined {
+    return this.renderer ? this.scene : undefined;
+  }
+
+  /** Origin of the local metre frame used by the shadow caster scene. */
+  shadowCasterOrigin() {
+    return {
+      longitude: this.sceneOrigin.lng,
+      latitude: this.sceneOrigin.lat,
+      elevation: this.sceneOriginElevation,
+    };
   }
 
   setTheme(dark: boolean) {
@@ -1166,7 +1185,7 @@ export class TreeModelLayer implements CustomLayerInterface {
     for (const mesh of staged) this.scene.add(mesh);
     [this.trunkMesh, this.broadleafMesh, this.coniferMesh,
       this.palmMesh, this.shrubMesh, this.shadowMesh] = staged;
-    this.shadowMesh.visible = this.shadowsEnabled;
+    this.shadowMesh.visible = this.shadowsEnabled && this.decalShadowsEnabled;
     (this.shadowMesh.material as THREE.MeshBasicMaterial).opacity = treeShadowOpacity(zoom)
       * (1 - Math.max(this.darkMode ? 0.85 : 0, this.nightMix) * 0.7);
     this.spareMeshes = previous;

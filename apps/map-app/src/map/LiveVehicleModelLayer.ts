@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as maplibregl from 'maplibre-gl';
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MaplibreMap } from 'maplibre-gl';
 import { routeSectionPoses, snapToGeometry, type LiveVehicle } from './LiveVehicles';
-import { createVehicleSection, dimensionsForMode, type BridgeDeckSource } from './TransitVehicleModelLayer';
+import { createVehicleSection, dimensionsForMode, setVehicleDecalShadowsEnabled, type BridgeDeckSource } from './TransitVehicleModelLayer';
 import { CARTOON_SUN_COLOR, CARTOON_SUN_AZIMUTH_DEGREES, CARTOON_SUN_POLAR_DEGREES, sunCartesian } from './CartoonLighting';
 
 const COLORS = { bus: '#1769e8', tram: '#8554c7', metro: '#e87524', train: '#21845b' };
@@ -73,11 +73,35 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
   private darkMode = false;
   private currentVehicles: LiveVehicle[] = [];
   private bridgeDeckSource: BridgeDeckSource | null = null;
+  private decalShadowsEnabled = true;
 
   fallbackCoordinateFor(id: string) { return this.fallbackCoordinates.get(id); }
 
   setBridgeDeckSource(source: BridgeDeckSource | null) {
     this.bridgeDeckSource = source;
+  }
+
+  /** Retires the blob decals while the shared shadow catcher owns ground shadows. */
+  setDecalShadowsEnabled(enabled: boolean) {
+    if (this.decalShadowsEnabled === enabled) return;
+    this.decalShadowsEnabled = enabled;
+    for (const model of this.models.values()) setVehicleDecalShadowsEnabled(model.root, enabled);
+    this.map?.triggerRepaint();
+  }
+
+  /** Scene whose meshes cast directional shadows in the shared shadow pass. */
+  shadowCasterScene(): THREE.Scene | undefined {
+    return this.renderer ? this.scene : undefined;
+  }
+
+  /** Origin of the local metre frame used by the shadow caster scene. */
+  shadowCasterOrigin() {
+    if (!this.hasOrigin) return undefined;
+    return {
+      longitude: this.origin.lng,
+      latitude: this.origin.lat,
+      elevation: this.originElevation,
+    };
   }
 
   private sampleElevation(map: MaplibreMap, lng: number, lat: number, heading: number) {
@@ -187,6 +211,7 @@ export class LiveVehicleModelLayer implements CustomLayerInterface {
         this.scene.add(root);
         model = { root, sections, connectors, targets: [], kind: vehicle.kind, color, dimensions, lastTerrainSample: 0 };
         this.models.set(vehicle.id, model);
+        if (!this.decalShadowsEnabled) setVehicleDecalShadowsEnabled(model.root, false);
       }
       const layout = sectionLayout(vehicle.kind);
       const spacing = dimensionsForMode(MODES[vehicle.kind]).length + layout.gap;

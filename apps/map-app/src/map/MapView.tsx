@@ -58,6 +58,7 @@ import { BridgeModelLayer } from './BridgeModelLayer';
 import { installTunnelPortals } from './TunnelPortals';
 import { RoofModelLayer } from './RoofModelLayer';
 import { FacadeModelLayer } from './FacadeModelLayer';
+import { ShadowCatcherLayer } from './ShadowCatcherLayer';
 import { MapControls, defaultMapLayerState, is3dModeEnabled, set2dModeLayers, set3dStyleLayers, type Map3dStyle, type MapLayerState } from './MapControls';
 import { MAP_COLORS } from './MapPalette';
 import { TransitStopsLayer } from './TransitStopsLayer';
@@ -498,6 +499,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
   const roofLayerRef = useRef<RoofModelLayer | null>(null);
   const facadeLayerRef = useRef<FacadeModelLayer | null>(null);
+  const shadowCatcherLayerRef = useRef<ShadowCatcherLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
   const trafficCamerasLayerRef = useRef<TrafficCamerasLayer | null>(null);
   const roadWeatherLayerRef = useRef<RoadWeatherLayer | null>(null);
@@ -509,6 +511,15 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const transitStopRouteDeckLayerRef = useRef<RouteLineDeckLayer | null>(null);
   const liveVehiclesLayerRef = useRef<import('./LiveVehicles').LiveVehiclesLayer | null>(null);
   const liveVehicleModelsLayerRef = useRef<import('./LiveVehicleModelLayer').LiveVehicleModelLayer | null>(null);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('shadowDebug') !== '1') return;
+    const debugWindow = window as typeof window & { katuShadowDebug?: unknown };
+    debugWindow.katuShadowDebug = {
+      stats: () => shadowCatcherLayerRef.current?.getPerformanceStats(),
+      layer: () => shadowCatcherLayerRef.current,
+    };
+  }, []);
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('bridgeDebug') !== '1') return;
@@ -567,6 +578,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     bridge: bridgeLayerRef,
     roof: roofLayerRef,
     facade: facadeLayerRef,
+    shadowCatcher: shadowCatcherLayerRef,
     transitStops: transitStopsLayerRef,
     trafficCameras: trafficCamerasLayerRef,
     roadWeather: roadWeatherLayerRef,
@@ -853,6 +865,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     bridgeLayerRef,
     roofLayerRef,
     facadeLayerRef,
+    shadowCatcherLayerRef,
     transitRouteOverlayRef,
     transitVehicleLayerRef,
     selectedRouteDeckLayerRef,
@@ -895,6 +908,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     transitVehicleLayerRef,
     facadeLayerRef,
     roofLayerRef,
+    shadowCatcherLayerRef,
   });
   useEffect(() => {
     if (!layerToggles.dayNight || !dayNightFollowNow) return;
@@ -1004,20 +1018,24 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     const roofLayer = roofLayerRef.current;
     const facadeLayer = facadeLayerRef.current;
     const bridgeLayer = bridgeLayerRef.current;
+    const shadowCatcherLayer = shadowCatcherLayerRef.current;
     bridgeLayer?.setFlightMode(true);
     roofLayer?.setFlightMode(true);
     facadeLayer?.setFlightMode(true);
+    shadowCatcherLayer?.setFlightMode(true);
     const stopRefresh = installFlightSceneScheduler(map, OPENFREEMAP_SOURCE_ID, [
       () => flightTreeLayerRef.current?.updateTrees(true),
       () => bridgeLayer?.updateBridges(),
       () => roofLayer?.requestFlightRefresh(),
       () => facadeLayer?.requestFlightRefresh(),
+      () => shadowCatcherLayer?.updateShadowCatcher(),
     ]);
     return () => {
       stopRefresh();
       bridgeLayer?.setFlightMode(false);
       roofLayer?.setFlightMode(false);
       facadeLayer?.setFlightMode(false);
+      shadowCatcherLayer?.setFlightMode(false);
     };
   }, [flight.active, layerToggles.trees, mapLoaded]);
   useEffect(() => {
@@ -1027,11 +1045,13 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     const facadeLayer = facadeLayerRef.current;
     const bridgeLayer = bridgeLayerRef.current;
     const treeLayer = treeLayerRef.current;
+    const shadowCatcherLayer = shadowCatcherLayerRef.current;
     // Same continuous-camera refresh path as flight: normal moveend/idle
     // updates are skipped while jumpTo runs every frame.
     bridgeLayer?.setFlightMode(true);
     roofLayer?.setFlightMode(true);
     facadeLayer?.setFlightMode(true);
+    shadowCatcherLayer?.setFlightMode(true);
     treeLayer?.setDriveCoverage(true);
     const stopRefresh = installFlightSceneScheduler(map, OPENFREEMAP_SOURCE_ID, [
       () => {
@@ -1040,12 +1060,14 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       () => bridgeLayer?.updateBridges(),
       () => roofLayer?.requestFlightRefresh(),
       () => facadeLayer?.requestFlightRefresh(),
+      () => shadowCatcherLayer?.updateShadowCatcher(),
     ], { moveMeters: 60, turnDegrees: 10 });
     return () => {
       stopRefresh();
       bridgeLayer?.setFlightMode(false);
       roofLayer?.setFlightMode(false);
       facadeLayer?.setFlightMode(false);
+      shadowCatcherLayer?.setFlightMode(false);
       treeLayer?.setDriveCoverage(false);
       if (layerToggles.trees) treeRefreshRef.current?.();
     };
@@ -1965,6 +1987,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       bridge: bridgeLayer,
       roof: roofLayer,
       facade: facadeLayer,
+      shadowCatcher: shadowCatcherLayer,
       transitVehicle: transitVehicleLayer,
       transitStops: transitStopsLayer,
       trafficCameras: trafficCamerasLayer,
@@ -2259,6 +2282,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       map.addLayer(facadeLayer, 'global-road-labels');
       map.addLayer(transitVehicleLayer, 'global-road-labels');
       map.addLayer(liveVehicleModelsLayer, 'global-road-labels');
+      map.addLayer(shadowCatcherLayer, 'global-road-labels');
       map.addLayer(selectedRouteDeckLayer, 'global-road-labels');
       map.addLayer(transitStopRouteDeckLayer, 'global-road-labels');
       map.addLayer(liveVehicleRouteDeckLayer, 'global-road-labels');

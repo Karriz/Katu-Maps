@@ -10,6 +10,7 @@ import type { BridgeModelLayer } from './BridgeModelLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { FacadeModelLayer } from './FacadeModelLayer';
 import type { RoofModelLayer } from './RoofModelLayer';
+import type { ShadowCatcherLayer } from './ShadowCatcherLayer';
 import type { ResolvedTheme } from '../theme';
 
 function firstSymbolLayerId(map: Map) {
@@ -30,6 +31,7 @@ export function useDayNightCycle({
     transitVehicleLayerRef,
     facadeLayerRef,
     roofLayerRef,
+    shadowCatcherLayerRef,
 }: {
   mapRef: RefObject<Map | null>;
   mapLoaded: boolean;
@@ -44,6 +46,7 @@ export function useDayNightCycle({
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   facadeLayerRef: RefObject<FacadeModelLayer | null>;
   roofLayerRef: RefObject<RoofModelLayer | null>;
+  shadowCatcherLayerRef: RefObject<ShadowCatcherLayer | null>;
 }) {
   const layerRef = useRef<DayNightShadeLayer | null>(null);
   const wasActiveRef = useRef(false);
@@ -70,6 +73,7 @@ export function useDayNightCycle({
       transitVehicleLayerRef.current?.setDayNightLighting(null);
       facadeLayerRef.current?.setDayNightLighting(null);
       roofLayerRef.current?.setDayNightLighting(null);
+      shadowCatcherLayerRef.current?.setDayNightLighting(null);
       wasActiveRef.current = false;
       applyRef.current = () => {};
       return;
@@ -109,6 +113,7 @@ export function useDayNightCycle({
         transitVehicleLayerRef.current?.setDayNightLighting(null);
         facadeLayerRef.current?.setDayNightLighting(null);
         roofLayerRef.current?.setDayNightLighting(null);
+        shadowCatcherLayerRef.current?.setDayNightLighting(null);
         map.triggerRepaint();
         return;
       }
@@ -143,6 +148,11 @@ export function useDayNightCycle({
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,
       });
+      shadowCatcherLayerRef.current?.setDayNightLighting({
+        azimuth: appearance.azimuth,
+        polar: appearance.polar,
+        nightMix: appearance.treeNightMix,
+      });
       setView({
         latitude: center.lat,
         longitude: center.lng,
@@ -172,6 +182,7 @@ export function useDayNightCycle({
   }, [
     buildingColorsEnabled, enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
     treeLayerRef, bridgeLayerRef, transitVehicleLayerRef, facadeLayerRef, roofLayerRef,
+    shadowCatcherLayerRef,
   ]);
 
   useGlobeCloudCover(mapRef, layerRef, mapLoaded, flightActive, cloudsEnabled);

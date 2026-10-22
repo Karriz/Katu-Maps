@@ -1,11 +1,12 @@
-import { BridgeModelLayer } from './BridgeModelLayer';
+import { BridgeModelLayer, BRIDGE_MODEL_LAYER_ID } from './BridgeModelLayer';
 import { ChargingStationsLayer } from './ChargingStationsLayer';
-import { FacadeModelLayer } from './FacadeModelLayer';
+import { FacadeModelLayer, FACADE_MODEL_LAYER_ID } from './FacadeModelLayer';
 import { OPENFREEMAP_SOURCE_ID } from './GlobalMapStyle';
 import { RoadTrafficLayer } from './RoadTrafficLayer';
 import { RoadWeatherLayer } from './RoadWeatherLayer';
-import { RoofModelLayer } from './RoofModelLayer';
+import { RoofModelLayer, ROOF_MODEL_LAYER_ID } from './RoofModelLayer';
 import { RouteLineDeckLayer } from './RouteLineDeckLayer';
+import { ShadowCatcherLayer } from './ShadowCatcherLayer';
 import { TrafficCamerasLayer } from './TrafficCamerasLayer';
 import { TransitRouteOverlay } from './TransitRouteOverlay';
 import { TransitStopsLayer, type TransitVehiclePose } from './TransitStopsLayer';
@@ -21,6 +22,7 @@ export type MapLayerRuntimeRefs = {
   bridge: RefSlot<BridgeModelLayer>;
   roof: RefSlot<RoofModelLayer>;
   facade: RefSlot<FacadeModelLayer>;
+  shadowCatcher: RefSlot<ShadowCatcherLayer>;
   transitStops: RefSlot<TransitStopsLayer>;
   trafficCameras: RefSlot<TrafficCamerasLayer>;
   roadWeather: RefSlot<RoadWeatherLayer>;
@@ -50,6 +52,7 @@ export function createMapLayerRuntime(
   const bridge = new BridgeModelLayer();
   const roof = new RoofModelLayer();
   const facade = new FacadeModelLayer();
+  const shadowCatcher = new ShadowCatcherLayer();
   const transitVehicle = new TransitVehicleModelLayer();
   transitVehicle.setBridgeDeckSource(bridge);
   const transitStops = new TransitStopsLayer((pose) => {
@@ -67,6 +70,44 @@ export function createMapLayerRuntime(
   const liveVehicles = new LiveVehiclesLayer(onLiveVehicleSelect, onLiveVehiclePosition);
   const liveVehicleModels = new LiveVehicleModelLayer();
   liveVehicleModels.setBridgeDeckSource(bridge);
+  // While the catcher owns ground shadows, retire the per-layer blob decals;
+  // they return automatically whenever the catcher goes inactive.
+  shadowCatcher.setActiveChangeHandler((active) => {
+    tree.setDecalShadowsEnabled(!active);
+    bridge.setDecalShadowsEnabled(!active);
+    transitVehicle.setDecalShadowsEnabled(!active);
+    liveVehicleModels.setDecalShadowsEnabled(!active);
+  });
+  shadowCatcher.registerCasters('tree', {
+    layerId: 'tree-models-3d',
+    root: () => tree.shadowCasterScene(),
+    origin: () => tree.shadowCasterOrigin(),
+  });
+  shadowCatcher.registerCasters('bridge', {
+    layerId: BRIDGE_MODEL_LAYER_ID,
+    root: () => bridge.shadowCasterScene(),
+    origin: () => bridge.shadowCasterOrigin(),
+  });
+  shadowCatcher.registerCasters('roof', {
+    layerId: ROOF_MODEL_LAYER_ID,
+    root: () => roof.shadowCasterScene(),
+    origin: () => roof.shadowCasterOrigin(),
+  });
+  shadowCatcher.registerCasters('facade', {
+    layerId: FACADE_MODEL_LAYER_ID,
+    root: () => facade.shadowCasterScene(),
+    origin: () => facade.shadowCasterOrigin(),
+  });
+  shadowCatcher.registerCasters('transitVehicle', {
+    layerId: 'transit-vehicle-model-3d',
+    root: () => transitVehicle.shadowCasterScene(),
+    origin: () => transitVehicle.shadowCasterOrigin(),
+  });
+  shadowCatcher.registerCasters('liveVehicleModels', {
+    layerId: 'live-vehicle-models-3d',
+    root: () => liveVehicleModels.shadowCasterScene(),
+    origin: () => liveVehicleModels.shadowCasterOrigin(),
+  });
   liveVehicles.setModelLayer(liveVehicleModels);
   liveVehicles.setRouteDeckLayer(liveVehicleRouteDeck);
   selectedRouteDeck.setBridgeDeckSource(bridge);
@@ -86,6 +127,7 @@ export function createMapLayerRuntime(
     bridge,
     roof,
     facade,
+    shadowCatcher,
     transitVehicle,
     transitStops,
     trafficCameras,

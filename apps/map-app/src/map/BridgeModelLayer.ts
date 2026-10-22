@@ -2816,6 +2816,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
   private acceptedViewSignature?: string;
   private terrainSignature?: string;
   private userEnabled = true;
+  private decalShadowsEnabled = true;
   private flightMode = false;
   /** Soft dirty from tile streaming — resample without treating it as a camera move. */
   private sourceContentDirty = false;
@@ -3142,6 +3143,30 @@ export class BridgeModelLayer implements CustomLayerInterface {
     this.flightMode = enabled;
     this.lastUpdateSignature = undefined;
     this.map?.triggerRepaint();
+  }
+
+  /** Retires the blob decals while the shared shadow catcher owns ground shadows. */
+  setDecalShadowsEnabled(enabled: boolean) {
+    if (this.decalShadowsEnabled === enabled) return;
+    this.decalShadowsEnabled = enabled;
+    for (const resource of this.bridgeResources.values()) {
+      resource.shadow.visible = enabled;
+    }
+    this.map?.triggerRepaint();
+  }
+
+  /** Scene whose meshes cast directional shadows in the shared shadow pass. */
+  shadowCasterScene(): THREE.Scene | undefined {
+    return this.renderer ? this.scene : undefined;
+  }
+
+  /** Origin of the local metre frame used by the shadow caster scene. */
+  shadowCasterOrigin() {
+    return {
+      longitude: this.sceneOrigin.lng,
+      latitude: this.sceneOrigin.lat,
+      elevation: this.sceneOriginElevation,
+    };
   }
 
   setDayNightLighting(lighting: {
@@ -4204,6 +4229,7 @@ export class BridgeModelLayer implements CustomLayerInterface {
     const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
     shadowMesh.frustumCulled = false;
     shadowMesh.renderOrder = -1;
+    shadowMesh.visible = this.decalShadowsEnabled;
 
     this.bridgeResources.set(key, {
       paintBridge,

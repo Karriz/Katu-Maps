@@ -137,6 +137,20 @@ export class RoofModelLayer implements CustomLayerInterface {
     return { ...this.performanceStats, sampledRoofs: this.sampledRoofCount, jobActive: Boolean(this.roofJob) };
   }
 
+  /** Scene whose meshes cast directional shadows in the shared shadow pass. */
+  shadowCasterScene(): THREE.Scene | undefined {
+    return this.renderer ? this.scene : undefined;
+  }
+
+  /** Origin of the local metre frame used by the shadow caster scene. */
+  shadowCasterOrigin() {
+    return {
+      longitude: this.sceneOrigin.lng,
+      latitude: this.sceneOrigin.lat,
+      elevation: this.sceneOriginElevation,
+    };
+  }
+
   setFlightMode(enabled: boolean) {
     if (this.flightMode === enabled) return;
     this.flightMode = enabled;

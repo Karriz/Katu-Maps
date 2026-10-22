@@ -27,6 +27,16 @@ export const CARTOON_MAP_LIGHT_POSITION: [number, number, number] = [
 // contact line keeps their bases visually attached to the ground.
 export const CARTOON_BUILDING_SHADOW_TRANSLATE: [number, number] = [1.4, -1.4];
 
+/**
+ * Shared fade for cartoon ground shadows. Trees used this for their blob
+ * decals; the Three.js shadow catcher reuses it so real directional shadows
+ * replace the decals at the same visual weight instead of doubling up.
+ */
+export function treeShadowOpacity(zoom: number) {
+  if (zoom <= 14) return 0.1 + Math.max(0, zoom - 12) * 0.04;
+  return Math.min(0.33, 0.2 + (zoom - 14) * 0.05);
+}
+
 export function sunCartesian(
   azimuthDegrees: number,
   polarDegrees: number,
