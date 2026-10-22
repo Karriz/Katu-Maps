@@ -1,4 +1,4 @@
-import type { Map } from 'maplibre-gl';
+import type { CameraOptions, Map } from 'maplibre-gl';
 import { panelPaddingForRects } from './RouteCamera';
 
 export const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider, .day-night-time-slider';
@@ -36,30 +36,22 @@ export function visibleMapTargetPoint(map: Map): [number, number] {
   return [(left + right) / 2, (top + bottom) / 2];
 }
 
-export function followCameraCenter(map: Map, coordinates: [number, number]): [number, number] {
-  const [targetX, targetY] = visibleMapTargetPoint(map);
-  const currentCenter = map.getCenter();
-  const vehicleCoordinateAtTarget = map.unproject([targetX, targetY]);
-  return [
-    currentCenter.lng + coordinates[0] - vehicleCoordinateAtTarget.lng,
-    currentCenter.lat + coordinates[1] - vehicleCoordinateAtTarget.lat,
-  ];
+/** Camera options that place the location at the visible map target point. */
+export function anchoredCameraOptions(map: Map, coordinates: [number, number], zoom = map.getZoom()): CameraOptions {
+  return map.calculateAnchoredCameraOptions({
+    anchorLocation: coordinates,
+    anchorScreenPoint: visibleMapTargetPoint(map),
+    zoom,
+  });
 }
 
 /** Blend frequent vehicle updates into one continuous camera movement. */
 export function smoothlyFollowVehicle(map: Map, coordinates: [number, number], duration = 350) {
   map.easeTo({
-    center: followCameraCenter(map, coordinates),
-    zoom: Math.max(map.getZoom(), 14.6),
+    ...anchoredCameraOptions(map, coordinates, Math.max(map.getZoom(), 14.6)),
     duration,
     easing: (progress) => progress,
   });
-}
-
-export function selectionCameraOffset(map: Map): [number, number] {
-  const mapRect = map.getContainer().getBoundingClientRect();
-  const [targetX, targetY] = visibleMapTargetPoint(map);
-  return [targetX - mapRect.width / 2, targetY - mapRect.height / 2];
 }
 
 export function panelViewportPadding(map: Map, base = 0, gap = 0) {

@@ -32,6 +32,7 @@ export function createRuntimeMap(
     bearing: savedView?.bearing ?? 0,
     maxPitch: 55,
     maxZoom: 18,
+    dragRotate: { around: 'pointer' },
     attributionControl: {
       compact: true,
       customAttribution: PROVIDER_ATTRIBUTION,

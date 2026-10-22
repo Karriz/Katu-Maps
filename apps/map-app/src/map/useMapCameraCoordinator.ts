@@ -3,8 +3,8 @@ import type { Map } from 'maplibre-gl';
 import { coordinateBounds } from './RouteCamera';
 import {
   CONTENT_PANEL_SELECTOR,
+  anchoredCameraOptions,
   panelViewportPadding,
-  selectionCameraOffset,
 } from './MapViewportLayout';
 import { isValidCoordinate, routeCoordinates } from './RoutePresentation';
 import type { RouteResult } from './ValhallaRouting';
@@ -153,9 +153,11 @@ export function useMapCameraCoordinator({
         map.once('moveend', () => { selectionCameraActiveRef.current = false; });
         const overviewSelection = selectedTrafficCamera || selectedRoadWeather || selectedRoadTrafficMessage;
         map.easeTo({
-          center: coordinates,
-          zoom: Math.max(map.getZoom(), selectedTransitStop ? 14.6 : overviewSelection ? 12 : selectedRoadTraffic ? 11 : 14),
-          offset: selectionCameraOffset(map),
+          ...anchoredCameraOptions(
+            map,
+            coordinates,
+            Math.max(map.getZoom(), selectedTransitStop ? 14.6 : overviewSelection ? 12 : selectedRoadTraffic ? 11 : 14),
+          ),
           duration: 900,
         });
       });
@@ -210,7 +212,7 @@ export function useMapCameraCoordinator({
       if (recenterTimer !== undefined) window.clearTimeout(recenterTimer);
       recenterTimer = window.setTimeout(() => {
         if (pendingSearchCameraRef.current || selectionCameraActiveRef.current || vehicleFollowEnabledRef.current) return;
-        map.easeTo({ center: coordinates, offset: selectionCameraOffset(map), duration: 250 });
+        map.easeTo({ ...anchoredCameraOptions(map, coordinates), duration: 250 });
       }, 120);
     };
     const schedulePadding = () => {

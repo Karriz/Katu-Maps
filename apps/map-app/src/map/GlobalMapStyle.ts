@@ -1061,6 +1061,19 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
     intensity: 0.34,
   },
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+  // The local webfont draws Latin, Greek, and Cyrillic labels; everything else
+  // (Arabic, Hebrew, Devanagari and other complex scripts) still falls back to
+  // the hosted glyph PBFs above.
+  'font-faces': {
+    'Noto Sans Regular': [{
+      url: `${import.meta.env.BASE_URL}fonts/NotoSans-Regular.ttf`,
+      'unicode-range': [
+        'U+0000-052F',
+        'U+1E00-1EFF',
+        'U+2000-214F',
+      ],
+    }],
+  },
   sources: {
     'tunnel-portals': { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     'globe-biomes': {
