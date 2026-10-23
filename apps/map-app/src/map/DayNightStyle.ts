@@ -1,8 +1,6 @@
 import type { LightSpecification, Map as MapLibreMap, SkySpecification } from 'maplibre-gl';
 import {
-  CARTOON_BUILDING_SHADOW_TRANSLATE,
   CARTOON_MAP_LIGHT_POSITION,
-  CARTOON_SHADOW_COLOR,
   CARTOON_SUN_COLOR,
 } from './CartoonLighting';
 import { globeBiomeColor } from './GlobeBiomeStyle';
@@ -44,14 +42,11 @@ function setPaint(map: MapLibreMap, id: string, property: string, value: unknown
 function applyBuildingPalette(
   map: MapLibreMap,
   building: string,
-  buildingBand: string,
   buildingColorsEnabled: boolean,
 ) {
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
     setPaint(map, id, 'fill-color', buildingColorPaint(building, buildingColorsEnabled));
   });
-  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-color', buildingColorPaint(buildingBand, buildingColorsEnabled));
-  setPaint(map, 'global-buildings', 'fill-extrusion-color', buildingColorPaint(building, buildingColorsEnabled));
 }
 
 function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, buildingColorsEnabled: boolean) {
@@ -98,13 +93,7 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => {
     setPaint(map, id, 'fill-outline-color', colors.boundary);
   });
-  applyBuildingPalette(map, colors.building, colors.buildingBand, buildingColorsEnabled);
-  const verticalGradient = false;
-  setPaint(map, 'global-building-ground-storeys', 'fill-extrusion-vertical-gradient', verticalGradient);
-  setPaint(map, 'global-buildings', 'fill-extrusion-vertical-gradient', verticalGradient);
-  ['global-building-shadow', 'global-building-contact-shadow'].forEach((id) => {
-    setPaint(map, id, 'line-color', colors.shadow);
-  });
+  applyBuildingPalette(map, colors.building, buildingColorsEnabled);
   ['global-boundaries', 'global-boundaries-regional'].forEach((id) => {
     setPaint(map, id, 'line-color', colors.boundary);
   });
@@ -118,21 +107,6 @@ function applyPalette(map: MapLibreMap, colors: DayNightPalette, night: number, 
 
 function applyHillshadeDirection(map: MapLibreMap, azimuth: number) {
   setPaint(map, 'terrain-hillshade', 'hillshade-illumination-direction', ((azimuth % 360) + 360) % 360);
-}
-
-function applyBuildingShadows(map: MapLibreMap, appearance: DayNightAppearance) {
-  // Match the offset to the outline width so it still overlaps the footprint.
-  const scale = Math.min(1, Math.max(0.45, 0.45 + (map.getZoom() - 13) * 0.275));
-  setPaint(map, 'global-building-shadow', 'line-translate',
-    appearance.buildingShadowTranslate.map((offset) => offset * scale));
-  const night = nightFactor(appearance.elevation);
-  const opacity = [
-    'interpolate', ['linear'], ['zoom'],
-    13, 0,
-    13.5, appearance.buildingShadowOpacity * (0.7 + (1 - night) * 0.3),
-    18, appearance.buildingShadowOpacity * (1.4 + (1 - night) * 0.6),
-  ];
-  setPaint(map, 'global-building-shadow', 'line-opacity', opacity);
 }
 
 function captureLighting(map: MapLibreMap) {
@@ -152,7 +126,7 @@ export function applyDayNightStyle(map: MapLibreMap, appearance: DayNightAppeara
     const currentMode = paintMode.get(map);
     if (currentMode?.palette !== false || currentMode.buildingColorsEnabled !== buildingColorsEnabled) {
       applyMapTheme(map, 'light', { refresh: false });
-      applyBuildingPalette(map, MAP_COLORS.building, MAP_COLORS.buildingBand, buildingColorsEnabled);
+      applyBuildingPalette(map, MAP_COLORS.building, buildingColorsEnabled);
       paintMode.set(map, { palette: false, buildingColorsEnabled });
     }
   } else {
@@ -160,7 +134,6 @@ export function applyDayNightStyle(map: MapLibreMap, appearance: DayNightAppeara
     paintMode.set(map, { palette: true, buildingColorsEnabled });
   }
   applyHillshadeDirection(map, appearance.azimuth);
-  applyBuildingShadows(map, appearance);
   map.setLight({
     anchor: 'map',
     position: appearance.lightPosition,
@@ -181,9 +154,7 @@ export function applyDayNightStyle(map: MapLibreMap, appearance: DayNightAppeara
 export function restoreDayNightStyle(map: MapLibreMap, theme: 'light' | 'dark') {
   const captured = capturedLighting.get(map);
   applyMapTheme(map, theme);
-  setPaint(map, 'global-building-shadow', 'line-translate', CARTOON_BUILDING_SHADOW_TRANSLATE);
   setPaint(map, 'terrain-hillshade', 'hillshade-illumination-direction', 225);
-  setPaint(map, 'global-building-shadow', 'line-color', theme === 'dark' ? '#061322' : CARTOON_SHADOW_COLOR);
   map.setLight(captured?.light ?? {
     anchor: 'map',
     position: CARTOON_MAP_LIGHT_POSITION,

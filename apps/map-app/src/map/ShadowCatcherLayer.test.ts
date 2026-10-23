@@ -8,9 +8,37 @@ import {
   groundGridSignature,
   groundGridWindow,
   shadowReachMeters,
+  shadowTextureSizes,
+  terrainShadowHalfSpanMeters,
   triangulateRing,
   type ShadowCasterSet,
 } from './ShadowCatcherLayer';
+
+describe('terrainShadowHalfSpanMeters', () => {
+  it('focuses the shadow map at close zoom', () => {
+    expect(terrainShadowHalfSpanMeters(16, 45)).toBe(700);
+    expect(terrainShadowHalfSpanMeters(17.5, 45)).toBe(350);
+    expect(terrainShadowHalfSpanMeters(18, 45)).toBe(300);
+  });
+
+  it('keeps more coverage for pitched close views', () => {
+    expect(terrainShadowHalfSpanMeters(18, 65)).toBe(425);
+    expect(terrainShadowHalfSpanMeters(18, 65)).toBeGreaterThan(terrainShadowHalfSpanMeters(18, 45));
+  });
+});
+
+describe('shadowTextureSizes', () => {
+  it('increases both shadow and terrain-height detail at close zoom', () => {
+    expect(shadowTextureSizes(14, 1200, 8192)).toEqual({ shadow: 1536, height: 768 });
+    expect(shadowTextureSizes(16, 1200, 8192)).toEqual({ shadow: 2560, height: 1024 });
+    expect(shadowTextureSizes(17, 1200, 8192)).toEqual({ shadow: 4096, height: 1536 });
+  });
+
+  it('keeps smaller device and GPU texture budgets', () => {
+    expect(shadowTextureSizes(17, 600, 8192)).toEqual({ shadow: 2048, height: 1024 });
+    expect(shadowTextureSizes(17, 1200, 2048)).toEqual({ shadow: 2048, height: 1536 });
+  });
+});
 
 describe('shadowReachMeters', () => {
   it('stretches at low sun up to the elevation clamp', () => {
@@ -131,15 +159,17 @@ describe('ShadowCatcherLayer', () => {
     const map = {
       getZoom: () => 15,
       getPitch: () => 30,
+      getCanvas: () => ({ clientWidth: 1200 }),
       getCenter: () => new LngLat(23.76, 61.5),
       getBounds: () => ({ getWest: () => 23.755, getEast: () => 23.765,
         getSouth: () => 61.495, getNorth: () => 61.505 }),
       getSource: () => ({}),
+      getTerrain: () => ({ source: 'terrain' }),
       getLayer: (id: string) => (id === 'global-buildings' || id === 'caster-layer' ? {} : undefined),
       getLayoutProperty: vi.fn(() => 'visible'),
       isMoving: () => false,
       querySourceFeatures: vi.fn(() => [buildingFeature]),
-      queryTerrainElevation: vi.fn(() => 10),
+      queryTerrainElevation: vi.fn((_point: LngLat) => 10),
       triggerRepaint: vi.fn(),
     };
     state.map = map;
@@ -199,6 +229,70 @@ describe('ShadowCatcherLayer', () => {
     expect(yValues).toEqual(new Set([10, 30]));
     layer.onRemove();
     expect(activeHandler).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps terrain tile textures cached until a zoom gesture settles', () => {
+    const { layer, state, map, finish } = fixture();
+    finish();
+    map.getZoom = () => 16.9;
+    let moving = true;
+    map.isMoving = () => moving;
+    state.tileDrape = {
+      heightSize: 1024,
+      resizeHeightMap: vi.fn(),
+      updateHeightMap: vi.fn(),
+      dispose: vi.fn(),
+    };
+    state.renderer.shadowMap = { type: THREE.BasicShadowMap };
+    state.renderer.properties = { get: () => ({ __webglTexture: {} }) };
+    state.sunlight.shadow.map = { depthTexture: {}, setSize: vi.fn() };
+    state.tileReady = true;
+    state.tileDirty = true;
+    const revision = layer.terrainTileRevision;
+    const gl = { getParameter: () => null, bindFramebuffer: vi.fn() };
+    const options = { renderTerrainHeightMap: vi.fn() };
+
+    layer.prerender(gl as any, options as any);
+    expect(layer.terrainTileRevision).toBe(revision);
+    expect(state.tileReady).toBe(true);
+    expect(state.tileRevisionPending).toBe(true);
+
+    map.getZoom = () => 17;
+    layer.prerender(gl as any, options as any);
+    expect(layer.terrainTileRevision).toBe(revision);
+    expect(state.shadowMapSize).toBe(2560);
+    expect(state.tileDrape.heightSize).toBe(1024);
+
+    moving = false;
+    layer.prerender(gl as any, options as any);
+    expect(layer.terrainTileRevision).toBe(revision + 1);
+    expect(state.shadowMapSize).toBe(4096);
+    expect(state.tileRevisionPending).toBe(false);
+    layer.onRemove();
+  });
+
+  it('builds coarse building casters first and finishes through source updates', () => {
+    const { layer, state, map } = fixture();
+    const finishBuildingJob = () => {
+      for (let step = 0; step < 1000 && state.buildingJob; step += 1) state.stepBuildingJob();
+      expect(state.buildingJob).toBeUndefined();
+    };
+    state.startBuildingJob(map);
+    expect(state.buildingJob.quality).toBe('coarse');
+    finishBuildingJob();
+    expect(state.buildingMesh.visible).toBe(true);
+    state.startBuildingJob(map);
+    const fineJob = state.buildingJob;
+    expect(fineJob.quality).toBe('fine');
+    layer.invalidateSource();
+    state.startBuildingJob(map);
+    expect(state.buildingJob).toBe(fineJob);
+    finishBuildingJob();
+    state.startBuildingJob(map);
+    expect(state.buildingJob.quality).toBe('fine');
+    finishBuildingJob();
+    expect(state.performanceStats.buildingCommits).toBe(3);
+    layer.onRemove();
   });
 
   it('mirrors caster meshes but skips blob decals and hidden layers', () => {
@@ -269,6 +363,159 @@ describe('ShadowCatcherLayer', () => {
     expect(state.groundMesh.visible).toBe(false);
     expect(state.buildingMesh.visible).toBe(false);
     expect(activeHandler).toHaveBeenLastCalledWith(false);
+    layer.onRemove();
+  });
+
+  it('shows a coarse catcher before the detailed terrain pass completes', () => {
+    const { layer, state, render, finish } = fixture();
+    for (let frame = 0; frame < 1000 && state.performanceStats.groundCommits === 0; frame += 1) {
+      render();
+    }
+    expect(state.performanceStats.groundCommits).toBe(1);
+    expect(state.active).toBe(true);
+    const coarseGeometry = state.groundMesh.geometry;
+    render();
+    expect(state.groundJob?.quality).toBe('fine');
+    finish();
+    expect(state.groundMesh.geometry).not.toBe(coarseGeometry);
+    expect(state.performanceStats.groundCommits).toBeGreaterThanOrEqual(2);
+    layer.onRemove();
+  });
+
+  it('lifts the catcher over a ridge between grid vertices', () => {
+    const { layer, state, map, finish } = fixture();
+    const window = state.currentGroundWindow(map);
+    const frame = state.localFrame();
+    const ridgeCellX = 10;
+    const ridgeCellZ = 10;
+    const ridge = frame.toLngLat(
+      (window.minCellX + ridgeCellX + 0.5) * window.cell,
+      (window.minCellZ + ridgeCellZ + 0.5) * window.cell,
+    );
+    map.queryTerrainElevation = vi.fn((point: LngLat) =>
+      Math.abs(point.lng - ridge.lng) < 1e-8 && Math.abs(point.lat - ridge.lat) < 1e-8
+        ? 12 : 0);
+    finish();
+    const positions = state.groundMesh.geometry.getAttribute('position');
+    const topLeft = ridgeCellZ * (window.cellsX + 1) + ridgeCellX;
+    const bottomLeft = topLeft + window.cellsX + 1;
+    for (const vertex of [topLeft, topLeft + 1, bottomLeft, bottomLeft + 1]) {
+      expect(positions.getY(vertex)).toBeGreaterThan(12);
+    }
+    layer.onRemove();
+  });
+
+  it('restores the completed catcher after crossing the minimum zoom', () => {
+    const { layer, state, map, render, finish } = fixture();
+    finish();
+    const geometry = state.groundMesh.geometry;
+    map.getZoom = () => 12;
+    render();
+    expect(state.active).toBe(false);
+    map.getZoom = () => 15;
+    render();
+    expect(state.active).toBe(true);
+    expect(state.groundMesh.visible).toBe(true);
+    expect(state.buildingMesh.visible).toBe(true);
+    expect(state.groundMesh.geometry).toBe(geometry);
+    layer.onRemove();
+  });
+
+  it('restores decal shadows while rebuilding beyond the completed ground', () => {
+    const { layer, state, map, render, finish } = fixture();
+    const activeHandler = vi.fn();
+    layer.setActiveChangeHandler(activeHandler);
+    finish();
+    map.getCenter = () => new LngLat(23.86, 61.5);
+    map.getBounds = () => ({ getWest: () => 23.855, getEast: () => 23.865,
+      getSouth: () => 61.495, getNorth: () => 61.505 });
+    const commitsBeforePan = state.performanceStats.groundCommits;
+    render();
+    expect(state.active).toBe(false);
+    expect(state.groundJob?.quality).toBe('coarse');
+    expect(activeHandler).toHaveBeenLastCalledWith(false);
+    for (let frame = 0; frame < 1000
+      && state.performanceStats.groundCommits === commitsBeforePan; frame += 1) render();
+    expect(state.active).toBe(true);
+    expect(activeHandler).toHaveBeenLastCalledWith(true);
+    finish();
+    layer.onRemove();
+  });
+
+  it('recenters before a high-zoom pan leaves the bounded ground window', () => {
+    const { layer, state, map, render, finish } = fixture();
+    finish();
+    const center = new LngLat(23.79, 61.5); // About 1.6 km, under the old 2 km threshold.
+    map.getCenter = () => center;
+    map.getBounds = () => ({ getWest: () => 23.788, getEast: () => 23.792,
+      getSouth: () => 61.498, getNorth: () => 61.502 });
+    render();
+    expect(state.sceneOrigin.lng).toBe(center.lng);
+    finish();
+    expect(state.groundBounds.minX).toBeLessThan(0);
+    expect(state.groundBounds.maxX).toBeGreaterThan(0);
+    expect(state.active).toBe(true);
+    layer.onRemove();
+  });
+
+  it('keeps ground shadows during a pan and starts replacement work while moving', () => {
+    const { layer, state, map, render, finish } = fixture();
+    finish();
+    const completed = state.groundMesh.geometry;
+    map.isMoving = () => true;
+    map.getCenter = () => new LngLat(23.762, 61.5);
+    map.getBounds = () => ({ getWest: () => 23.757, getEast: () => 23.767,
+      getSouth: () => 61.495, getNorth: () => 61.505 });
+    render();
+    expect(state.active).toBe(true);
+    expect(state.groundMesh.geometry).toBe(completed);
+    expect(state.groundJob).toBeUndefined();
+
+    map.getCenter = () => new LngLat(23.772, 61.5);
+    map.getBounds = () => ({ getWest: () => 23.767, getEast: () => 23.777,
+      getSouth: () => 61.495, getNorth: () => 61.505 });
+    render();
+    expect(state.groundJob).toBeDefined();
+    finish();
+    expect(state.active).toBe(true);
+    expect(state.groundMesh.geometry).not.toBe(completed);
+    layer.onRemove();
+  });
+
+  it('focuses the shadow camera more tightly than the ground pan buffer', () => {
+    const { layer, state, render, finish } = fixture();
+    finish();
+    render();
+    const groundHalfSpan = (state.groundBounds.maxX - state.groundBounds.minX) * 0.5;
+    expect(state.sunlight.shadow.camera.right).toBeLessThan(groundHalfSpan);
+    layer.onRemove();
+  });
+
+  it('finishes an in-flight ground job despite a newer terrain revision', () => {
+    const { layer, state, render, finish } = fixture();
+    finish();
+    const before = state.performanceStats.groundCommits;
+    layer.invalidateTerrain();
+    render();
+    const job = state.groundJob;
+    expect(job).toBeDefined();
+    layer.invalidateTerrain();
+    render();
+    expect(state.groundJob).toBe(job);
+    finish();
+    expect(state.performanceStats.groundCommits).toBeGreaterThanOrEqual(before + 2);
+    layer.onRemove();
+  });
+
+  it('rebuilds a flat catcher when terrain is switched off', () => {
+    const { layer, state, map, finish } = fixture();
+    finish();
+    const terrainGeometry = state.groundMesh.geometry;
+    map.getTerrain = () => null as any;
+    finish();
+    expect(state.groundMesh.geometry).not.toBe(terrainGeometry);
+    const positions = state.groundMesh.geometry.getAttribute('position');
+    expect(positions.getY(0)).toBeCloseTo(0.3);
     layer.onRemove();
   });
 

@@ -18,6 +18,8 @@ type Scenario = {
   state: string;
   favorites?: StoredFavorite[];
   initialView?: { center: [number, number]; zoom: number; bearing?: number; pitch?: number };
+  terrain?: boolean;
+  shadowDebug?: boolean;
 
 };
 
@@ -559,6 +561,71 @@ const scenarios: Scenario[] = [
     viewport: 'phone',
     state: 'close-zoom neighborhood map ready',
     initialView: { center: [23.7609, 61.4981], zoom: 16.2, bearing: -12, pitch: 48 },
+  },
+  {
+    name: 'desktop-three-buildings-city-zoom',
+    description: 'Three.js buildings cover the former extrusion zoom range',
+    viewport: 'desktop',
+    state: 'Three.js buildings visible from city zoom 13',
+    shadowDebug: true,
+    initialView: { center: [23.7609, 61.4981], zoom: 13.7, bearing: -12, pitch: 45 },
+    setup: async page => {
+      await expect.poll(() => page.evaluate(() => {
+        const debug = (window as any).katuShadowDebug;
+        const map = debug?.layer()?.map;
+        return { extrusionPresent: Boolean(map?.getLayer('global-buildings')), building: debug?.building() };
+      }), { timeout: 20_000 }).toMatchObject({ extrusionPresent: false, building: { active: true } });
+    },
+  },
+  {
+    name: 'phone-three-buildings-terrain',
+    description: 'Close Three.js buildings replace hosted extrusions over terrain',
+    viewport: 'phone',
+    state: 'Three.js buildings and terrain shadows ready',
+    terrain: true,
+    shadowDebug: true,
+    initialView: { center: [23.7609, 61.4981], zoom: 17.2, bearing: -12, pitch: 55 },
+    setup: async page => {
+      const presentation = () => page.evaluate(() => {
+        const debug = (window as any).katuShadowDebug;
+        const map = debug?.layer()?.map;
+        return { extrusionPresent: Boolean(map?.getLayer('global-buildings')), building: debug?.building() };
+      });
+      try {
+        await expect.poll(presentation, { timeout: 8_000 }).toMatchObject({ extrusionPresent: false, building: { active: true } });
+      } catch (error) {
+        throw new Error(`${error}\nBuilding state: ${JSON.stringify(await presentation())}`);
+      }
+      await expect.poll(() => page.evaluate(() =>
+        (window as any).katuShadowDebug?.stats()?.terrainTileDrapeReady
+      ), { timeout: 15_000 }).toBe(true);
+      const movement = await page.evaluate(async () => {
+        const debug = (window as any).katuShadowDebug;
+        const map = debug.layer().map;
+        let fellBack = false;
+        const sample = () => {
+          if (!debug.building()?.active || map.getLayer('global-buildings')) {
+            fellBack = true;
+          }
+        };
+        map.on('render', sample);
+        const rendered = new Promise<void>(resolve => map.once('render', () => resolve()));
+        map.jumpTo({ center: [23.7612, 61.4982], zoom: 18 });
+        await rendered;
+        sample();
+        const rotated = new Promise<void>(resolve => map.once('render', () => resolve()));
+        map.jumpTo({ bearing: map.getBearing() + 150 });
+        await rotated;
+        sample();
+        map.off('render', sample);
+        return { fellBack, active: debug.building()?.active, cachedParts: debug.building()?.cachedParts };
+      });
+      expect(movement).toMatchObject({ fellBack: false, active: true });
+      expect(movement.cachedParts).toBeGreaterThan(0);
+      await expect.poll(() => page.evaluate(() =>
+        (window as any).katuShadowDebug?.building()?.shadowMapReady
+      ), { timeout: 15_000 }).toBe(true);
+    },
   },
   {
     name: 'phone-search-autocomplete',
@@ -1140,7 +1207,7 @@ for (const scenario of scenarios) {
         throw new Error(`Map readiness preflight already failed; skipping repeated 45-second wait. First failure: ${readinessFailure}`);
       }
 
-      await page.addInitScript(({ favorites, initialView }) => {
+      await page.addInitScript(({ favorites, initialView, terrain }) => {
         localStorage.clear();
         localStorage.setItem('tampere-map-layer-options', JSON.stringify({
           globe: true,
@@ -1148,7 +1215,7 @@ for (const scenario of scenarios) {
           buildings: true,
           buildingColors: true,
           bridges: false,
-          terrain: false,
+          terrain: terrain ?? false,
           transit: true,
           transitModels: false,
         }));
@@ -1163,8 +1230,8 @@ for (const scenario of scenarios) {
             pitch: initialView.pitch ?? 0,
           }));
         }
-      }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView });
-      await page.goto('/');
+      }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView, terrain: scenario.terrain });
+      await page.goto(scenario.shadowDebug ? '/?shadowDebug=1' : '/');
       const webgl2 = await page.evaluate(() => Boolean(document.createElement('canvas').getContext('webgl2')));
       expect(webgl2, 'WebGL2 is unavailable. Install Chromium dependencies and run with the SwiftShader flags from playwright.config.ts.').toBe(true);
       await expect(page.locator('.map-view')).toBeVisible();

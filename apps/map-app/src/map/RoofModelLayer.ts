@@ -32,7 +32,7 @@ import {
 
 export const ROOF_MODEL_LAYER_ID = 'roof-models-3d';
 
-const ROOF_MIN_ZOOM = 14;
+const ROOF_MIN_ZOOM = 16;
 const ROOF_MAX_BUILDINGS = 1200;
 const ROOF_MAX_VERTICES = 120_000;
 const ROOF_RECENTER_DISTANCE_METERS = 3000;
@@ -119,6 +119,7 @@ export class RoofModelLayer implements CustomLayerInterface {
   private roofMesh?: THREE.Mesh;
   private roofMaterial?: THREE.MeshLambertMaterial;
   private userEnabled = true;
+  private buildingBodyVisible: () => boolean = () => true;
   private darkMode = false;
   private nightMix = 0;
   private latitude = 61.4981;
@@ -139,7 +140,7 @@ export class RoofModelLayer implements CustomLayerInterface {
 
   /** Scene whose meshes cast directional shadows in the shared shadow pass. */
   shadowCasterScene(): THREE.Scene | undefined {
-    return this.renderer ? this.scene : undefined;
+    return this.renderer && this.buildingBodyVisible() ? this.scene : undefined;
   }
 
   /** Origin of the local metre frame used by the shadow caster scene. */
@@ -193,6 +194,10 @@ export class RoofModelLayer implements CustomLayerInterface {
     }
     this.applyRoofColors();
     this.map?.triggerRepaint();
+  }
+
+  setBuildingBodyVisibility(visible: () => boolean) {
+    this.buildingBodyVisible = visible;
   }
 
   setEnabled(enabled: boolean) {
@@ -274,7 +279,7 @@ export class RoofModelLayer implements CustomLayerInterface {
     const map = this.map;
     const renderer = this.renderer;
     if (!map || !renderer) return;
-    if (!this.userEnabled) return;
+    if (!this.userEnabled || !this.buildingBodyVisible()) return;
 
     // Recenter if drifted too far. This must happen before updateRoofs so the
     // new job uses the correct scene origin, and roofs from the previous
@@ -340,7 +345,7 @@ export class RoofModelLayer implements CustomLayerInterface {
 
   updateRoofs(): boolean {
     const map = this.map;
-    if (!map || !this.userEnabled || map.getZoom() < ROOF_MIN_ZOOM) return false;
+    if (!map || !this.userEnabled || !this.buildingBodyVisible() || map.getZoom() < ROOF_MIN_ZOOM) return false;
     // Keep the last complete scene during gestures. Idle resumes generation.
     if (!this.flightMode && map.isMoving?.()) {
       this.roofJob = undefined;

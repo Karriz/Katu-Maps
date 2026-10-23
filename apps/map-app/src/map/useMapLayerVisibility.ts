@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from 'react';
 import type { Map } from 'maplibre-gl';
 import type { TreeModelLayer } from './TreeModelLayer';
 import type { BridgeModelLayer } from './BridgeModelLayer';
+import type { BuildingBodyLayer } from './BuildingBodyLayer';
 import type { RoofModelLayer } from './RoofModelLayer';
 import type { FacadeModelLayer } from './FacadeModelLayer';
 import type { ShadowCatcherLayer } from './ShadowCatcherLayer';
@@ -27,6 +28,7 @@ import {
 type LayerRefs = {
   treeLayerRef: RefObject<TreeModelLayer | null>;
   bridgeLayerRef: RefObject<BridgeModelLayer | null>;
+  buildingBodyLayerRef: RefObject<BuildingBodyLayer | null>;
   roofLayerRef: RefObject<RoofModelLayer | null>;
   facadeLayerRef: RefObject<FacadeModelLayer | null>;
   shadowCatcherLayerRef: RefObject<ShadowCatcherLayer | null>;
@@ -47,8 +49,6 @@ type MapLayerVisibilityOptions = LayerRefs & {
   layerToggles: MapLayerState;
   resolvedTheme: 'light' | 'dark';
   dayNightEnabled: boolean;
-  building3dLayerIds: string[];
-  buildingShadowLayerIds: string[];
   buildingTransitionFootprintLayerId: string;
   building2dLayerId: string;
   cyclingLayerIds: string[];
@@ -72,12 +72,7 @@ function applyBuildingColors(map: Map, enabled: boolean, theme: 'light' | 'dark'
   footprintLayerIds.forEach((id) => {
     if (map.getLayer(id)) map.setPaintProperty(id, 'fill-color', buildingColorPaint(buildingColor, enabled));
   });
-  if (map.getLayer('global-building-ground-storeys')) {
-    map.setPaintProperty('global-building-ground-storeys', 'fill-extrusion-color', buildingColorPaint(buildingBand, enabled));
-  }
-  if (map.getLayer('global-buildings')) {
-    map.setPaintProperty('global-buildings', 'fill-extrusion-color', buildingColorPaint(buildingColor, enabled));
-  }
+
 }
 
 export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[], visible: boolean) {
@@ -88,8 +83,8 @@ export function setMapLayerVisibility(map: LayerVisibilityMap, layerIds: string[
 
 export function useMapLayerVisibility({
   mapRef, mapLoaded, layerToggles, resolvedTheme, dayNightEnabled,
-  treeLayerRef, bridgeLayerRef, roofLayerRef, facadeLayerRef, shadowCatcherLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef, treeRefreshRef,
-  terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive, building3dLayerIds, buildingShadowLayerIds,
+  treeLayerRef, bridgeLayerRef, buildingBodyLayerRef, roofLayerRef, facadeLayerRef, shadowCatcherLayerRef, transitRouteOverlayRef, transitVehicleLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef, treeRefreshRef,
+  terrainSourceRef, terrainEnabledRef, flightActiveRef, flightActive,
   buildingTransitionFootprintLayerId, building2dLayerId, cyclingLayerIds,
   hikingLayerIds, waterEffectLayerIds, onTransitDisabled, onTrafficCamerasDisabled, onChargingStationsDisabled,
   onRoadWeatherDisabled, onRoadTrafficDisabled,
@@ -126,10 +121,10 @@ export function useMapLayerVisibility({
     setVisibility([...CHARGING_STATION_LAYER_IDS], layerToggles.chargingStations);
     setVisibility([...ROAD_WEATHER_LAYER_IDS], layerToggles.roadWeather);
     setVisibility([...ROAD_TRAFFIC_LAYER_IDS], layerToggles.roadTraffic);
-    setVisibility(building3dLayerIds, layerToggles.buildings);
-    setVisibility([buildingTransitionFootprintLayerId], layerToggles.buildings);
-    setVisibility([building2dLayerId], !layerToggles.buildings);
-    setVisibility(buildingShadowLayerIds, layerToggles.buildings);
+    buildingBodyLayerRef.current?.setEnabled(layerToggles.buildings);
+    buildingBodyLayerRef.current?.setBuildingColorsEnabled(layerToggles.buildingColors);
+    setVisibility([buildingTransitionFootprintLayerId], false);
+    setVisibility([building2dLayerId], true);
     treeLayerRef.current?.setShadowsEnabled(layerToggles.trees);
     setVisibility(cyclingLayerIds, layerToggles.cycling);
     setVisibility(hikingLayerIds, layerToggles.hiking);
@@ -159,16 +154,16 @@ export function useMapLayerVisibility({
     if (!layerToggles.roadWeather) onRoadWeatherDisabled();
     if (!layerToggles.roadTraffic) onRoadTrafficDisabled();
   }, [mapLoaded, layerToggles.globe, layerToggles.terrain, layerToggles.buildings, layerToggles.bridges,
-    layerToggles.proceduralBuildingDetails,
+    layerToggles.proceduralBuildingDetails, layerToggles.buildingColors,
     layerToggles.trees, layerToggles.cycling, layerToggles.hiking, layerToggles.transit,
     layerToggles.transitLines, layerToggles.transitModels, layerToggles.trafficCameras,
     layerToggles.chargingStations, layerToggles.roadWeather, layerToggles.roadTraffic,
     layerToggles.locationIcons, layerToggles.labels,
-    building2dLayerId, building3dLayerIds, buildingShadowLayerIds, buildingTransitionFootprintLayerId,
+    building2dLayerId, buildingTransitionFootprintLayerId,
     cyclingLayerIds, hikingLayerIds, flightActive, flightActiveRef, mapRef, onChargingStationsDisabled,
     onRoadTrafficDisabled, onRoadWeatherDisabled, onTrafficCamerasDisabled, onTransitDisabled,
     terrainEnabledRef, terrainSourceRef, treeLayerRef, treeRefreshRef, transitRouteOverlayRef,
-    waterEffectLayerIds, bridgeLayerRef, roofLayerRef, facadeLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef]);
+    waterEffectLayerIds, bridgeLayerRef, buildingBodyLayerRef, roofLayerRef, facadeLayerRef, selectedRouteDeckLayerRef, transitStopRouteDeckLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -176,6 +171,7 @@ export function useMapLayerVisibility({
     treeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     bridgeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     roofLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
+    buildingBodyLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     facadeLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     shadowCatcherLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
     transitVehicleLayerRef.current?.setTheme(!dayNightEnabled && resolvedTheme === 'dark');
@@ -184,7 +180,7 @@ export function useMapLayerVisibility({
     applyMapTheme(map, resolvedTheme);
     map.triggerRepaint();
   }, [dayNightEnabled, flightActive, flightActiveRef, mapLoaded, mapRef, resolvedTheme,
-    bridgeLayerRef, roofLayerRef, facadeLayerRef, shadowCatcherLayerRef, transitVehicleLayerRef, treeLayerRef]);
+    bridgeLayerRef, buildingBodyLayerRef, roofLayerRef, facadeLayerRef, shadowCatcherLayerRef, transitVehicleLayerRef, treeLayerRef]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -67,6 +67,7 @@ export function installModelRefresh({
     layers.bridge.invalidateTerrain();
     layers.tree.invalidateTerrain();
     layers.roof.invalidateSource();
+    layers.buildingBody.invalidateSource();
     layers.facade.invalidateSource();
     layers.shadowCatcher.invalidateTerrain();
     layers.shadowCatcher.invalidateSource();
@@ -80,6 +81,7 @@ export function installModelRefresh({
         layers.bridge.markTerrainDirty();
         layers.tree.invalidateTerrain();
         layers.roof.invalidateSource();
+        layers.buildingBody.invalidateSource();
         layers.facade.invalidateSource();
         layers.shadowCatcher.invalidateTerrain();
         dataRevision += 1;
@@ -98,6 +100,7 @@ export function installModelRefresh({
     else layers.bridge.invalidateSource();
     layers.tree.cancelTreeJobs();
     layers.roof.invalidateSource();
+    layers.buildingBody.invalidateSource();
     layers.facade.invalidateSource();
     layers.shadowCatcher.invalidateSource();
     dataRevision += 1;

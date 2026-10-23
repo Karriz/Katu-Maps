@@ -6,6 +6,7 @@ import {
 } from 'maplibre-gl';
 import * as THREE from 'three';
 import { flightBuildingView, buildingView, buildingViewOverlapRatio, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
+import { createBuildingEnvironmentMap } from './BuildingMaterials';
 import {
   CARTOON_AMBIENT_BASE_INTENSITY,
   CARTOON_AMBIENT_DAY_INTENSITY,
@@ -28,7 +29,7 @@ import {
 
 export const FACADE_MODEL_LAYER_ID = 'facade-details-3d';
 
-const FACADE_MIN_ZOOM = 15;
+const FACADE_MIN_ZOOM = 16;
 const FACADE_MAX_BUILDINGS = 1200;
 const FACADE_MAX_VERTICES = 240_000;
 const FACADE_RECENTER_DISTANCE_METERS = 3000;
@@ -107,8 +108,10 @@ export class FacadeModelLayer implements CustomLayerInterface {
   private sampledFacadeCount = 0;
   private completedView?: BuildingView;
   private facadeMesh?: THREE.Mesh;
-  private facadeMaterial?: THREE.MeshLambertMaterial;
+  private facadeMaterial?: THREE.MeshStandardMaterial;
+  private environmentMap?: THREE.DataTexture;
   private userEnabled = true;
+  private buildingBodyVisible: () => boolean = () => true;
   private darkMode = false;
   private nightMix = 0;
   private lastViewSignature = '';
@@ -128,7 +131,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
 
   /** Scene whose meshes cast directional shadows in the shared shadow pass. */
   shadowCasterScene(): THREE.Scene | undefined {
-    return this.renderer ? this.scene : undefined;
+    return this.renderer && this.buildingBodyVisible() ? this.scene : undefined;
   }
 
   /** Origin of the local metre frame used by the shadow caster scene. */
@@ -184,6 +187,10 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
+  setBuildingBodyVisibility(visible: () => boolean) {
+    this.buildingBodyVisible = visible;
+  }
+
   setEnabled(enabled: boolean) {
     if (this.userEnabled === enabled) return;
     this.userEnabled = enabled;
@@ -213,6 +220,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.facadeMaterial.color.copy(FACADE_GLASS_LIGHT).lerp(FACADE_GLASS_DARK, night);
     this.facadeMaterial.emissive.copy(FACADE_EMISSIVE_OFF).lerp(FACADE_EMISSIVE_NIGHT, night);
     this.facadeMaterial.emissiveIntensity = night * FACADE_EMISSIVE_INTENSITY_NIGHT;
+    this.facadeMaterial.envMapIntensity = 0.45 * (1 - night * 0.75);
   }
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
@@ -233,10 +241,15 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.sunlight.position.set(sunPosition.x, sunPosition.y, sunPosition.z);
     this.scene.add(this.sunlight);
 
-    this.facadeMaterial = new THREE.MeshLambertMaterial({
+    this.environmentMap = createBuildingEnvironmentMap();
+    this.facadeMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true,
       flatShading: true,
       side: THREE.DoubleSide,
+      roughness: 0.45,
+      metalness: 0.03,
+      envMap: this.environmentMap,
+      envMapIntensity: 0.45,
     });
     this.applyFacadeColors();
     this.facadeMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.facadeMaterial);
@@ -257,6 +270,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.map = undefined;
     this.facadeMesh?.geometry.dispose();
     this.facadeMaterial?.dispose();
+    this.environmentMap?.dispose();
     this.renderer?.dispose();
   }
 
@@ -264,7 +278,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
     const map = this.map;
     const renderer = this.renderer;
     if (!map || !renderer) return;
-    if (!this.userEnabled) return;
+    if (!this.userEnabled || !this.buildingBodyVisible()) return;
 
     const center = map.getCenter();
     const originMercator = maplibregl.MercatorCoordinate.fromLngLat(this.sceneOrigin);
@@ -296,7 +310,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
     }
 
     const zoom = map.getZoom();
-    if (zoom < (this.flightMode ? 14 : FACADE_MIN_ZOOM)) {
+    if (zoom < FACADE_MIN_ZOOM) {
       this.facadeJob = undefined;
       if (this.sampledFacadeCount > 0) {
         this.completedView = undefined;
@@ -326,7 +340,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
 
   updateFacades(): boolean {
     const map = this.map;
-    if (!map || !this.userEnabled || map.getZoom() < (this.flightMode ? 14 : FACADE_MIN_ZOOM)) return false;
+    if (!map || !this.userEnabled || !this.buildingBodyVisible() || map.getZoom() < FACADE_MIN_ZOOM) return false;
     // Keep the last complete scene during gestures. Idle resumes generation.
     if (!this.flightMode && map.isMoving?.()) {
       this.facadeJob = undefined;

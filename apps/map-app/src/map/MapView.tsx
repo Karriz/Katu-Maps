@@ -55,6 +55,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TreeModelLayer } from './TreeModelLayer';
 import { BridgeModelLayer } from './BridgeModelLayer';
+import { BuildingBodyLayer } from './BuildingBodyLayer';
 import { installTunnelPortals } from './TunnelPortals';
 import { RoofModelLayer } from './RoofModelLayer';
 import { FacadeModelLayer } from './FacadeModelLayer';
@@ -141,7 +142,6 @@ import {
 } from './CartoonLighting';
 import {
   GLOBAL_BUILDING_2D_LAYER_ID,
-  GLOBAL_BUILDING_3D_LAYER_IDS,
   GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
   GLOBAL_CYCLING_LAYER_IDS,
   GLOBAL_HIKING_LAYER_IDS,
@@ -198,14 +198,8 @@ import { installMapInteractions } from './installMapInteractions';
 import { installModelRefresh } from './installModelRefresh';
 import { installAppSources } from './installAppSources';
 const WATER_EFFECT_LAYER_IDS = ['global-water-pattern'];
-const BUILDING_SHADOW_LAYER_IDS = [
-  'global-building-shadow',
-  'global-building-contact-shadow',
-];
 const LAYER_STORAGE_KEY = deploymentStorageKey('tampere-map-layer-options');
 const THREE_D_STYLE_STORAGE_KEY = deploymentStorageKey('tampere-map-3d-style');
-
-const BUILDING_3D_LAYER_IDS = [...GLOBAL_BUILDING_3D_LAYER_IDS];
 
 const LOCATION_POI_CLASSES = [
   'restaurant', 'cafe', 'bar', 'fast_food', 'pub', 'food_court',
@@ -498,6 +492,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
   const treeLayerRef = useRef<TreeModelLayer | null>(null);
   const bridgeLayerRef = useRef<BridgeModelLayer | null>(null);
   const roofLayerRef = useRef<RoofModelLayer | null>(null);
+  const buildingBodyLayerRef = useRef<BuildingBodyLayer | null>(null);
   const facadeLayerRef = useRef<FacadeModelLayer | null>(null);
   const shadowCatcherLayerRef = useRef<ShadowCatcherLayer | null>(null);
   const transitStopsLayerRef = useRef<TransitStopsLayer | null>(null);
@@ -518,6 +513,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     debugWindow.katuShadowDebug = {
       stats: () => shadowCatcherLayerRef.current?.getPerformanceStats(),
       layer: () => shadowCatcherLayerRef.current,
+      building: () => buildingBodyLayerRef.current?.getDebugState(),
     };
   }, []);
 
@@ -577,6 +573,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     tree: treeLayerRef,
     bridge: bridgeLayerRef,
     roof: roofLayerRef,
+    buildingBody: buildingBodyLayerRef,
     facade: facadeLayerRef,
     shadowCatcher: shadowCatcherLayerRef,
     transitStops: transitStopsLayerRef,
@@ -863,6 +860,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     dayNightEnabled: layerToggles.dayNight,
     treeLayerRef,
     bridgeLayerRef,
+    buildingBodyLayerRef,
     roofLayerRef,
     facadeLayerRef,
     shadowCatcherLayerRef,
@@ -875,8 +873,6 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     terrainEnabledRef,
     flightActiveRef,
     flightActive: immersiveActive,
-    building3dLayerIds: BUILDING_3D_LAYER_IDS,
-    buildingShadowLayerIds: BUILDING_SHADOW_LAYER_IDS,
     buildingTransitionFootprintLayerId: GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
     building2dLayerId: GLOBAL_BUILDING_2D_LAYER_ID,
     cyclingLayerIds: GLOBAL_CYCLING_LAYER_IDS,
@@ -905,6 +901,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     resolvedTheme,
     treeLayerRef,
     bridgeLayerRef,
+    buildingBodyLayerRef,
     transitVehicleLayerRef,
     facadeLayerRef,
     roofLayerRef,
@@ -1985,6 +1982,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
     const {
       tree: treeLayer,
       bridge: bridgeLayer,
+      buildingBody: buildingBodyLayer,
       roof: roofLayer,
       facade: facadeLayer,
       shadowCatcher: shadowCatcherLayer,
@@ -2277,6 +2275,7 @@ export function MapView({ onImmersiveModeChange }: { onImmersiveModeChange?: (ac
       map.addLayer(globalWaterPatternLayer(), 'global-pedestrian-areas');
       for (const layer of groundPatternLayers()) map.addLayer(layer, 'global-pedestrian-areas');
       map.addLayer(bridgeLayer, 'global-road-labels');
+      map.addLayer(buildingBodyLayer, 'global-road-labels');
       map.addLayer(treeLayer, 'global-road-labels');
       map.addLayer(roofLayer, 'global-road-labels');
       map.addLayer(facadeLayer, 'global-road-labels');

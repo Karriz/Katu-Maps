@@ -5,7 +5,6 @@ import type {
   StyleSpecification,
 } from 'maplibre-gl';
 import {
-  CARTOON_BUILDING_SHADOW_TRANSLATE,
   CARTOON_MAP_LIGHT_POSITION,
   CARTOON_SHADOW_COLOR,
   CARTOON_SUN_AZIMUTH_DEGREES,
@@ -616,58 +615,17 @@ export const GLOBAL_FEATURE_LABEL_LAYER_IDS = [
   'global-transit-line-labels',
 ];
 
-// Planetiler encodes OSM way feature IDs as `osm_id * 10 + 2`.
-const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
-
-// OpenMapTiles only marks an overall building outline as hide_3d when it is
-// assigned the outline role in a type=building relation. Näsinneula's broad
-// outline is not related to its detailed 3D parts, so suppress that one outline
-// while retaining its flat footprint and the separately mapped tower parts.
-const NASINNEULA_BUILDING_OUTLINE_MATCH: ExpressionSpecification = [
-  'any',
-  ['==', ['id'], NASINNEULA_BUILDING_OUTLINE_ID],
-  [
-    'all',
-    // OpenFreeMap can merge building polygons and replace their source IDs.
-    // Keep a narrow geometry/property fallback for this landmark outline.
-    ['==', ['get', 'render_height'], 135],
-    ['==', ['get', 'render_min_height'], 7],
-    ['<=', ['distance', {
-      type: 'Point',
-      coordinates: [23.74329, 61.50496],
-    }], 40],
-  ],
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_3D_FILTER: ExpressionSpecification = [
-  'all',
-  ['!', ['has', 'hide_3d']],
-  ['!', NASINNEULA_BUILDING_OUTLINE_MATCH],
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES = 5.5;
 const GLOBAL_MAP_SUN_COLOR = MAP_COLORS.sun;
-
-export const GLOBAL_BUILDING_FACADE_LAYER_IDS = [
-  'global-building-ground-storeys',
-];
 
 export const GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID = 'global-building-footprints';
 export const GLOBAL_BUILDING_2D_LAYER_ID = 'global-building-footprints-2d';
 
-export const GLOBAL_BUILDING_3D_LAYER_IDS = [
-  'global-buildings',
-  ...GLOBAL_BUILDING_FACADE_LAYER_IDS,
-];
-
 export const GLOBAL_BUILDING_LAYER_IDS = [
   GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID,
   GLOBAL_BUILDING_2D_LAYER_ID,
-  ...GLOBAL_BUILDING_3D_LAYER_IDS,
 ];
 
 const GLOBAL_BUILDING_COLOR = MAP_COLORS.building;
-const GLOBAL_BUILDING_GROUND_COLOR = MAP_COLORS.buildingBand;
 
 /**
  * Retain already-soft OSM building colours while progressively pulling dark
@@ -744,39 +702,6 @@ const WATER_COLOR: ExpressionSpecification = [
   0, '#5fa9bc',
   3, '#6db5c7',
   6, MAP_COLORS.water,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_BASE: ExpressionSpecification = [
-  'coalesce', ['get', 'render_min_height'], 0,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_HEIGHT: ExpressionSpecification = [
-  'coalesce', ['get', 'render_height'], 6,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_BODY_HEIGHT: ExpressionSpecification = [
-  'max', 0, ['-', GLOBAL_BUILDING_HEIGHT, GLOBAL_BUILDING_BASE],
-] as ExpressionSpecification;
-
-const GLOBAL_ESTIMATED_BUILDING_STORIES: ExpressionSpecification = [
-  'max', 1, ['round', ['/', GLOBAL_BUILDING_BODY_HEIGHT, 3]],
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_STORY_HEIGHT: ExpressionSpecification = [
-  '/', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_ESTIMATED_BUILDING_STORIES,
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_FIRST_STORY_TOP: ExpressionSpecification = [
-  'min',
-  GLOBAL_BUILDING_HEIGHT,
-  ['+', GLOBAL_BUILDING_BASE, GLOBAL_BUILDING_STORY_HEIGHT],
-] as ExpressionSpecification;
-
-const GLOBAL_BUILDING_UPPER_BASE: ExpressionSpecification = [
-  'case',
-  ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
-  GLOBAL_BUILDING_FIRST_STORY_TOP,
-  GLOBAL_BUILDING_BASE,
 ] as ExpressionSpecification;
 
 function pixelsPerMetre(zoom: number, latitude: number) {
@@ -2244,11 +2169,9 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
       source: OPENFREEMAP_SOURCE_ID,
       'source-layer': 'building',
       minzoom: 12,
-      layout: { visibility: 'none' },
       paint: {
-        // This is the persistent flat representation used when 3D buildings
-        // are disabled. It gains a little definition at close zooms without
-        // trying to imitate extrusion lighting.
+        // Flat footprints remain visible beneath close-up Three.js buildings
+        // and cover tiles while their geometry is arriving.
         'fill-color': pastelBuildingColor('#fffef9'),
         'fill-opacity': [
           'interpolate', ['linear'], ['zoom'],
@@ -2259,123 +2182,6 @@ export const GLOBAL_MAP_STYLE: StyleSpecification = {
         // Fill outlines render as a restrained one-pixel hairline in
         // MapLibre, keeping adjacent footprints legible without heavy rims.
         'fill-outline-color': '#b7beb7',
-      },
-    },
-    {
-      id: 'global-building-shadow',
-      // Keep the shadow on the footprint boundary so it reads as ambient
-      // occlusion without overlapping the real extrusion at a pitched camera.
-      type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'building',
-      minzoom: 13,
-      filter: GLOBAL_BUILDING_3D_FILTER,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 3,
-          15, 6.8,
-          18, 12,
-        ],
-        'line-translate': CARTOON_BUILDING_SHADOW_TRANSLATE,
-        'line-translate-anchor': 'map',
-        'line-blur': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 1.6,
-          18, 3.8,
-        ],
-        'line-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          13.5, 0.16,
-          18, 0.32,
-        ],
-      },
-    },
-    {
-      id: 'global-building-contact-shadow',
-      // A compact ambient-occlusion cue at the wall/ground seam gives the
-      // pastel extrusions weight without needing another 3D shadow volume.
-      type: 'line',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'building',
-      minzoom: 13,
-      filter: [
-        'all',
-        GLOBAL_BUILDING_3D_FILTER,
-        ['<=', GLOBAL_BUILDING_BASE, 0.5],
-      ],
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: {
-        'line-color': CARTOON_SHADOW_COLOR,
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 1.6,
-          15, 3.5,
-          18, 6,
-        ],
-        'line-blur': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0.9,
-          18, 1.8,
-        ],
-        'line-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          13.45, 0.26,
-          18, 0.46,
-        ],
-      },
-    },
-    {
-      id: GLOBAL_BUILDING_FACADE_LAYER_IDS[0],
-      type: 'fill-extrusion',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'building',
-      minzoom: 13,
-      filter: [
-        'all',
-        GLOBAL_BUILDING_3D_FILTER,
-        ['>=', GLOBAL_BUILDING_BODY_HEIGHT, GLOBAL_BUILDING_MIN_MULTI_STOREY_HEIGHT_METRES],
-      ],
-      paint: {
-        'fill-extrusion-color': pastelBuildingColor(GLOBAL_BUILDING_GROUND_COLOR),
-        // Keep the real height present while the layer fades in. The opacity
-        // transition below handles the low-zoom handoff from footprints;
-        // animating height here makes pitched, distant buildings look flat.
-        'fill-extrusion-height': GLOBAL_BUILDING_FIRST_STORY_TOP,
-        'fill-extrusion-base': GLOBAL_BUILDING_BASE,
-        'fill-extrusion-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          13.45, 0.96,
-          14, 1,
-        ],
-        'fill-extrusion-vertical-gradient': false,
-      },
-    },
-    {
-      id: 'global-buildings',
-      type: 'fill-extrusion',
-      source: OPENFREEMAP_SOURCE_ID,
-      'source-layer': 'building',
-      minzoom: 13,
-      filter: GLOBAL_BUILDING_3D_FILTER,
-      paint: {
-        'fill-extrusion-color': pastelBuildingColor(GLOBAL_BUILDING_COLOR),
-        'fill-extrusion-height': GLOBAL_BUILDING_HEIGHT,
-        // Multi-storey buildings begin above the darker ground floor. Short
-        // buildings remain a single extrusion from their normal base.
-        'fill-extrusion-base': GLOBAL_BUILDING_UPPER_BASE,
-        'fill-extrusion-opacity': [
-          'interpolate', ['linear'], ['zoom'],
-          13, 0,
-          13.45, 0.96,
-          14, 1,
-        ],
-        'fill-extrusion-vertical-gradient': false,
       },
     },
     {
@@ -3208,40 +3014,23 @@ export function globalMapStyleForBuildingMode(options: {
   buildings: boolean;
   buildingColors: boolean;
 }): StyleSpecification {
-  const hidden3dLayerIds = new Set([
-    ...GLOBAL_BUILDING_3D_LAYER_IDS,
-    'global-building-shadow',
-    'global-building-contact-shadow',
-  ]);
-
   return {
     ...GLOBAL_MAP_STYLE,
     layers: GLOBAL_MAP_STYLE.layers.map((layer) => {
-      const show2dFootprints = layer.id === GLOBAL_BUILDING_2D_LAYER_ID;
-      const show3dBuilding = layer.id === GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID
-        || hidden3dLayerIds.has(layer.id);
-      if (!show2dFootprints && !show3dBuilding) return layer;
-
+      const isFlatFootprint = layer.id === GLOBAL_BUILDING_2D_LAYER_ID;
+      const isTransitionFootprint = layer.id === GLOBAL_BUILDING_TRANSITION_FOOTPRINT_LAYER_ID;
+      if (!isFlatFootprint && !isTransitionFootprint) return layer;
       const nextLayer = {
         ...layer,
         layout: {
           ...layer.layout,
-          visibility: (show2dFootprints ? !options.buildings : options.buildings) ? 'visible' : 'none',
+          visibility: isFlatFootprint ? 'visible' : 'none',
         },
       } as typeof layer;
-
       if (layer.type === 'fill') {
         nextLayer.paint = {
           ...layer.paint,
           'fill-color': buildingColorPaint(GLOBAL_BUILDING_COLOR, options.buildingColors),
-        };
-      } else if (layer.type === 'fill-extrusion') {
-        const baseColor = layer.id === GLOBAL_BUILDING_FACADE_LAYER_IDS[0]
-          ? GLOBAL_BUILDING_GROUND_COLOR
-          : GLOBAL_BUILDING_COLOR;
-        nextLayer.paint = {
-          ...layer.paint,
-          'fill-extrusion-color': buildingColorPaint(baseColor, options.buildingColors),
         };
       }
       return nextLayer;
@@ -3344,11 +3133,6 @@ export function applyMapTheme(
   set('global-railway-bed', 'line-color', RAIL_BED_NIGHT);
   set('global-railway-sleepers', 'line-color', RAIL_SLEEPER_NIGHT);
   ['global-building-footprints', 'global-building-footprints-2d'].forEach((id) => { set(id, 'fill-color', colors.building); set(id, 'fill-outline-color', colors.boundary); });
-  set('global-building-ground-storeys', 'fill-extrusion-color', colors.buildingBand);
-  set('global-buildings', 'fill-extrusion-color', colors.building);
-  set('global-building-ground-storeys', 'fill-extrusion-vertical-gradient', false);
-  set('global-buildings', 'fill-extrusion-vertical-gradient', false);
-  ['global-building-shadow', 'global-building-contact-shadow'].forEach((id) => set(id, 'line-color', colors.shadow));
   ['global-boundaries', 'global-boundaries-regional'].forEach((id) => set(id, 'line-color', colors.boundary));
   (map.getStyle().layers ?? []).filter((layer) => layer.id.startsWith('global-') && layer.id.includes('label')).forEach((layer) => {
     set(layer.id, 'text-color', colors.label);

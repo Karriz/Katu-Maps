@@ -7,6 +7,7 @@ import { useGlobeCloudCover } from './useGlobeCloudCover';
 import { screenLockedSunDirection, timeZoneAt } from './DayNightSun';
 import type { TreeModelLayer } from './TreeModelLayer';
 import type { BridgeModelLayer } from './BridgeModelLayer';
+import type { BuildingBodyLayer } from './BuildingBodyLayer';
 import type { TransitVehicleModelLayer } from './TransitVehicleModelLayer';
 import type { FacadeModelLayer } from './FacadeModelLayer';
 import type { RoofModelLayer } from './RoofModelLayer';
@@ -28,6 +29,7 @@ export function useDayNightCycle({
   resolvedTheme,
     treeLayerRef,
     bridgeLayerRef,
+    buildingBodyLayerRef,
     transitVehicleLayerRef,
     facadeLayerRef,
     roofLayerRef,
@@ -43,6 +45,7 @@ export function useDayNightCycle({
   resolvedTheme: ResolvedTheme;
   treeLayerRef: RefObject<TreeModelLayer | null>;
   bridgeLayerRef: RefObject<BridgeModelLayer | null>;
+  buildingBodyLayerRef: RefObject<BuildingBodyLayer | null>;
   transitVehicleLayerRef: RefObject<TransitVehicleModelLayer | null>;
   facadeLayerRef: RefObject<FacadeModelLayer | null>;
   roofLayerRef: RefObject<RoofModelLayer | null>;
@@ -70,6 +73,7 @@ export function useDayNightCycle({
       layerRef.current?.setAppearance([1, 0, 0], 0, 0);
       treeLayerRef.current?.setDayNightLighting(null);
       bridgeLayerRef.current?.setDayNightLighting(null);
+      buildingBodyLayerRef.current?.setDayNightLighting(null);
       transitVehicleLayerRef.current?.setDayNightLighting(null);
       facadeLayerRef.current?.setDayNightLighting(null);
       roofLayerRef.current?.setDayNightLighting(null);
@@ -110,6 +114,7 @@ export function useDayNightCycle({
         );
         treeLayerRef.current?.setDayNightLighting(null);
         bridgeLayerRef.current?.setDayNightLighting(null);
+        buildingBodyLayerRef.current?.setDayNightLighting(null);
         transitVehicleLayerRef.current?.setDayNightLighting(null);
         facadeLayerRef.current?.setDayNightLighting(null);
         roofLayerRef.current?.setDayNightLighting(null);
@@ -131,6 +136,12 @@ export function useDayNightCycle({
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,
         shadowOffset: appearance.treeShadowOffset,
+      });
+      buildingBodyLayerRef.current?.setDayNightLighting({
+        palette: appearance.palette,
+        azimuth: appearance.azimuth,
+        polar: appearance.polar,
+        nightMix: appearance.treeNightMix,
       });
       transitVehicleLayerRef.current?.setDayNightLighting({
         palette: appearance.palette,
@@ -181,7 +192,7 @@ export function useDayNightCycle({
     };
   }, [
     buildingColorsEnabled, enabled, flightActive, mapLoaded, mapRef, resolvedTheme,
-    treeLayerRef, bridgeLayerRef, transitVehicleLayerRef, facadeLayerRef, roofLayerRef,
+    treeLayerRef, bridgeLayerRef, buildingBodyLayerRef, transitVehicleLayerRef, facadeLayerRef, roofLayerRef,
     shadowCatcherLayerRef,
   ]);
 

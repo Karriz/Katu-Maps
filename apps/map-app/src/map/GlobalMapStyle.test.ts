@@ -25,24 +25,22 @@ describe('global map overlay styles', () => {
   it('applies the selected building mode before the initial map render', () => {
     const simpleLayers = new Map(globalMapStyleForBuildingMode({ buildings: true, buildingColors: false })
       .layers.map((layer) => [layer.id, layer]));
-    expect(simpleLayers.get('global-buildings')).toMatchObject({
-      layout: { visibility: 'visible' },
-      paint: { 'fill-extrusion-color': '#fffdf8' },
-    });
+    expect(simpleLayers.has('global-buildings')).toBe(false);
+    expect(simpleLayers.has('global-building-ground-storeys')).toBe(false);
     expect(simpleLayers.get('global-building-footprints-2d')).toMatchObject({
-      layout: { visibility: 'none' },
+      layout: { visibility: 'visible' },
       paint: { 'fill-color': '#fffdf8' },
     });
+    expect(simpleLayers.has('global-building-shadow')).toBe(false);
+    expect(simpleLayers.has('global-building-contact-shadow')).toBe(false);
 
     const flatLayers = new Map(globalMapStyleForBuildingMode({ buildings: false, buildingColors: false })
       .layers.map((layer) => [layer.id, layer]));
-    expect(flatLayers.get('global-buildings')?.layout?.visibility).toBe('none');
-    expect(flatLayers.get('global-building-shadow')?.layout?.visibility).toBe('none');
     expect(flatLayers.get('global-building-footprints-2d')?.layout?.visibility).toBe('visible');
 
     const detailedLayers = new Map(globalMapStyleForBuildingMode({ buildings: true, buildingColors: true })
       .layers.map((layer) => [layer.id, layer]));
-    expect((detailedLayers.get('global-buildings')?.paint as Record<string, unknown>)?.['fill-extrusion-color']).toEqual(
+    expect((detailedLayers.get('global-building-footprints-2d')?.paint as Record<string, unknown>)?.['fill-color']).toEqual(
       pastelBuildingColor('#fffdf8'),
     );
   });
@@ -375,27 +373,6 @@ describe('global map overlay styles', () => {
     overlayIds.forEach((layerId) => {
       expect(layersById.get(layerId)?.layout?.visibility, layerId).toBe('none');
     });
-  });
-
-  it('keeps the unsupported Näsinneula outline out of every 3D building layer', () => {
-    const layersById = new Map(GLOBAL_MAP_STYLE.layers.map((layer) => [layer.id, layer]));
-    const affectedLayerIds = [
-      'global-building-shadow',
-      'global-building-contact-shadow',
-      'global-building-ground-storeys',
-      'global-buildings',
-    ];
-
-    affectedLayerIds.forEach((layerId) => {
-      const filter = (layersById.get(layerId) as { filter?: unknown } | undefined)?.filter;
-      const serializedFilter = JSON.stringify(filter);
-      expect(serializedFilter, layerId).toContain('6807253782');
-      expect(serializedFilter, layerId).toContain('distance');
-      expect(serializedFilter, layerId).toContain('render_height');
-    });
-
-    const flatFootprint = layersById.get('global-building-footprints-2d') as { filter?: unknown } | undefined;
-    expect(flatFootprint?.filter).toBeUndefined();
   });
 
   it('uses the polygon water color for line waterways', () => {

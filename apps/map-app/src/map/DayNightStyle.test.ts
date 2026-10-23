@@ -23,10 +23,10 @@ describe('day/night building colors', () => {
     const appearance = dayNightAppearance(new Date('2026-06-21T10:00:00Z'), 61.5, 23.76, 16);
 
     applyDayNightStyle(map as never, appearance, false);
-    expect((map.getLayer('global-buildings')?.paint as any)['fill-extrusion-color']).toBe('#fffdf8');
+    expect((map.getLayer('global-building-footprints-2d')?.paint as any)['fill-color']).toBe('#fffdf8');
 
     applyDayNightStyle(map as never, appearance, true);
-    expect((map.getLayer('global-buildings')?.paint as any)['fill-extrusion-color']).toEqual(
+    expect((map.getLayer('global-building-footprints-2d')?.paint as any)['fill-color']).toEqual(
       pastelBuildingColor('#fffdf8'),
     );
   });

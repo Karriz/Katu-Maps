@@ -1,6 +1,7 @@
 import { BridgeModelLayer, BRIDGE_MODEL_LAYER_ID } from './BridgeModelLayer';
+import { BuildingBodyLayer, BUILDING_BODY_LAYER_ID } from './BuildingBodyLayer';
 import { ChargingStationsLayer } from './ChargingStationsLayer';
-import { FacadeModelLayer, FACADE_MODEL_LAYER_ID } from './FacadeModelLayer';
+import { FacadeModelLayer } from './FacadeModelLayer';
 import { OPENFREEMAP_SOURCE_ID } from './GlobalMapStyle';
 import { RoadTrafficLayer } from './RoadTrafficLayer';
 import { RoadWeatherLayer } from './RoadWeatherLayer';
@@ -20,6 +21,7 @@ type RefSlot<T> = { current: T | null };
 export type MapLayerRuntimeRefs = {
   tree: RefSlot<TreeModelLayer>;
   bridge: RefSlot<BridgeModelLayer>;
+  buildingBody: RefSlot<BuildingBodyLayer>;
   roof: RefSlot<RoofModelLayer>;
   facade: RefSlot<FacadeModelLayer>;
   shadowCatcher: RefSlot<ShadowCatcherLayer>;
@@ -50,8 +52,11 @@ export function createMapLayerRuntime(
     biomeLayer: 'global-globe-biomes',
   });
   const bridge = new BridgeModelLayer();
+  const buildingBody = new BuildingBodyLayer();
   const roof = new RoofModelLayer();
   const facade = new FacadeModelLayer();
+  roof.setBuildingBodyVisibility(() => buildingBody.isActive());
+  facade.setBuildingBodyVisibility(() => buildingBody.isActive());
   const shadowCatcher = new ShadowCatcherLayer();
   const transitVehicle = new TransitVehicleModelLayer();
   transitVehicle.setBridgeDeckSource(bridge);
@@ -88,15 +93,15 @@ export function createMapLayerRuntime(
     root: () => bridge.shadowCasterScene(),
     origin: () => bridge.shadowCasterOrigin(),
   });
+  shadowCatcher.registerCasters('buildingBody', {
+    layerId: BUILDING_BODY_LAYER_ID,
+    root: () => buildingBody.shadowCasterScene(),
+    origin: () => buildingBody.shadowCasterOrigin(),
+  });
   shadowCatcher.registerCasters('roof', {
     layerId: ROOF_MODEL_LAYER_ID,
     root: () => roof.shadowCasterScene(),
     origin: () => roof.shadowCasterOrigin(),
-  });
-  shadowCatcher.registerCasters('facade', {
-    layerId: FACADE_MODEL_LAYER_ID,
-    root: () => facade.shadowCasterScene(),
-    origin: () => facade.shadowCasterOrigin(),
   });
   shadowCatcher.registerCasters('transitVehicle', {
     layerId: 'transit-vehicle-model-3d',
@@ -125,6 +130,7 @@ export function createMapLayerRuntime(
   return {
     tree,
     bridge,
+    buildingBody,
     roof,
     facade,
     shadowCatcher,
