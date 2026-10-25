@@ -25,6 +25,7 @@ export type FacadeCandidate = {
 export type FacadeMeshData = {
   positions: Float32Array;
   normals: Float32Array;
+  uvs: Float32Array;
   indices: Uint16Array | Uint32Array;
   /** Translation to apply so the facade sits at the footprint centroid. */
   offset: [number, number];
@@ -138,6 +139,7 @@ export function generateFacadeGeometry(
 
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
 
   for (let edgeIdx = 0; edgeIdx < local.length; edgeIdx++) {
@@ -214,6 +216,7 @@ export function generateFacadeGeometry(
         for (let v = 0; v < 4; v++) {
           normals.push(nx, 0, nz);
         }
+        uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
 
         indices.push(p0, p0 + 1, p0 + 2, p0, p0 + 2, p0 + 3);
       }
@@ -225,6 +228,7 @@ export function generateFacadeGeometry(
   return {
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
+    uvs: new Float32Array(uvs),
     indices: indices.length > 65535
       ? new Uint32Array(indices)
       : new Uint16Array(indices),
@@ -236,6 +240,7 @@ export function facadeMeshDataToBufferGeometry(data: FacadeMeshData): THREE.Buff
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2));
   geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
   return geometry;
 }

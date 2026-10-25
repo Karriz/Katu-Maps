@@ -5,8 +5,9 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
+import { ModelShadowReceiver, type ModelShadowSource } from './ModelShadowReceiver';
 import { flightBuildingView, buildingView, buildingViewOverlapRatio, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
-import { createBuildingEnvironmentMap } from './BuildingMaterials';
+import { WindowSkyReflection } from './WindowSkyReflection';
 import {
   CARTOON_AMBIENT_BASE_INTENSITY,
   CARTOON_AMBIENT_DAY_INTENSITY,
@@ -41,11 +42,10 @@ const FACADE_MIN_WALL_HEIGHT_M = 3;
 const FACADE_MAX_WALL_HEIGHT_M = 45;
 
 /**
- * Glass tint for light mode. Only slightly darker than the building wall
- * colour (#fffdf8) so windows read as a subtle tonal shift rather than
- * a separate material pasted onto the facade.
+ * Cool glass separates windows from warm plaster even under bright sunlight.
+ * View-dependent sky reflections add highlights over this base tint.
  */
-const FACADE_GLASS_LIGHT = new THREE.Color('#dcd8cf');
+const FACADE_GLASS_LIGHT = new THREE.Color('#6f8c9d');
 /**
  * Glass tint for dark mode. Slightly lighter than the dark building wall
  * (#293f53) so windows remain visible at night even before emissive.
@@ -109,7 +109,8 @@ export class FacadeModelLayer implements CustomLayerInterface {
   private completedView?: BuildingView;
   private facadeMesh?: THREE.Mesh;
   private facadeMaterial?: THREE.MeshStandardMaterial;
-  private environmentMap?: THREE.DataTexture;
+  private readonly skyReflection = new WindowSkyReflection();
+  private skyPalette?: { sky: string; horizon: string; land: string };
   private userEnabled = true;
   private buildingBodyVisible: () => boolean = () => true;
   private darkMode = false;
@@ -122,6 +123,9 @@ export class FacadeModelLayer implements CustomLayerInterface {
   private readonly performanceStats = { jobs: 0, commits: 0, lastJobMs: 0, maxJobMs: 0 };
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
+  private readonly modelShadows = new ModelShadowReceiver();
+
+  setShadowSource(source: ModelShadowSource) { this.modelShadows.setSource(source); }
 
   constructor(private readonly sourceId: string = OPENFREEMAP_SOURCE_ID) {}
 
@@ -170,10 +174,13 @@ export class FacadeModelLayer implements CustomLayerInterface {
     azimuth: number;
     polar: number;
     nightMix: number;
+    palette?: { sky: string; horizon: string; land: string };
   } | null) {
     const azimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
     const polar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
+    this.skyReflection.setSun(azimuth, polar);
     this.nightMix = lighting?.nightMix ?? 0;
+    this.skyPalette = lighting?.palette;
     const position = sunCartesian(azimuth, polar);
     this.sunlight?.position.set(position.x, position.y, position.z);
     if (this.sunlight) {
@@ -215,12 +222,12 @@ export class FacadeModelLayer implements CustomLayerInterface {
   }
 
   private applyFacadeColors() {
-    if (!this.facadeMaterial) return;
     const night = Math.max(this.darkMode ? 1 : 0, this.nightMix);
+    this.skyReflection.setAppearance(this.skyPalette, night);
+    if (!this.facadeMaterial) return;
     this.facadeMaterial.color.copy(FACADE_GLASS_LIGHT).lerp(FACADE_GLASS_DARK, night);
     this.facadeMaterial.emissive.copy(FACADE_EMISSIVE_OFF).lerp(FACADE_EMISSIVE_NIGHT, night);
     this.facadeMaterial.emissiveIntensity = night * FACADE_EMISSIVE_INTENSITY_NIGHT;
-    this.facadeMaterial.envMapIntensity = 0.45 * (1 - night * 0.75);
   }
 
   onAdd(map: MaplibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext) {
@@ -241,16 +248,15 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.sunlight.position.set(sunPosition.x, sunPosition.y, sunPosition.z);
     this.scene.add(this.sunlight);
 
-    this.environmentMap = createBuildingEnvironmentMap();
     this.facadeMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true,
       flatShading: true,
       side: THREE.DoubleSide,
-      roughness: 0.45,
-      metalness: 0.03,
-      envMap: this.environmentMap,
-      envMapIntensity: 0.45,
+      roughness: 0.28,
+      metalness: 0,
     });
+    this.modelShadows.apply(this.facadeMaterial);
+    this.skyReflection.apply(this.facadeMaterial);
     this.applyFacadeColors();
     this.facadeMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.facadeMaterial);
     this.facadeMesh.frustumCulled = false;
@@ -270,7 +276,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
     this.map = undefined;
     this.facadeMesh?.geometry.dispose();
     this.facadeMaterial?.dispose();
-    this.environmentMap?.dispose();
+    this.modelShadows.dispose();
     this.renderer?.dispose();
   }
 
@@ -333,7 +339,9 @@ export class FacadeModelLayer implements CustomLayerInterface {
       .multiply(this.sceneTransform);
     this.camera.projectionMatrix.copy(this.projectionMatrix);
     this.camera.projectionMatrixInverse.copy(this.projectionMatrix).invert();
+    this.skyReflection.updateCamera(this.projectionMatrix, options.projectionMatrix);
 
+    this.modelShadows.update(this.shadowCasterOrigin());
     renderer.resetState();
     renderer.render(this.scene, this.camera);
   }

@@ -58,6 +58,10 @@ export function createMapLayerRuntime(
   roof.setBuildingBodyVisibility(() => buildingBody.isActive());
   facade.setBuildingBodyVisibility(() => buildingBody.isActive());
   const shadowCatcher = new ShadowCatcherLayer();
+  const shadowSource = () => shadowCatcher.modelShadowMap();
+  buildingBody.setShadowSource(shadowSource);
+  roof.setShadowSource(shadowSource);
+  facade.setShadowSource(shadowSource);
   const transitVehicle = new TransitVehicleModelLayer();
   transitVehicle.setBridgeDeckSource(bridge);
   const transitStops = new TransitStopsLayer((pose) => {

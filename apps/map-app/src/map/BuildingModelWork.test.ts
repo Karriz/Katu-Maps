@@ -18,11 +18,12 @@ it('sorts incrementally and preserves ties', () => {
   expect(finish(job)).toEqual([...values].sort((a, b) => b.area - a.area));
 });
 it('merges attributes and indices exceeding 16-bit range incrementally', () => {
-  const geometries = Array.from({ length: 2 }, () => {
+  const geometries = Array.from({ length: 2 }, (_, index) => {
     const geometry = new THREE.BufferGeometry();
     for (const name of ['position', 'normal', 'color']) {
       geometry.setAttribute(name, new THREE.BufferAttribute(new Float32Array(120_000).fill(0.5), 3));
     }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(80_000).fill(index + 0.25), 2));
     geometry.setIndex([0, 1, 39_999]);
     return geometry;
   });
@@ -35,6 +36,9 @@ it('merges attributes and indices exceeding 16-bit range incrementally', () => {
     expect(merged.getAttribute(name).count).toBe(80_000);
     expect(merged.getAttribute(name).getX(79_999)).toBe(0.5);
   }
+  expect(merged.getAttribute('uv').count).toBe(80_000);
+  expect(merged.getAttribute('uv').getX(39_999)).toBe(0.25);
+  expect(merged.getAttribute('uv').getX(40_000)).toBe(1.25);
 });
 it('bounds windows for every facade style and detail level', () => {
   for (const maxWindows of [128, 256, 512]) for (let featureId = 0; featureId < 4; featureId++) {
@@ -143,7 +147,7 @@ for (const kind of ['roof', 'facade'] as const) describe(`${kind} scheduling`, (
     f.layer.setFlightMode(true);
     f.state.moving = true;
     f.state.loaded = false;
-    f.state.zoom = 14;
+    f.state.zoom = 16; // Procedural roofs and facades start at street zoom.
     // Flight must not depend on ground intersections at screen corners.
     vi.spyOn(f.map, 'getBounds').mockImplementation(() => { throw new Error('horizon'); });
     let clock = 0;
@@ -181,6 +185,19 @@ for (const kind of ['roof', 'facade'] as const) describe(`${kind} scheduling`, (
     f.layer.requestFlightRefresh();
     f.complete();
     expect(f.map.querySourceFeatures).toHaveBeenCalledTimes(2);
+  });
+  it('does not schedule procedural detail below street zoom during flight', () => {
+    const f = fixture();
+    f.state.zoom = 14;
+    f.state.moving = true;
+    f.layer.setFlightMode(true);
+    f.layer.requestFlightRefresh();
+    expect(f.update()).toBe(false);
+    expect(f.map.querySourceFeatures).not.toHaveBeenCalled();
+    expect((f.layer as any)[`${kind}Job`]).toBeUndefined();
+    f.state.zoom = 16;
+    f.complete();
+    expect(f.mesh.geometry.getAttribute('position').count).toBeGreaterThan(0);
   });
   if (kind === 'facade') it('caps a dense scene at 240,000 vertices', () => {
     const f = fixture(400); f.complete();

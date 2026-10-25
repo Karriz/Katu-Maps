@@ -3,6 +3,8 @@ import type { CustomLayerInterface, CustomRenderMethodInput, Map as MaplibreMap 
 import * as THREE from 'three';
 import { buildingView, containsBuildingView, type BuildingView } from './BuildingModelWork';
 import { createBuildingEnvironmentMap, createBuildingNormalMap } from './BuildingMaterials';
+import { ModelShadowReceiver, type ModelShadowSource } from './ModelShadowReceiver';
+import { applyBuildingSurfaceMaterial } from './BuildingSurfaceMaterial';
 import {
   CARTOON_AMBIENT_BASE_INTENSITY,
   CARTOON_AMBIENT_DAY_INTENSITY,
@@ -93,6 +95,7 @@ type BuildingBuffers = {
   normals: number[];
   colors: number[];
   uvs: number[];
+  contact?: number[];
 };
 
 function vertex(
@@ -101,11 +104,13 @@ function vertex(
   nx: number, ny: number, nz: number,
   color: THREE.Color,
   u: number, v: number,
+  aboveBase = -1, belowRoof = 0,
 ) {
   buffers.positions.push(x, y, z);
   buffers.normals.push(nx, ny, nz);
   buffers.colors.push(color.r, color.g, color.b);
   buffers.uvs.push(u, v);
+  buffers.contact?.push(aboveBase, belowRoof);
 }
 
 /** A complete roof cap and outward-facing walls; holes remain open. */
@@ -115,6 +120,7 @@ export function appendBuildingBody(
   base: number,
   top: number,
   wallColor: THREE.Color,
+  groundContact = true,
 ) {
   const valid = rings.map((ring) => {
     const trimmed = ring.length > 1 && ring[0][0] === ring[ring.length - 1][0]
@@ -129,7 +135,6 @@ export function appendBuildingBody(
   if (!triangles.length) return 0;
   const before = buffers.positions.length / 3;
   const roofColor = wallColor.clone().lerp(LIGHT_COLOR, 0.08);
-  const groundColor = wallColor.clone().multiplyScalar(0.72);
   for (const triangle of triangles) {
     const [a, b, c] = triangle.map((index) => points[index]);
     const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -151,8 +156,8 @@ export function appendBuildingBody(
       const nx = outwardSign * dz / length;
       const nz = -outwardSign * dx / length;
       const corners = [
-        [a[0], base, a[1], distance / 8, base / 8, groundColor],
-        [b[0], base, b[1], (distance + length) / 8, base / 8, groundColor],
+        [a[0], base, a[1], distance / 8, base / 8, wallColor],
+        [b[0], base, b[1], (distance + length) / 8, base / 8, wallColor],
         [b[0], top, b[1], (distance + length) / 8, top / 8, wallColor],
         [a[0], top, a[1], distance / 8, top / 8, wallColor],
       ] as const;
@@ -160,7 +165,8 @@ export function appendBuildingBody(
       const order = outwardSign > 0 ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
       for (const corner of order) {
         const [x, y, z, u, v, color] = corners[corner];
-        vertex(buffers, x, y, z, nx, 0, nz, color, u, v);
+        vertex(buffers, x, y, z, nx, 0, nz, color, u, v,
+          groundContact ? y - base : -1, top - y);
       }
       distance += length;
     }
@@ -174,6 +180,7 @@ function geometryFromBuffers(buffers: BuildingBuffers) {
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(buffers.normals, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(buffers.colors, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(buffers.uvs, 2));
+  geometry.setAttribute('buildingContact', new THREE.Float32BufferAttribute(buffers.contact ?? [], 2));
   return geometry;
 }
 
@@ -190,15 +197,21 @@ export class BuildingBodyLayer implements CustomLayerInterface {
   private readonly environmentMap = createBuildingEnvironmentMap();
   private readonly material = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.88, metalness: 0,
-    normalMap: this.normalMap, normalScale: new THREE.Vector2(0.12, 0.12),
+    shadowSide: THREE.DoubleSide,
+    normalMap: this.normalMap, normalScale: new THREE.Vector2(0.65, 0.65),
     envMap: this.environmentMap, envMapIntensity: 0.15,
   });
   private readonly mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
+  private readonly modelShadows = new ModelShadowReceiver();
+  private sharedShadowSource?: ModelShadowSource;
+  private sharedShadowsActive = false;
   private readonly ambient = new THREE.HemisphereLight(CARTOON_AMBIENT_SKY_COLOR, CARTOON_AMBIENT_GROUND_COLOR);
   private readonly sunlight = new THREE.DirectionalLight(CARTOON_SUN_COLOR);
   private readonly sunTarget = new THREE.Object3D();
   private sunAzimuth = CARTOON_SUN_AZIMUTH_DEGREES;
   private sunPolar = CARTOON_SUN_POLAR_DEGREES;
+  private shadowSunAzimuth = CARTOON_SUN_AZIMUTH_DEGREES;
+  private shadowSunPolar = CARTOON_SUN_POLAR_DEGREES;
   private shadowMapDirty = true;
   private shadowMapSize = 0;
   private origin = new maplibregl.LngLat(23.7609, 61.4981);
@@ -220,6 +233,9 @@ export class BuildingBodyLayer implements CustomLayerInterface {
   private buildingColorsEnabled = true;
 
   constructor(private readonly sourceId = OPENFREEMAP_SOURCE_ID) {
+    this.modelShadows.setSource(() => this.sharedShadowSource?.() ?? this.selfShadowMap());
+    this.modelShadows.apply(this.material);
+    applyBuildingSurfaceMaterial(this.material);
     this.scene.rotateX(Math.PI / 2);
     this.scene.scale.multiply(new THREE.Vector3(1, 1, -1));
     this.mesh.castShadow = true;
@@ -240,6 +256,23 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     return { longitude: this.origin.lng, latitude: this.origin.lat, elevation: this.originElevation };
   }
   isActive() { return this.active; }
+  setShadowSource(source: ModelShadowSource) { this.sharedShadowSource = source; }
+
+  private selfShadowMap() {
+    const strength = this.selfShadowStrength();
+    if (strength === 0) return undefined;
+    const depth = this.sunlight.shadow.map?.depthTexture;
+    const texture = depth && (this.renderer?.properties?.get(depth) as { __webglTexture?: WebGLTexture } | undefined)?.__webglTexture;
+    return texture ? { texture, matrix: this.sunlight.shadow.matrix, origin: this.shadowCasterOrigin(), strength } : undefined;
+  }
+
+  private selfShadowStrength() {
+    const camera = this.sunlight.shadow.camera;
+    const texelMeters = (camera.right - camera.left) / Math.max(1, this.shadowMapSize);
+    // At city scale a texel can cover multiple roofs. Those comparisons are
+    // unreliable even with a correct receiver plane; fade them out smoothly.
+    return 1 - THREE.MathUtils.smoothstep(texelMeters, 1.5, 4);
+  }
   getDebugState() {
     return { active: this.active, enabled: this.enabled, readyView: this.readyView,
       job: Boolean(this.job), sourceRevision: this.sourceRevision, builtRevision: this.builtRevision,
@@ -248,6 +281,7 @@ export class BuildingBodyLayer implements CustomLayerInterface {
       sourceLoaded: this.map?.isSourceLoaded(this.sourceId),
       processedFeatures: this.processedFeatures, totalFeatures: this.totalFeatures,
       cachedParts: this.cachedParts.size, shadowMapReady: Boolean(this.sunlight.shadow.map),
+      sharedShadowMapReady: this.active && this.sharedShadowsActive,
       shadowMapSize: this.shadowMapSize };
   }
   setActiveChangeHandler(handler: (active: boolean) => void) { this.activeChanged = handler; }
@@ -279,8 +313,9 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     this.nightMix = lighting?.nightMix ?? 0;
     const nextAzimuth = lighting?.azimuth ?? CARTOON_SUN_AZIMUTH_DEGREES;
     const nextPolar = lighting?.polar ?? CARTOON_SUN_POLAR_DEGREES;
-    if (Math.abs(nextAzimuth - this.sunAzimuth) > 0.25
-      || Math.abs(nextPolar - this.sunPolar) > 0.25) this.shadowMapDirty = true;
+    const azimuthDelta = ((nextAzimuth - this.shadowSunAzimuth + 540) % 360) - 180;
+    if (Math.abs(azimuthDelta) > 0.25
+      || Math.abs(nextPolar - this.shadowSunPolar) > 0.25) this.shadowMapDirty = true;
     this.sunAzimuth = nextAzimuth;
     this.sunPolar = nextPolar;
     this.sunlight.intensity = CARTOON_SUN_BASE_INTENSITY + (1 - this.nightMix) * CARTOON_SUN_DAY_INTENSITY;
@@ -305,7 +340,7 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     this.renderer.autoClear = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.BasicShadowMap;
   }
   onRemove() {
     this.setActive(false);
@@ -316,6 +351,8 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     this.material.dispose();
     this.normalMap.dispose();
     this.environmentMap.dispose();
+    this.modelShadows.dispose();
+    this.sunlight.shadow.dispose();
     this.renderer?.dispose();
     this.renderer = undefined;
     this.map = undefined;
@@ -346,8 +383,15 @@ export class BuildingBodyLayer implements CustomLayerInterface {
         -origin.meterInMercatorCoordinateUnits(), origin.meterInMercatorCoordinateUnits()));
     this.camera.projectionMatrix.fromArray(options.defaultProjectionData.mainMatrix).multiply(transform);
     this.camera.projectionMatrixInverse.copy(this.camera.projectionMatrix).invert();
+    const sharedShadows = Boolean(this.sharedShadowSource?.());
+    this.sharedShadowsActive = sharedShadows;
+    // Both caster maps use the same receiver-plane depth correction. Native
+    // PCF compares neighboring texels at one depth and blots distant roofs.
+    this.mesh.receiveShadow = false;
+    if (sharedShadows) this.shadowMapDirty = true;
     this.configureShadowCamera(map.getZoom());
-    if (this.shadowMapDirty) {
+    this.renderer.shadowMap.enabled = !sharedShadows && this.selfShadowStrength() > 0;
+    if (this.shadowMapDirty && !sharedShadows && this.selfShadowStrength() > 0) {
       // Three restores its own framebuffer after the depth pass. Save the
       // framebuffer MapLibre selected, then draw building color into it.
       const gl = this.renderer.getContext() as WebGL2RenderingContext;
@@ -357,12 +401,15 @@ export class BuildingBodyLayer implements CustomLayerInterface {
       try {
         this.renderer.resetState();
         this.renderer.render(this.scene, this.camera);
+        this.shadowSunAzimuth = this.sunAzimuth;
+        this.shadowSunPolar = this.sunPolar;
         this.shadowMapDirty = false;
       } finally {
         this.material.colorWrite = true;
         gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       }
     }
+    this.modelShadows.update(this.shadowCasterOrigin());
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
   }
@@ -425,6 +472,10 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     let features: ReturnType<MaplibreMap['querySourceFeatures']>;
     try { features = map.querySourceFeatures(this.sourceId, { sourceLayer: 'building' }); }
     catch { return; }
+    const sourceLoaded = map.isSourceLoaded(this.sourceId);
+    // An empty streaming snapshot is not evidence that buildings disappeared.
+    if (features.length === 0 && !sourceLoaded) return;
+    if (features.length === 0) this.cachedParts.clear();
     this.totalFeatures = features.length;
     this.processedFeatures = 0;
     for (const feature of features) {
@@ -472,7 +523,7 @@ export class BuildingBodyLayer implements CustomLayerInterface {
       return first[0] - second[0] || first[1] - second[1];
     });
     for (const [key] of candidates.slice(MAX_CACHED_PARTS)) this.cachedParts.delete(key);
-    const buffers: BuildingBuffers = { positions: [], normals: [], colors: [], uvs: [] };
+    const buffers: BuildingBuffers = { positions: [], normals: [], colors: [], uvs: [], contact: [] };
     let count = 0;
     for (const [index, [, part]] of candidates.slice(0, MAX_CACHED_PARTS).entries()) {
       if (index % 32 === 0) yield;
@@ -488,13 +539,9 @@ export class BuildingBodyLayer implements CustomLayerInterface {
       }
       const estimatedVertices = rings.reduce((sum, ring) => sum + ring.length * 9, 0) + rings.length * 6;
       if (buffers.positions.length / 3 + estimatedVertices > MAX_VERTICES || count >= MAX_BUILDINGS) break;
-      if (appendBuildingBody(buffers, rings, base, top, color)) count += 1;
+      if (appendBuildingBody(buffers, rings, base, top, color, part.minHeight <= 0.5)) count += 1;
     }
-    if (count === 0) {
-      this.readyView = view;
-      this.builtRevision = revision;
-      return;
-    }
+    if (count === 0 && (!sourceLoaded || revision !== this.sourceRevision)) return;
     const geometry = geometryFromBuffers(buffers);
     geometry.computeBoundingBox();
     this.shadowMapDirty = true;
@@ -504,6 +551,7 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     this.originElevation = originElevation;
     this.readyView = view;
     this.builtRevision = revision;
+    if (count === 0) this.setActive(false);
     map.triggerRepaint();
   }
 }

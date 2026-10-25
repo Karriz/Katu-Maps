@@ -150,6 +150,7 @@ export function useDayNightCycle({
         nightMix: appearance.treeNightMix,
       });
       facadeLayerRef.current?.setDayNightLighting({
+        palette: appearance.palette,
         azimuth: appearance.azimuth,
         polar: appearance.polar,
         nightMix: appearance.treeNightMix,

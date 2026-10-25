@@ -61,6 +61,10 @@ describe('FacadeGeometry', () => {
       expect(facade!.indices.length % 6).toBe(0);
       // At least some windows on a 10×6 building with 3 stories.
       expect(facade!.indices.length / 6).toBeGreaterThan(4);
+      expect(facade!.uvs.length).toBe(facade!.positions.length / 3 * 2);
+      for (let offset = 0; offset < facade!.uvs.length; offset += 8) {
+        expect(Array.from(facade!.uvs.slice(offset, offset + 8))).toEqual([0, 0, 1, 0, 1, 1, 0, 1]);
+      }
     });
 
     it('produces no geometry for a building with only very short walls', () => {

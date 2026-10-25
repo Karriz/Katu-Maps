@@ -82,6 +82,8 @@ export function* mergeBuildingGeometries(geometries: THREE.BufferGeometry[]): Ge
   yield;
   const colors = new Float32Array(totalVertices * 3);
   yield;
+  const uvs = geometries.length > 0 && geometries.every((geometry) => geometry.hasAttribute('uv'))
+    ? new Float32Array(totalVertices * 2) : undefined;
   const indices = totalVertices > 65535 ? new Uint32Array(totalIndices) : new Uint16Array(totalIndices);
   let vertexOffset = 0;
   let indexOffset = 0;
@@ -91,6 +93,13 @@ export function* mergeBuildingGeometries(geometries: THREE.BufferGeometry[]): Ge
       const source = geometry.getAttribute(name).array as Float32Array;
       for (let offset = 0; offset < source.length; offset += 3072) {
         target.set(source.subarray(offset, offset + 3072), vertexOffset * 3 + offset);
+        yield;
+      }
+    }
+    if (uvs) {
+      const source = geometry.getAttribute('uv').array as Float32Array;
+      for (let offset = 0; offset < source.length; offset += 2048) {
+        uvs.set(source.subarray(offset, offset + 2048), vertexOffset * 2 + offset);
         yield;
       }
     }
@@ -107,6 +116,7 @@ export function* mergeBuildingGeometries(geometries: THREE.BufferGeometry[]): Ge
   merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  if (uvs) merged.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   merged.setIndex(new THREE.BufferAttribute(indices, 1));
   return merged;
 }

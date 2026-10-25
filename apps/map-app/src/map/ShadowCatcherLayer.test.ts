@@ -1,16 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { LngLat } from 'maplibre-gl';
+import { LngLat, MercatorCoordinate } from 'maplibre-gl';
 import {
   ShadowCatcherLayer,
-  appendBuildingCaster,
   groundCellSize,
   groundGridSignature,
   groundGridWindow,
   shadowReachMeters,
   shadowTextureSizes,
   terrainShadowHalfSpanMeters,
-  triangulateRing,
   type ShadowCasterSet,
 } from './ShadowCatcherLayer';
 
@@ -93,69 +91,12 @@ describe('groundGridWindow', () => {
   });
 });
 
-describe('triangulateRing', () => {
-  it('triangulates a square into two triangles', () => {
-    const triangles = triangulateRing([[0, 0], [10, 0], [10, 10], [0, 10]]);
-    expect(triangles).not.toBeNull();
-    expect(triangles).toHaveLength(6);
-  });
-
-  it('triangulates a concave L-shape without losing area', () => {
-    const ring: Array<[number, number]> = [
-      [0, 0], [20, 0], [20, 10], [10, 10], [10, 20], [0, 20],
-    ];
-    const triangles = triangulateRing(ring);
-    expect(triangles).not.toBeNull();
-    const points = ring;
-    let area = 0;
-    for (let index = 0; index < triangles!.length; index += 3) {
-      const [ax, ay] = points[triangles![index]];
-      const [bx, by] = points[triangles![index + 1]];
-      const [cx, cy] = points[triangles![index + 2]];
-      area += Math.abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) / 2;
-    }
-    expect(area).toBeCloseTo(300, 6);
-  });
-
-  it('handles reversed winding and closing vertices', () => {
-    const clockwise: Array<[number, number]> = [[0, 0], [0, 10], [10, 10], [10, 0], [0, 0]];
-    expect(triangulateRing(clockwise)).toHaveLength(6);
-    const degenerate = triangulateRing([[0, 0], [5, 5]]);
-    expect(degenerate).toBeNull();
-  });
-});
-
-describe('appendBuildingCaster', () => {
-  it('emits a closed prism with caps and walls', () => {
-    const ring: Array<[number, number]> = [[0, 0], [10, 0], [10, 10], [0, 10]];
-    const triangles = triangulateRing(ring)!;
-    const positions: number[] = [];
-    const indices: number[] = [];
-    const vertices = appendBuildingCaster(positions, indices, ring, triangles, 2, 12);
-    expect(vertices).toBe(8);
-    expect(indices).toHaveLength(36);
-    const yValues = new Set<number>();
-    for (let index = 1; index < positions.length; index += 3) yValues.add(positions[index]);
-    expect(yValues).toEqual(new Set([2, 12]));
-  });
-});
-
 describe('ShadowCatcherLayer', () => {
   afterEach(() => vi.restoreAllMocks());
 
   function fixture() {
-    const layer = new ShadowCatcherLayer('source');
+    const layer = new ShadowCatcherLayer();
     const state = layer as any;
-    const buildingFeature = {
-      id: 1,
-      geometry: {
-        type: 'Polygon',
-        coordinates: [[
-          [23.76, 61.5], [23.761, 61.5], [23.761, 61.5001], [23.76, 61.5001], [23.76, 61.5],
-        ]],
-      },
-      properties: { render_height: 20, render_min_height: 0 },
-    };
     const map = {
       getZoom: () => 15,
       getPitch: () => 30,
@@ -165,10 +106,10 @@ describe('ShadowCatcherLayer', () => {
         getSouth: () => 61.495, getNorth: () => 61.505 }),
       getSource: () => ({}),
       getTerrain: () => ({ source: 'terrain' }),
-      getLayer: (id: string) => (id === 'global-buildings' || id === 'caster-layer' ? {} : undefined),
+      getLayer: (id: string) => (id === 'caster-layer' ? {} : undefined),
       getLayoutProperty: vi.fn(() => 'visible'),
       isMoving: () => false,
-      querySourceFeatures: vi.fn(() => [buildingFeature]),
+      querySourceFeatures: vi.fn(),
       queryTerrainElevation: vi.fn((_point: LngLat) => 10),
       triggerRepaint: vi.fn(),
     };
@@ -186,10 +127,8 @@ describe('ShadowCatcherLayer', () => {
     state.groundMaterial = new THREE.ShadowMaterial();
     state.groundMesh = new THREE.Mesh(new THREE.BufferGeometry(), state.groundMaterial);
     state.groundMesh.visible = false;
-    state.buildingMesh = new THREE.Mesh(new THREE.BufferGeometry(), state.casterMaterial);
-    state.buildingMesh.visible = false;
     state.sunlight = new THREE.DirectionalLight();
-    state.scene.add(state.groundMesh, state.buildingMesh);
+    state.scene.add(state.groundMesh);
     let now = 1000;
     vi.spyOn(performance, 'now').mockImplementation(() => now++);
     const render = () => layer.render({} as any, {
@@ -199,15 +138,14 @@ describe('ShadowCatcherLayer', () => {
       let settled = 0;
       for (let index = 0; index < maxRenders && settled < 3; index += 1) {
         render();
-        settled = state.groundJob || state.buildingJob ? 0 : settled + 1;
+        settled = state.groundJob ? 0 : settled + 1;
       }
       expect(state.groundJob).toBeUndefined();
-      expect(state.buildingJob).toBeUndefined();
     };
     return { layer, state, map, render, finish };
   }
 
-  it('builds the draped ground mesh and building casters under frame budgets', () => {
+  it('builds the draped ground mesh under frame budgets', () => {
     const { layer, state, finish } = fixture();
     const activeHandler = vi.fn();
     layer.setActiveChangeHandler(activeHandler);
@@ -218,15 +156,6 @@ describe('ShadowCatcherLayer', () => {
     const positions = state.groundMesh.geometry.getAttribute('position');
     expect(positions.count).toBeGreaterThan(100);
     expect(state.groundMesh.geometry.getIndex()!.count % 6).toBe(0);
-    expect(state.buildingMesh.visible).toBe(true);
-    const buildingPositions = state.buildingMesh.geometry.getAttribute('position');
-    expect(buildingPositions.count).toBe(8);
-    const yValues = new Set<number>();
-    for (let index = 1; index < buildingPositions.count * 3; index += 3) {
-      yValues.add(buildingPositions.array[index]);
-    }
-    // Ground elevation 10 minus origin elevation 0: base at 10, top at 30.
-    expect(yValues).toEqual(new Set([10, 30]));
     layer.onRemove();
     expect(activeHandler).toHaveBeenCalledWith(false);
   });
@@ -245,7 +174,13 @@ describe('ShadowCatcherLayer', () => {
     };
     state.renderer.shadowMap = { type: THREE.BasicShadowMap };
     state.renderer.properties = { get: () => ({ __webglTexture: {} }) };
-    state.sunlight.shadow.map = { depthTexture: {}, setSize: vi.fn() };
+    state.sunlight.shadow.map = { depthTexture: {}, setSize: vi.fn(), dispose: vi.fn() };
+    const root = new THREE.Scene();
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
+    layer.registerCasters('building', {
+      layerId: 'caster-layer', root: () => root,
+      origin: () => ({ longitude: 23.76, latitude: 61.5, elevation: 0 }),
+    });
     state.tileReady = true;
     state.tileDirty = true;
     const revision = layer.terrainTileRevision;
@@ -271,28 +206,34 @@ describe('ShadowCatcherLayer', () => {
     layer.onRemove();
   });
 
-  it('builds coarse building casters first and finishes through source updates', () => {
+  it('only exposes a completed terrain shadow map while its layer and zoom are active', () => {
     const { layer, state, map } = fixture();
-    const finishBuildingJob = () => {
-      for (let step = 0; step < 1000 && state.buildingJob; step += 1) state.stepBuildingJob();
-      expect(state.buildingJob).toBeUndefined();
-    };
-    state.startBuildingJob(map);
-    expect(state.buildingJob.quality).toBe('coarse');
-    finishBuildingJob();
-    expect(state.buildingMesh.visible).toBe(true);
-    state.startBuildingJob(map);
-    const fineJob = state.buildingJob;
-    expect(fineJob.quality).toBe('fine');
-    layer.invalidateSource();
-    state.startBuildingJob(map);
-    expect(state.buildingJob).toBe(fineJob);
-    finishBuildingJob();
-    state.startBuildingJob(map);
-    expect(state.buildingJob.quality).toBe('fine');
-    finishBuildingJob();
-    expect(state.performanceStats.buildingCommits).toBe(3);
+    map.getLayer = () => ({});
+    map.getZoom = () => 17;
+    state.tileDepthTexture = {};
+    expect(layer.modelShadowMap()).toBeUndefined();
+    state.tileReady = true;
+    const shadow = layer.modelShadowMap();
+    expect(shadow?.texture).toBe(state.tileDepthTexture);
+    expect(shadow?.matrix).toBe(state.tileShadowMatrix);
+    map.getLayoutProperty.mockReturnValue('none');
+    expect(layer.modelShadowMap()).toBeUndefined();
+    map.getLayoutProperty.mockReturnValue('visible');
+    map.getZoom = () => 16;
+    expect(layer.modelShadowMap()).toBeUndefined();
+    map.getZoom = () => 17;
+    map.getTerrain = () => null as any;
+    expect(layer.modelShadowMap()).toBeUndefined();
     layer.onRemove();
+  });
+
+  it('releases the owned shadow render target on removal', () => {
+    const { layer, state } = fixture();
+    const target = new THREE.WebGLRenderTarget(2, 2);
+    const dispose = vi.spyOn(target, 'dispose');
+    state.sunlight.shadow.map = target;
+    layer.onRemove();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it('mirrors caster meshes but skips blob decals and hidden layers', () => {
@@ -323,6 +264,11 @@ describe('ShadowCatcherLayer', () => {
 
     const entry = state.casters.get('test');
     expect(entry.proxies.size).toBe(2);
+    const sourceUnits = MercatorCoordinate.fromLngLat([23.761, 61.5005]).meterInMercatorCoordinateUnits();
+    const catcherUnits = MercatorCoordinate.fromLngLat(state.sceneOrigin).meterInMercatorCoordinateUnits();
+    expect(entry.host.scale.x).toBeCloseTo(sourceUnits / catcherUnits, 12);
+    expect(entry.host.scale.z).toBeCloseTo(sourceUnits / catcherUnits, 12);
+    expect(entry.host.scale.y).toBe(1);
     const instancedProxy = entry.proxies.get(instanced) as THREE.InstancedMesh;
     expect(instancedProxy.count).toBe(3);
     expect(instancedProxy.instanceMatrix).toBe(instanced.instanceMatrix);
@@ -341,13 +287,12 @@ describe('ShadowCatcherLayer', () => {
     layer.onRemove();
   });
 
-  it('does not build building casters while the 3D buildings layer is hidden', () => {
-    const { layer, state, map, finish } = fixture();
-    map.getLayer = () => undefined;
+  it('uses registered models without querying vector footprints', () => {
+    const { layer, map, finish } = fixture();
     finish();
-    expect(state.buildingMesh.visible).toBe(false);
-    expect(state.buildingMesh.geometry.getAttribute('position')).toBeUndefined();
-    expect(state.groundMesh.visible).toBe(true);
+    layer.invalidateSource();
+    finish();
+    expect(map.querySourceFeatures).not.toHaveBeenCalled();
     layer.onRemove();
   });
 
@@ -361,7 +306,6 @@ describe('ShadowCatcherLayer', () => {
     render();
     expect(state.active).toBe(false);
     expect(state.groundMesh.visible).toBe(false);
-    expect(state.buildingMesh.visible).toBe(false);
     expect(activeHandler).toHaveBeenLastCalledWith(false);
     layer.onRemove();
   });
@@ -416,7 +360,6 @@ describe('ShadowCatcherLayer', () => {
     render();
     expect(state.active).toBe(true);
     expect(state.groundMesh.visible).toBe(true);
-    expect(state.buildingMesh.visible).toBe(true);
     expect(state.groundMesh.geometry).toBe(geometry);
     layer.onRemove();
   });

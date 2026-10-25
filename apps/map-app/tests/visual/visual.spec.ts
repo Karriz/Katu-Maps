@@ -20,6 +20,7 @@ type Scenario = {
   initialView?: { center: [number, number]; zoom: number; bearing?: number; pitch?: number };
   terrain?: boolean;
   shadowDebug?: boolean;
+  proceduralBuildingDetails?: boolean;
 
 };
 
@@ -583,6 +584,7 @@ const scenarios: Scenario[] = [
     viewport: 'phone',
     state: 'Three.js buildings and terrain shadows ready',
     terrain: true,
+    proceduralBuildingDetails: true,
     shadowDebug: true,
     initialView: { center: [23.7609, 61.4981], zoom: 17.2, bearing: -12, pitch: 55 },
     setup: async page => {
@@ -623,8 +625,18 @@ const scenarios: Scenario[] = [
       expect(movement).toMatchObject({ fellBack: false, active: true });
       expect(movement.cachedParts).toBeGreaterThan(0);
       await expect.poll(() => page.evaluate(() =>
-        (window as any).katuShadowDebug?.building()?.shadowMapReady
+        (window as any).katuShadowDebug?.building()?.sharedShadowMapReady
       ), { timeout: 15_000 }).toBe(true);
+      const shaderErrors = await page.evaluate(() => {
+        const debug = (window as any).katuShadowDebug;
+        const map = debug.layer().map;
+        return ['building-bodies-3d', 'roof-models-3d', 'facade-details-3d'].flatMap(id => {
+          const renderer = map.getLayer(id)?.implementation?.renderer;
+          return (renderer?.info.programs ?? []).filter((program: any) =>
+            program.diagnostics?.runnable === false).map((program: any) => program.diagnostics);
+        });
+      });
+      expect(shaderErrors).toEqual([]);
     },
   },
   {
@@ -1207,12 +1219,13 @@ for (const scenario of scenarios) {
         throw new Error(`Map readiness preflight already failed; skipping repeated 45-second wait. First failure: ${readinessFailure}`);
       }
 
-      await page.addInitScript(({ favorites, initialView, terrain }) => {
+      await page.addInitScript(({ favorites, initialView, terrain, proceduralBuildingDetails }) => {
         localStorage.clear();
         localStorage.setItem('tampere-map-layer-options', JSON.stringify({
           globe: true,
           trees: false,
           buildings: true,
+          proceduralBuildingDetails: proceduralBuildingDetails ?? false,
           buildingColors: true,
           bridges: false,
           terrain: terrain ?? false,
@@ -1230,7 +1243,8 @@ for (const scenario of scenarios) {
             pitch: initialView.pitch ?? 0,
           }));
         }
-      }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView, terrain: scenario.terrain });
+      }, { favorites: scenario.favorites ?? [], initialView: scenario.initialView, terrain: scenario.terrain,
+        proceduralBuildingDetails: scenario.proceduralBuildingDetails });
       await page.goto(scenario.shadowDebug ? '/?shadowDebug=1' : '/');
       const webgl2 = await page.evaluate(() => Boolean(document.createElement('canvas').getContext('webgl2')));
       expect(webgl2, 'WebGL2 is unavailable. Install Chromium dependencies and run with the SwiftShader flags from playwright.config.ts.').toBe(true);

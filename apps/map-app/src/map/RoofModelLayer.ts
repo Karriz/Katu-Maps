@@ -5,6 +5,8 @@ import {
   type Map as MaplibreMap,
 } from 'maplibre-gl';
 import * as THREE from 'three';
+import { ModelShadowReceiver, type ModelShadowSource } from './ModelShadowReceiver';
+import { addRoofMaterialUvs, createBuildingNormalMap } from './BuildingMaterials';
 import { flightBuildingView, buildingView, buildingViewOverlapRatio, containsBuildingView, mergeBuildingGeometries, sortBuildingCandidates, type BuildingView } from './BuildingModelWork';
 import {
   CARTOON_AMBIENT_BASE_INTENSITY,
@@ -117,7 +119,8 @@ export class RoofModelLayer implements CustomLayerInterface {
   private sampledRoofCount = 0;
   private completedView?: BuildingView;
   private roofMesh?: THREE.Mesh;
-  private roofMaterial?: THREE.MeshLambertMaterial;
+  private roofMaterial?: THREE.MeshStandardMaterial;
+  private readonly roofNormalMap = createBuildingNormalMap('roof');
   private userEnabled = true;
   private buildingBodyVisible: () => boolean = () => true;
   private darkMode = false;
@@ -131,6 +134,9 @@ export class RoofModelLayer implements CustomLayerInterface {
   private readonly performanceStats = { jobs: 0, commits: 0, lastJobMs: 0, maxJobMs: 0 };
   private hemisphereLight?: THREE.HemisphereLight;
   private sunlight?: THREE.DirectionalLight;
+  private readonly modelShadows = new ModelShadowReceiver();
+
+  setShadowSource(source: ModelShadowSource) { this.modelShadows.setSource(source); }
 
   constructor(private readonly sourceId: string = OPENFREEMAP_SOURCE_ID) {}
 
@@ -249,10 +255,13 @@ export class RoofModelLayer implements CustomLayerInterface {
     this.sunlight.position.set(sunPosition.x, sunPosition.y, sunPosition.z);
     this.scene.add(this.sunlight);
 
-    this.roofMaterial = new THREE.MeshLambertMaterial({
+    this.roofMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true,
       flatShading: true,
+      roughness: 0.8, metalness: 0,
+      normalMap: this.roofNormalMap, normalScale: new THREE.Vector2(0.8, 0.8),
     });
+    this.modelShadows.apply(this.roofMaterial);
     this.applyRoofColors();
     this.roofMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.roofMaterial);
     this.roofMesh.frustumCulled = false;
@@ -272,6 +281,8 @@ export class RoofModelLayer implements CustomLayerInterface {
     this.map = undefined;
     this.roofMesh?.geometry.dispose();
     this.roofMaterial?.dispose();
+    this.roofNormalMap.dispose();
+    this.modelShadows.dispose();
     this.renderer?.dispose();
   }
 
@@ -339,6 +350,7 @@ export class RoofModelLayer implements CustomLayerInterface {
     this.camera.projectionMatrix.copy(this.projectionMatrix);
     this.camera.projectionMatrixInverse.copy(this.projectionMatrix).invert();
 
+    this.modelShadows.update(this.shadowCasterOrigin());
     renderer.resetState();
     renderer.render(this.scene, this.camera);
   }
@@ -555,6 +567,7 @@ export class RoofModelLayer implements CustomLayerInterface {
       if (vertexCount + vertices > ROOF_MAX_VERTICES) continue;
       vertexCount += vertices;
       const geometry = roofMeshDataToBufferGeometry(roofData);
+      addRoofMaterialUvs(geometry);
       geometry.translate(roofData.offset[0], wallTopUp + zOffset, roofData.offset[1]);
       // Always bake the light palette into vertex colours. Dark-mode and
       // day/night darkening are applied uniformly via the material color in

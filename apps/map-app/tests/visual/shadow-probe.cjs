@@ -28,7 +28,7 @@ async function main() {
       return { stats, zoom: layer['map']?.getZoom?.() };
     });
     const summary = state.stats
-      ? `active=${state.stats.active} groundCommits=${state.stats.groundCommits} buildingCommits=${state.stats.buildingCommits} visibleProxies=${state.stats.visibleProxyCount}/${state.stats.proxyCount} lastGroundMs=${Math.round(state.stats.lastGroundJobMs)} lastBuildingMs=${Math.round(state.stats.lastBuildingJobMs)}`
+      ? `active=${state.stats.active} groundCommits=${state.stats.groundCommits} visibleProxies=${state.stats.visibleProxyCount}/${state.stats.proxyCount} lastGroundMs=${Math.round(state.stats.lastGroundJobMs)}`
       : JSON.stringify(state);
     console.log(label, summary);
   };

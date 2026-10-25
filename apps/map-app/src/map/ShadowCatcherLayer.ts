@@ -14,13 +14,8 @@ import {
   sunCartesian,
   treeShadowOpacity,
 } from './CartoonLighting';
-import {
-  containsBuildingView,
-  sortBuildingCandidates,
-  type BuildingView,
-} from './BuildingModelWork';
-import { OPENFREEMAP_SOURCE_ID } from './GlobalMapStyle';
 import { TerrainShadowDrape } from './TerrainShadowDrape';
+import type { ModelShadowMap } from './ModelShadowReceiver';
 
 /**
  * Three.js renders model and building casters into one directional shadow map.
@@ -61,21 +56,15 @@ const TILE_SHADOW_UPDATE_INTERVAL_MS = 350;
 const CATCHER_RECENTER_DISTANCE_METERS = 2000;
 /** Matches the elevation clamp of buildingShadowTranslate in DayNightAppearance. */
 const MIN_SUN_ELEVATION_DEGREES = 8;
-const BUILDING_CASTER_MAX_COUNT = 2400;
-const COARSE_BUILDING_CASTER_COUNT = 300;
-const BUILDING_CASTER_MAX_VERTICES = 160_000;
-const BUILDING_CASTER_MAX_RING_VERTICES = 64;
 const MAX_ELEVATION_CACHE_ENTRIES = 80_000;
-const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
-const METRES_PER_DEGREE_LAT = Math.PI / 180 * 6_378_137;
 
 /**
  * Half-span caps per zoom band. Pitched views reach the horizon in
  * map.getBounds(); shadows only read near the camera, and DEM sampling is the
- * expensive part (~0.3 ms per queryTerrainElevation call), so the drape and
- * the building casters sample a bounded window instead.
+ * expensive part (~0.3 ms per queryTerrainElevation call), so the fallback
+ * drape samples a bounded window instead.
  */
 export function groundHalfSpanCapMeters(zoom: number) {
   if (zoom < 13.5) return 2000;
@@ -177,133 +166,10 @@ export function groundGridSignature(window: GroundGridWindow, terrainZoomBucket:
   ].join(':');
 }
 
-function stripClosingVertex(ring: Array<[number, number]>): Array<[number, number]> {
-  if (ring.length < 2) return ring;
-  const first = ring[0];
-  const last = ring[ring.length - 1];
-  if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
-  return ring;
-}
-
-/**
- * Deterministic ear clipping for footprint caps. Returns triangles as indices
- * into the (stripped) ring, or null for degenerate rings.
- */
-export function triangulateRing(ring: Array<[number, number]>): number[] | null {
-  const points = stripClosingVertex(ring);
-  const count = points.length;
-  if (count < 3) return null;
-  let twiceArea = 0;
-  for (let index = 0; index < count; index += 1) {
-    const [x1, y1] = points[index];
-    const [x2, y2] = points[(index + 1) % count];
-    twiceArea += x1 * y2 - x2 * y1;
-  }
-  if (Math.abs(twiceArea) < 1e-6) return null;
-  // Work on an index list normalized to counter-clockwise winding.
-  let remaining = Array.from({ length: count }, (_unused, index) => index);
-  if (twiceArea < 0) remaining.reverse();
-  const triangles: number[] = [];
-  const cross = (a: number, b: number, c: number) => {
-    const [ax, ay] = points[a];
-    const [bx, by] = points[b];
-    const [cx, cy] = points[c];
-    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-  };
-  const pointInsideTriangle = (a: number, b: number, c: number, p: number) => {
-    const d1 = cross(a, b, p);
-    const d2 = cross(b, c, p);
-    const d3 = cross(c, a, p);
-    return d1 >= -1e-9 && d2 >= -1e-9 && d3 >= -1e-9;
-  };
-  let guard = 0;
-  while (remaining.length > 3 && guard < count * count) {
-    guard += 1;
-    let clipped = false;
-    for (let index = 0; index < remaining.length; index += 1) {
-      const previous = remaining[(index + remaining.length - 1) % remaining.length];
-      const current = remaining[index];
-      const next = remaining[(index + 1) % remaining.length];
-      if (cross(previous, current, next) <= 0) continue;
-      let occluded = false;
-      for (const other of remaining) {
-        if (other === previous || other === current || other === next) continue;
-        if (pointInsideTriangle(previous, current, next, other)) {
-          occluded = true;
-          break;
-        }
-      }
-      if (occluded) continue;
-      triangles.push(previous, current, next);
-      remaining.splice(index, 1);
-      clipped = true;
-      break;
-    }
-    if (!clipped) return null;
-  }
-  if (remaining.length !== 3) return null;
-  triangles.push(remaining[0], remaining[1], remaining[2]);
-  return triangles;
-}
-
-/**
- * Append a closed vertical prism (bottom cap, walls, top cap) for one building
- * footprint in local metres. Ring winding does not matter; the depth material
- * renders both sides. Returns the number of vertices appended.
- */
-export function appendBuildingCaster(
-  positions: number[],
-  indices: number[],
-  ring: Array<[number, number]>,
-  triangles: number[],
-  baseY: number,
-  topY: number,
-): number {
-  const count = ring.length;
-  const vertexOffset = positions.length / 3;
-  for (const [east, north] of ring) {
-    positions.push(east, baseY, north);
-  }
-  for (const [east, north] of ring) {
-    positions.push(east, topY, north);
-  }
-  for (let index = 0; index < triangles.length; index += 3) {
-    // Top cap in the triangulated winding, bottom cap reversed.
-    indices.push(
-      vertexOffset + count + triangles[index],
-      vertexOffset + count + triangles[index + 1],
-      vertexOffset + count + triangles[index + 2],
-    );
-    indices.push(
-      vertexOffset + triangles[index],
-      vertexOffset + triangles[index + 2],
-      vertexOffset + triangles[index + 1],
-    );
-  }
-  for (let index = 0; index < count; index += 1) {
-    const next = (index + 1) % count;
-    const baseA = vertexOffset + index;
-    const baseB = vertexOffset + next;
-    const topA = vertexOffset + count + index;
-    const topB = vertexOffset + count + next;
-    indices.push(baseA, baseB, topB, baseA, topB, topA);
-  }
-  return count * 2;
-}
-
 type CasterEntry = {
   set: ShadowCasterSet;
   host: THREE.Object3D;
   proxies: Map<THREE.Object3D, THREE.Mesh | THREE.InstancedMesh>;
-};
-
-type BuildingCasterCandidate = {
-  ring: Array<[number, number]>;
-  centroidLng: number;
-  centroidLat: number;
-  area: number;
-  baseY: number;
-  topY: number;
 };
 
 export class ShadowCatcherLayer implements CustomLayerInterface {
@@ -337,7 +203,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
 
   private groundMesh?: THREE.Mesh;
   private groundMaterial?: THREE.ShadowMaterial;
-  private buildingMesh?: THREE.Mesh;
   private readonly casterMaterial = new THREE.MeshBasicMaterial({
     colorWrite: false,
     depthWrite: false,
@@ -367,23 +232,9 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
   };
   private groundSignature = '';
   private groundBounds?: { minX: number; minZ: number; maxX: number; maxZ: number };
-  private buildingMeshView?: BuildingView;
-  private buildingJob?: {
-    generator: Generator<void, boolean, void>;
-    signature: string;
-    viewSignature: string;
-    quality: 'coarse' | 'fine';
-    startedAt: number;
-    view: BuildingView;
-    sourceRevision: number;
-  };
-  private buildingSignature = '';
   private groundMeshOrigin = this.sceneOrigin;
   private groundMeshOriginElevation = 0;
-  private buildingMeshOrigin = this.sceneOrigin;
-  private buildingMeshOriginElevation = 0;
   private terrainRevision = 0;
-  private sourceRevision = 0;
   private terrainZoomBucket = 0;
   /** Exact geographic DEM samples; keys never alias different grid origins. */
   private readonly elevationCache = new Map<string, number>();
@@ -391,13 +242,9 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
   private readonly performanceStats = {
     groundJobs: 0,
     groundCommits: 0,
-    buildingJobs: 0,
-    buildingCommits: 0,
     lastGroundJobMs: 0,
-    lastBuildingJobMs: 0,
   };
 
-  constructor(private readonly sourceId: string = OPENFREEMAP_SOURCE_ID) {}
 
   getPerformanceStats() {
     let proxyCount = 0;
@@ -423,11 +270,20 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
       hasGroundMesh: Boolean(this.groundBounds),
       groundMeshVisible: this.groundMesh?.visible ?? false,
       groundJobActive: Boolean(this.groundJob),
-      buildingJobActive: Boolean(this.buildingJob),
     };
   }
 
   isActive() { return this.active; }
+
+  modelShadowMap(): ModelShadowMap | undefined {
+    if (!this.tileReady || !this.tileDepthTexture || !this.map?.getTerrain()
+      || this.map.getZoom() < TERRAIN_SHADOW_MIN_ZOOM
+      || !this.layerVisible(this.map, this.id)) return undefined;
+    const [x, y, , elevation] = this.tileOrigin;
+    const origin = new maplibregl.MercatorCoordinate(x, y).toLngLat();
+    return { texture: this.tileDepthTexture, matrix: this.tileShadowMatrix,
+      origin: { longitude: origin.lng, latitude: origin.lat, elevation } };
+  }
 
   /** Called with false when the catcher retires, so blob decals return as the fallback. */
   setActiveChangeHandler(handler?: (active: boolean) => void) {
@@ -481,9 +337,8 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  /** Vector tiles changed; building footprint casters resample. */
+  /** Vector tiles may replace geometry in the registered model layers. */
   invalidateSource() {
-    this.sourceRevision += 1;
     this.tileDirty = true;
     this.map?.triggerRepaint();
   }
@@ -517,8 +372,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     this.sceneOriginElevation = map.queryTerrainElevation(this.sceneOrigin) ?? 0;
     this.groundMeshOrigin = this.sceneOrigin;
     this.groundMeshOriginElevation = this.sceneOriginElevation;
-    this.buildingMeshOrigin = this.sceneOrigin;
-    this.buildingMeshOriginElevation = this.sceneOriginElevation;
     // Ground and casters use local metre coordinates: x=east, y=up, z=north.
     this.scene.rotateX(Math.PI / 2);
     this.scene.scale.multiply(new THREE.Vector3(1, 1, -1));
@@ -561,12 +414,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     this.groundMesh.visible = false;
     this.scene.add(this.groundMesh);
 
-    this.buildingMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.casterMaterial);
-    this.buildingMesh.castShadow = true;
-    this.buildingMesh.frustumCulled = false;
-    this.buildingMesh.visible = false;
-    this.scene.add(this.buildingMesh);
-
     this.renderer = new THREE.WebGLRenderer({
       canvas: map.getCanvas(),
       context: gl as WebGL2RenderingContext,
@@ -575,7 +422,7 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     this.renderer.autoClear = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    // Regular depth sampling lets the tile shader filter in four explicit taps.
+    // Regular depth sampling lets the tile shader filter depth comparisons.
     this.renderer.shadowMap.type = THREE.BasicShadowMap;
     try {
       this.tileDrape = new TerrainShadowDrape(
@@ -590,7 +437,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
 
   onRemove() {
     this.groundJob = undefined;
-    this.buildingJob = undefined;
     this.setActive(false);
     if (this.tileUpdateTimer) clearTimeout(this.tileUpdateTimer);
     this.tileUpdateTimer = undefined;
@@ -600,7 +446,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     this.tileReady = false;
     this.tileRevisionPending = false;
     this.groundMesh?.geometry.dispose();
-    this.buildingMesh?.geometry.dispose();
     for (const entry of this.casters.values()) {
       for (const proxy of entry.proxies.values()) entry.host.remove(proxy);
       entry.proxies.clear();
@@ -608,6 +453,7 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     }
     this.casters.clear();
     this.groundMaterial?.dispose();
+    this.sunlight?.shadow.dispose();
     this.casterMaterial.dispose();
     this.scene.clear();
     this.renderer?.dispose();
@@ -637,7 +483,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     this.recenterIfNeeded(map);
     this.groundJob = undefined;
     if (this.groundMesh) this.groundMesh.visible = false;
-    this.updateTileCasterJobs(map);
     const casterSignature = this.casterSignature(map);
     if (casterSignature !== this.lastCasterSignature) {
       this.lastCasterSignature = casterSignature;
@@ -681,15 +526,9 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
 
     this.syncCasterProxies(map);
     if (renderer.shadowMap.type !== THREE.BasicShadowMap) renderer.shadowMap.type = THREE.BasicShadowMap;
-    const visibleCaster = Boolean(this.buildingMesh?.visible)
-      || [...this.casters.values()].some(({ proxies }) =>
-        [...proxies.values()].some((proxy) => proxy.visible));
+    const visibleCaster = [...this.casters.values()].some(({ proxies }) =>
+      [...proxies.values()].some((proxy) => proxy.visible));
     if (!visibleCaster) {
-      // Vector tiles can briefly have no building features during a zoom.
-      // Keep the last completed shadow until replacement casters are ready.
-      if (this.tileReady && this.buildings3dVisible(map)
-        && (map.isMoving() || Boolean(this.buildingJob)
-          || !(map.isSourceLoaded?.(this.sourceId) ?? true))) return;
       if (this.tileReady) {
         this.tileReady = false;
         this.tileRevisionPending = false;
@@ -776,21 +615,7 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
         }
       }
     }
-    parts.push(`buildings:${this.buildings3dVisible(map)}`);
     return parts.join('|');
-  }
-
-  private updateTileCasterJobs(map: MaplibreMap) {
-    const buildingsVisible = this.buildings3dVisible(map);
-    if (this.buildingMesh) {
-      this.buildingMesh.visible = buildingsVisible
-        && Boolean(this.buildingMesh.geometry.getAttribute('position')?.count);
-    }
-    if (buildingsVisible) this.startBuildingJob(map);
-    else this.buildingJob = undefined;
-    const deadline = performance.now() + SHADOW_FRAME_BUDGET_MS;
-    while (this.buildingJob && performance.now() < deadline) this.stepBuildingJob();
-    if (this.buildingJob) map.triggerRepaint();
   }
 
   render(_gl: WebGLRenderingContext | WebGL2RenderingContext, options: CustomRenderMethodInput) {
@@ -853,9 +678,7 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
 
   private clearActiveCatcher() {
     this.groundJob = undefined;
-    this.buildingJob = undefined;
     if (this.groundMesh?.visible) this.groundMesh.visible = false;
-    if (this.buildingMesh?.visible) this.buildingMesh.visible = false;
     this.setActive(false);
   }
 
@@ -899,60 +722,33 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     if (this.groundBounds && this.groundMesh) {
       reposition(this.groundMesh, this.groundMeshOrigin, this.groundMeshOriginElevation);
     }
-    if (this.buildingMesh?.geometry.getAttribute('position')) {
-      reposition(this.buildingMesh, this.buildingMeshOrigin, this.buildingMeshOriginElevation);
-    }
-
     this.sceneOrigin = center;
     this.sceneOriginElevation = nextOriginElevation;
     this.groundJob = undefined;
-    this.buildingJob = undefined;
     this.groundSignature = '';
-    this.buildingSignature = '';
     this.tileDirty = true;
   }
 
-  /** Frame-budget stepping of the ground drape and building caster jobs. */
+  /** Frame-budget stepping of the fallback ground drape. */
   updateShadowCatcher(): boolean {
     const map = this.map;
     if (!map || map.getZoom() < SHADOW_MIN_ZOOM) return false;
     if (map.getTerrain() && this.tileDrape) {
       this.groundJob = undefined;
       if (this.groundMesh) this.groundMesh.visible = false;
-      this.updateTileCasterJobs(map);
-      return Boolean(this.buildingJob);
+      return false;
     }
     // The zoom gate hides the mesh without discarding its completed geometry.
     if (this.groundBounds && this.groundMesh) this.groundMesh.visible = true;
     this.setActive(this.groundCoversCurrentView(map));
-    // Both ground and building jobs use stable local windows, so they can
-    // continue during a camera gesture.
-    const buildings3dVisible = this.buildings3dVisible(map);
-    if (this.buildingMesh) {
-      this.buildingMesh.visible = buildings3dVisible
-        && Boolean(this.buildingMesh.geometry.getAttribute('position')?.count);
-    }
+    // The stable ground window can continue building during a camera gesture.
     this.startGroundJob(map);
-    if (buildings3dVisible && this.active) this.startBuildingJob(map);
-    else if (!buildings3dVisible || !this.active) {
-      this.buildingJob = undefined;
-      if (this.buildingMesh?.visible) this.buildingMesh.visible = false;
-    }
-
     const deadline = performance.now() + SHADOW_FRAME_BUDGET_MS;
-    let groundTurn = true;
-    while (performance.now() < deadline && (this.groundJob || this.buildingJob)) {
-      if (this.groundJob && (groundTurn || !this.buildingJob)) {
-        this.stepGroundJob();
-      } else if (this.buildingJob) {
-        this.stepBuildingJob();
-      }
-      groundTurn = !groundTurn;
-    }
+    while (this.groundJob && performance.now() < deadline) this.stepGroundJob();
     // Restore decal shadows if the completed mesh no longer covers this view.
     this.setActive(this.groundCoversCurrentView(map));
-    if (this.groundJob || this.buildingJob) map.triggerRepaint();
-    return Boolean(this.groundJob || this.buildingJob);
+    if (this.groundJob) map.triggerRepaint();
+    return Boolean(this.groundJob);
   }
 
   private stepGroundJob() {
@@ -972,35 +768,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
         // A coarse commit is usable now, then a fine pass replaces it.
         this.groundSignature = '';
       }
-    }
-  }
-
-  private stepBuildingJob() {
-    const job = this.buildingJob!;
-    const result = job.generator.next();
-    if (!result.done) return;
-    this.buildingJob = undefined;
-    const jobMs = performance.now() - job.startedAt;
-    this.performanceStats.lastBuildingJobMs = jobMs;
-    if (result.value) {
-      this.performanceStats.buildingCommits += 1;
-      this.buildingMeshView = job.view;
-      this.tileDirty = true;
-      if (job.quality === 'fine' && job.sourceRevision === this.sourceRevision) {
-        this.buildingSignature = job.signature;
-      } else {
-        // A coarse or stale commit is visible now; refresh it next.
-        this.buildingSignature = '';
-      }
-    }
-  }
-
-  private buildings3dVisible(map: MaplibreMap) {
-    if (!map.getLayer?.('global-buildings')) return false;
-    try {
-      return map.getLayoutProperty('global-buildings', 'visibility') !== 'none';
-    } catch {
-      return false;
     }
   }
 
@@ -1210,153 +977,6 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     return true;
   }
 
-  private get buildingJobView(): BuildingView {
-    const map = this.map!;
-    const margin = shadowReachMeters(this.polar);
-    const halfSpan = (map.getTerrain() && this.tileDrape
-      ? terrainShadowHalfSpanMeters(map.getZoom(), map.getPitch())
-      : groundHalfSpanCapMeters(map.getZoom())) + margin;
-    const center = this.sceneOrigin;
-    const cosLat = Math.max(0.1, Math.cos(center.lat * DEGREES_TO_RADIANS));
-    const reachLat = halfSpan / METRES_PER_DEGREE_LAT;
-    const reachLng = halfSpan / (METRES_PER_DEGREE_LAT * cosLat);
-    return {
-      west: center.lng - reachLng,
-      east: center.lng + reachLng,
-      south: center.lat - reachLat,
-      north: center.lat + reachLat,
-      zoom: Math.floor(map.getZoom()),
-      latitude: Math.round(center.lat * 10) / 10,
-    };
-  }
-
-  private startBuildingJob(map: MaplibreMap) {
-    const view = this.buildingJobView;
-    const viewSignature = JSON.stringify(view);
-    const signature = `${viewSignature}:${this.sourceRevision}`;
-    const covered = this.buildingMeshView && containsBuildingView(this.buildingMeshView, view);
-    const quality = covered ? 'fine' : 'coarse';
-    if (this.buildingJob) {
-      // Complete this window even if vector tiles stream in mid-job.
-      if (this.buildingJob.quality === quality
-        && this.buildingJob.viewSignature === viewSignature) return;
-      this.buildingJob = undefined;
-    }
-    if (covered && signature === this.buildingSignature) return;
-    if (!map.getSource(this.sourceId)) return;
-    this.buildingJob = {
-      generator: this.buildBuildingCastersJob(map, view, quality),
-      signature,
-      viewSignature,
-      quality,
-      startedAt: performance.now(),
-      view,
-      sourceRevision: this.sourceRevision,
-    };
-    this.performanceStats.buildingJobs += 1;
-  }
-
-  private *buildBuildingCastersJob(
-    map: MaplibreMap,
-    view: BuildingView,
-    quality: 'coarse' | 'fine',
-  ): Generator<void, boolean, void> {
-    if (!map.getSource(this.sourceId)) return false;
-    let features: ReturnType<MaplibreMap['querySourceFeatures']> = [];
-    try {
-      features = map.querySourceFeatures(this.sourceId, { sourceLayer: 'building' });
-    } catch {
-      return false;
-    }
-
-    const frame = this.localFrame();
-    const originElevation = this.sceneOriginElevation;
-    const candidates: BuildingCasterCandidate[] = [];
-    featureLoop: for (const feature of features) {
-      yield;
-      if (feature.properties?.hide_3d) continue;
-      const sourceId = feature.id ?? feature.properties?.osm_id;
-      if (sourceId === NASINNEULA_BUILDING_OUTLINE_ID) continue;
-      const renderHeight = Number(feature.properties?.render_height ?? 6);
-      const renderMinHeight = Number(feature.properties?.render_min_height ?? 0);
-      if (!Number.isFinite(renderHeight) || !Number.isFinite(renderMinHeight)) continue;
-      const bodyHeight = Math.max(0, renderHeight - renderMinHeight);
-      if (bodyHeight < 1) continue;
-
-      for (const outerRing of featureOuterRings(feature)) {
-        yield;
-        const ring = stripClosingVertex(outerRing);
-        if (ring.length < 4 || ring.length > BUILDING_CASTER_MAX_RING_VERTICES) continue;
-        let centroidLng = 0;
-        let centroidLat = 0;
-        for (const [lng, lat] of ring) {
-          centroidLng += lng;
-          centroidLat += lat;
-        }
-        centroidLng /= ring.length;
-        centroidLat /= ring.length;
-        if (centroidLng < view.west || centroidLng > view.east
-          || centroidLat < view.south || centroidLat > view.north) continue;
-
-        const localRing = ring.map(([lng, lat]) => frame.toLocal(lng, lat));
-        let twiceArea = 0;
-        for (let vertex = 0; vertex < localRing.length; vertex += 1) {
-          const [x1, z1] = localRing[vertex];
-          const [x2, z2] = localRing[(vertex + 1) % localRing.length];
-          twiceArea += x1 * z2 - x2 * z1;
-        }
-        const area = Math.abs(twiceArea) / 2;
-        if (area < 4) continue;
-        const groundElevation = this.cachedTerrainElevation(map, centroidLng, centroidLat);
-        candidates.push({
-          ring: localRing,
-          centroidLng,
-          centroidLat,
-          area,
-          baseY: groundElevation + renderMinHeight - originElevation,
-          topY: groundElevation + renderHeight - originElevation,
-        });
-        if (quality === 'coarse' && candidates.length >= COARSE_BUILDING_CASTER_COUNT) {
-          break featureLoop;
-        }
-      }
-    }
-
-    const sorted = yield* sortBuildingCandidates(candidates, (first, second) => second.area - first.area);
-    const positions: number[] = [];
-    const indices: number[] = [];
-    let vertices = 0;
-    let buildings = 0;
-    for (const candidate of sorted) {
-      yield;
-      if (buildings >= (quality === 'coarse'
-        ? COARSE_BUILDING_CASTER_COUNT : BUILDING_CASTER_MAX_COUNT)) break;
-      if (vertices + candidate.ring.length * 2 > BUILDING_CASTER_MAX_VERTICES) break;
-      const triangles = triangulateRing(candidate.ring);
-      if (!triangles) continue;
-      vertices += appendBuildingCaster(positions, indices, candidate.ring, triangles, candidate.baseY, candidate.topY);
-      buildings += 1;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-    geometry.setIndex(new THREE.BufferAttribute(
-      vertices > 65535 ? new Uint32Array(indices) : new Uint16Array(indices), 1,
-    ));
-    if (!this.buildingMesh) {
-      geometry.dispose();
-      return false;
-    }
-    this.buildingMesh.geometry.dispose();
-    this.buildingMesh.geometry = geometry;
-    this.buildingMesh.position.set(0, 0, 0);
-    this.buildingMesh.scale.set(1, 1, 1);
-    this.buildingMesh.visible = buildings > 0;
-    this.buildingMeshOrigin = this.sceneOrigin;
-    this.buildingMeshOriginElevation = this.sceneOriginElevation;
-    return true;
-  }
-
   private isEffectivelyVisible(object: THREE.Object3D) {
     let current: THREE.Object3D | null = object;
     while (current) {
@@ -1397,6 +1017,8 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
         origin.elevation - this.sceneOriginElevation,
         (catcherOrigin.y - originMercator.y) / units,
       );
+      const horizontalScale = originMercator.meterInMercatorCoordinateUnits() / units;
+      entry.host.scale.set(horizontalScale, 1, horizontalScale);
       root.updateMatrixWorld(true);
       this.sceneInverse.copy(root.matrixWorld).invert();
       const seen = new Set<THREE.Object3D>();
@@ -1501,17 +1123,5 @@ export class ShadowCatcherLayer implements CustomLayerInterface {
     shadowCamera.near = 1;
     shadowCamera.far = distance * 2 + 600;
     shadowCamera.updateProjectionMatrix();
-  }
-}
-
-function* featureOuterRings(
-  feature: ReturnType<MaplibreMap['querySourceFeatures']>[number],
-): Generator<Array<[number, number]>> {
-  const geometry = feature.geometry;
-  if (!geometry) return;
-  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
-    : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
-  for (const polygon of polygons) {
-    if (polygon?.[0]) yield polygon[0] as Array<[number, number]>;
   }
 }
