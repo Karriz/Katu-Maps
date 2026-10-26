@@ -32,7 +32,7 @@ function fixture(features: FacadeFeature[], renderHeight = 9) {
   const layer = new FacadeModelLayer('buildings');
   let loaded = false;
   const map = {
-    getZoom: () => 15,
+    getZoom: () => 16,
     getCenter: () => new LngLat(23.76, 61.5),
     getBounds: () => ({
       getWest: () => 23.75, getSouth: () => 61.49,
@@ -117,6 +117,18 @@ describe('FacadeModelLayer source refresh', () => {
 
     expect(completeJob(() => layer.updateFacades())).toBe(true);
     expect(sampledCount()).toBe(12);
+  });
+
+  it('keeps courtyard windows in the merged facade mesh', () => {
+    const building = rectangle(10, 23.7598, 61.4999, 0.001, 0.0006);
+    building.geometry.coordinates.push([
+      [23.7601, 61.5001], [23.7605, 61.5001], [23.7605, 61.5003],
+      [23.7601, 61.5003], [23.7601, 61.5001],
+    ]);
+    const courtyard = fixture([building]);
+    courtyard.setLoaded(true);
+    expect(completeJob(() => courtyard.layer.updateFacades())).toBe(true);
+    expect(courtyard.sampledCount()).toBe(1);
   });
 
   it('skips buildings that are too short for facades', () => {

@@ -5,9 +5,8 @@
  * the caller can place the resulting mesh at the correct world position.
  *
  * Only simple, small, rectangular footprints get a procedural roof.
- * Complex shapes, L-shapes, non-rectangular polygons, large buildings, and
- * anything with `hide_3d` fall back to the existing flat fill-extrusion top
- * (the caller decides eligibility).
+ * Larger outlines can receive an inset flat roof, including concave shapes
+ * and courtyard openings. Unsupported geometry retains the building body cap.
  */
 
 import * as THREE from 'three';
@@ -18,6 +17,8 @@ export type RoofCandidate = {
   ring: Array<[number, number]>;
   /** Building wall height in metres (top of walls = base of roof). */
   wallHeight: number;
+  /** Inner courtyard rings, preserved by flat roofs. */
+  holes?: Array<Array<[number, number]>>;
   /** Roof type from the climate profile. */
   type: RoofType;
   /** Roof pitch in degrees (0 for flat). */
@@ -98,13 +99,13 @@ export function isEligibleFootprint(
 /**
  * Larger buildings that do not receive a pitched/hipped roof get a flat roof
  * slab inset from the wall edge. The inset leaves a rim of the building's
- * fill-extrusion top showing around a lighter roof surface, reading as a low
+ * body cap showing around a darker roof surface, reading as a low
  * parapet. Only the larger building outline is eligible — small footprints
  * and building parts are excluded so the detail stays on the dominant shape.
  */
 const MIN_FLAT_ROOF_AREA_SQ_M = 600;
-const MAX_FLAT_ROOF_AREA_SQ_M = 6000;
-const MAX_FLAT_ROOF_RING_VERTICES = 32;
+const MAX_FLAT_ROOF_AREA_SQ_M = 20_000;
+const MAX_FLAT_ROOF_RING_VERTICES = 64;
 const MIN_FLAT_ROOF_WIDTH_M = 5;
 
 export function isEligibleFlatRoofFootprint(
@@ -117,10 +118,6 @@ export function isEligibleFlatRoofFootprint(
 
   const area = Math.abs(signedArea(verts));
   if (area <= MIN_FLAT_ROOF_AREA_SQ_M || area > MAX_FLAT_ROOF_AREA_SQ_M) return false;
-
-  // Insetting relies on a convex outline; concave shapes fall back to the
-  // plain extrusion top.
-  if (countConcaveVertices(verts) > 0) return false;
 
   const bb = boundingBox(verts);
   const shorter = Math.min(bb.maxX - bb.minX, bb.maxZ - bb.minZ);
@@ -152,8 +149,8 @@ const FLAT_ROOF_INSET_M = 0.6;
 /**
  * Flat roof: a single inset polygon capped at the wall top. The slab is
  * smaller than the footprint so the building's extrusion top forms a rim
- * around a lighter roof surface. Only convex outlines are supported (see
- * `isEligibleFlatRoofFootprint`); the slab sits at wall top (y = 0 in
+ * around a darker roof surface. Concave outlines and courtyard holes are
+ * triangulated together; the slab sits at wall top (y = 0 in
  * roof-local space) and the caller offsets it to the building height.
  */
 export function generateFlatRoofGeometry(
@@ -164,22 +161,30 @@ export function generateFlatRoofGeometry(
 
   const centroid = polygonCentroid(verts);
   const local = verts.map(([x, z]) => [x - centroid[0], z - centroid[1]] as [number, number]);
-  const inset = insetConvexPolygon(local, FLAT_ROOF_INSET_M);
-  if (!inset || inset.length < 3) return null;
-  if (Math.abs(signedArea(inset)) < 1) return null;
-
-  const positions: number[] = [];
-  for (const [x, z] of inset) positions.push(x, 0, z);
-
-  // Fan-triangulate the convex inset polygon, choosing the winding so the
-  // face normal points up (+y) in the roof-local frame. A positive signed
-  // area (CCW in x-z) would yield a downward normal with the default fan, so
-  // its winding is reversed.
-  const ccw = signedArea(inset) > 0;
+  const inset = offsetRoofRing(local, FLAT_ROOF_INSET_M);
+  if (!inset || Math.abs(signedArea(inset)) < 1) return null;
+  const holes: Array<Array<[number, number]>> = [];
+  for (const ring of candidate.holes ?? []) {
+    const hole = stripClosingVertex(ring).map(([x, z]) =>
+      [x - centroid[0], z - centroid[1]] as [number, number]);
+    const expanded = offsetRoofRing(hole, -FLAT_ROOF_INSET_M);
+    if (!expanded || !expanded.every(point => pointInRoofRing(point, inset))
+      || roofRingsIntersect(inset, expanded)
+      || holes.some(other => roofRingsIntersect(other, expanded)
+        || pointInRoofRing(expanded[0], other) || pointInRoofRing(other[0], expanded))) return null;
+    holes.push(expanded);
+  }
+  const contour = inset.map(([x, z]) => new THREE.Vector2(x, z));
+  const openings = holes.map(ring => ring.map(([x, z]) => new THREE.Vector2(x, z)));
+  const points = [...contour, ...openings.flat()];
+  const triangles = THREE.ShapeUtils.triangulateShape(contour, openings);
+  if (!triangles.length) return null;
+  const positions = points.flatMap(point => [point.x, 0, point.y]);
   const indices: number[] = [];
-  for (let i = 1; i < inset.length - 1; i++) {
-    if (ccw) indices.push(0, i + 1, i);
-    else indices.push(0, i, i + 1);
+  for (const [a, b, c] of triangles) {
+    const cross = (points[b].x - points[a].x) * (points[c].y - points[a].y)
+      - (points[b].y - points[a].y) * (points[c].x - points[a].x);
+    indices.push(a, ...(cross > 0 ? [c, b] : [b, c]));
   }
 
   const normals = computeFlatNormals(positions, indices);
@@ -534,57 +539,71 @@ function stripClosingVertex(ring: Array<[number, number]>): Array<[number, numbe
   return ring;
 }
 
-/**
- * Inset a convex polygon by moving every edge inward by `distance` and
- * intersecting adjacent offset edges. Returns null if the polygon is too
- * small or the inset collapses it. Winding is preserved.
+/** Offset each edge using ring winding, retaining concave corners.
+ * Invalid miters, collapsed edges and intersecting offsets fall back to the
+ * body roof cap rather than bridging a narrow wing or covering a courtyard.
  */
-function insetConvexPolygon(
-  ring: Array<[number, number]>,
-  distance: number,
+function offsetRoofRing(
+  ring: Array<[number, number]>, distance: number,
 ): Array<[number, number]> | null {
-  const n = ring.length;
-  if (n < 3) return null;
-  const centroid = polygonCentroid(ring);
-
-  // Inward normal for each edge, oriented toward the centroid.
+  if (ring.length < 3 || ring.length > MAX_FLAT_ROOF_RING_VERTICES) return null;
+  const sign = Math.sign(signedArea(ring));
+  if (!sign) return null;
   const normals: Array<[number, number]> = [];
-  for (let i = 0; i < n; i++) {
-    const [ax, az] = ring[i];
-    const [bx, bz] = ring[(i + 1) % n];
-    const dx = bx - ax;
-    const dz = bz - az;
-    const len = Math.hypot(dx, dz);
-    if (len < 1e-9) return null;
-    let nx = dz / len;
-    let nz = -dx / len;
-    const mx = (ax + bx) / 2;
-    const mz = (az + bz) / 2;
-    if (nx * (centroid[0] - mx) + nz * (centroid[1] - mz) < 0) {
-      nx = -nx;
-      nz = -nz;
-    }
-    normals.push([nx, nz]);
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (length < 0.01) return null;
+    normals.push([-sign * (b[1] - a[1]) / length, sign * (b[0] - a[0]) / length]);
   }
-
   const result: Array<[number, number]> = [];
-  for (let i = 0; i < n; i++) {
-    const prev = (i - 1 + n) % n;
-    const [pa1x, pa1z] = ring[prev];
-    const [pa2x, pa2z] = ring[(prev + 1) % n];
-    const [pb1x, pb1z] = ring[i];
-    const [pb2x, pb2z] = ring[(i + 1) % n];
-    const [nax, naz] = normals[prev];
-    const [nbx, nbz] = normals[i];
-    const a1: [number, number] = [pa1x + nax * distance, pa1z + naz * distance];
-    const a2: [number, number] = [pa2x + nax * distance, pa2z + naz * distance];
-    const b1: [number, number] = [pb1x + nbx * distance, pb1z + nbz * distance];
-    const b2: [number, number] = [pb2x + nbx * distance, pb2z + nbz * distance];
-    const vertex = lineIntersection(a1, a2, b1, b2);
-    if (!vertex) return null;
+  for (let i = 0; i < ring.length; i++) {
+    const prev = (i + ring.length - 1) % ring.length;
+    const a = ring[prev], b = ring[i], c = ring[(i + 1) % ring.length];
+    const na = normals[prev], nb = normals[i];
+    const shift = (point: [number, number], normal: [number, number]): [number, number] =>
+      [point[0] + normal[0] * distance, point[1] + normal[1] * distance];
+    const vertex = lineIntersection(shift(a, na), shift(b, na), shift(b, nb), shift(c, nb))
+      ?? (na[0] * nb[0] + na[1] * nb[1] > 0.999 ? shift(b, nb) : null);
+    if (!vertex || Math.hypot(vertex[0] - b[0], vertex[1] - b[1]) > Math.abs(distance) * 4) return null;
     result.push(vertex);
   }
+  if (signedArea(result) * sign <= 0 || roofRingsIntersect(result, ring)) return null;
+  for (let i = 0; i < result.length; i++) {
+    const a = result[i], b = result[(i + 1) % result.length];
+    const originalA = ring[i], originalB = ring[(i + 1) % ring.length];
+    if ((b[0] - a[0]) * (originalB[0] - originalA[0])
+      + (b[1] - a[1]) * (originalB[1] - originalA[1]) <= 0) return null;
+    if (distance > 0 && !pointInRoofRing(a, ring)) return null;
+    for (let j = i + 2; j < result.length; j++) {
+      if (i === 0 && j === result.length - 1) continue;
+      if (roofSegmentsIntersect(a, b, result[j], result[(j + 1) % result.length])) return null;
+    }
+  }
   return result;
+}
+
+function roofSegmentsIntersect(a: [number, number], b: [number, number], c: [number, number], d: [number, number]) {
+  const cross = (p: [number, number], q: [number, number], r: [number, number]) =>
+    (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  if (Math.max(a[0], b[0]) < Math.min(c[0], d[0]) || Math.max(c[0], d[0]) < Math.min(a[0], b[0])
+    || Math.max(a[1], b[1]) < Math.min(c[1], d[1]) || Math.max(c[1], d[1]) < Math.min(a[1], b[1])) return false;
+  return cross(a, b, c) * cross(a, b, d) <= 0 && cross(c, d, a) * cross(c, d, b) <= 0;
+}
+
+function roofRingsIntersect(first: Array<[number, number]>, second: Array<[number, number]>) {
+  return first.some((a, i) => second.some((c, j) =>
+    roofSegmentsIntersect(a, first[(i + 1) % first.length], c, second[(j + 1) % second.length])));
+}
+
+function pointInRoofRing(point: [number, number], ring: Array<[number, number]>) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if ((a[1] > point[1]) !== (b[1] > point[1])
+      && point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
 }
 
 /** Intersection of two infinite lines, each defined by two points. */

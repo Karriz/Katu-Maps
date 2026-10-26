@@ -9,6 +9,7 @@ async function fixture(initialZoom = 2) {
   let zoom = initialZoom;
   const handlers = new Map<string, () => void>();
   const registered = new Map<string, unknown>();
+  const paints = new Map<string, unknown>();
   const pending = new Map<number, IdleRequestCallback>();
   let handle = 0;
   const requestIdleCallback = vi.fn((callback: IdleRequestCallback) => {
@@ -19,7 +20,9 @@ async function fixture(initialZoom = 2) {
   const map = {
     getZoom: () => zoom,
     getLayer: () => ({}),
-    getPaintProperty: () => patternImageExpression('ground-pattern-grass-dark'),
+    getPaintProperty: (id: string) => paints.get(id) ?? patternImageExpression(id === 'global-water-pattern'
+      ? 'water-surface-pattern' : `${id.replace('global-ground-pattern-', 'ground-pattern-')}-dark`),
+    setPaintProperty: vi.fn((id: string, _property: string, value: unknown) => paints.set(id, value)),
     hasImage: (id: string) => registered.has(id),
     addImage: vi.fn((id: string, image: unknown) => { registered.set(id, image); }),
     on: (event: string, callback: () => void) => handlers.set(event, callback),
@@ -53,13 +56,16 @@ describe('lazy map patterns', () => {
 
   it('registers the active palette first, one image per callback, and removes listeners on disposal', async () => {
     vi.spyOn(performance, 'now').mockReturnValue(0);
-    const { registered, pending, tick, dispose, handlers } = await fixture(9);
+    const { map, registered, pending, tick, dispose, handlers } = await fixture(9);
     tick();
     expect([...registered.keys()]).toEqual([EMPTY_PATTERN_ID, 'water-surface-pattern']);
+    expect(map.setPaintProperty).toHaveBeenCalledWith('global-water-pattern', 'fill-pattern', 'water-surface-pattern');
     tick();
     expect([...registered.keys()].at(-1)).toBe('ground-pattern-grass-dark');
+    expect(map.getPaintProperty('global-ground-pattern-grass')).toBe('ground-pattern-grass-dark');
     while (pending.size) tick();
     expect(registered.size).toBe(20);
+    expect(map.getPaintProperty('global-ground-pattern-grass')).toBe('ground-pattern-grass-dark');
     dispose();
     expect(handlers.size).toBe(0);
   });

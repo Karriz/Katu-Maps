@@ -69,7 +69,7 @@ test('building materials preserve sun, shade ambient contacts, and reflect the c
     const smoothWall = readWallPatch();
     const wallNormal = createBuildingNormalMap();
     material.normalMap = wallNormal;
-    material.normalScale.set(0.65, 0.65);
+    material.normalScale.set(0.28, 0.28);
     material.needsUpdate = true;
     const texturedWall = readWallPatch();
     let normalMaxDifference = 0;

@@ -36,7 +36,7 @@ function hash(x: number, y: number, seed: number) {
 
 function* generateCoverage(size: number, kind: GroundPatternKind): Generator<void, Float64Array> {
   const mask = new Float64Array(size * size);
-  const cells = kind === 'park' ? 4 : kind === 'farmland' ? 8 : kind === 'forest' || kind === 'scrub' ? 12 : kind === 'rock' ? 18 : 14;
+  const cells = kind === 'park' || kind === 'grass' || kind === 'meadow' ? 4 : kind === 'farmland' ? 8 : kind === 'forest' || kind === 'scrub' ? 12 : kind === 'rock' ? 18 : 14;
   const cellSize = size / cells;
 
   const hashCells = kind === 'sand' || kind === 'rock' ? cells * 3 : cells;
@@ -75,16 +75,14 @@ function* generateCoverage(size: number, kind: GroundPatternKind): Generator<voi
         const radius = kind === 'forest' ? 0.28 : 0.24;
         coverage = dx * dx + dy * dy < radius * radius ? (kind === 'forest' ? 0.8 : 0.45) : 0;
       } else {
-        // Use broad, irregular dappled patches rather than hard diagonal facets.
-        // Two overlapping patches break up the texture repeat across large areas.
-        const radius = kind === 'park' ? 0.46 : 0.3;
-        const firstX = 0.16 + cellHash(cellX, cellY, 7) * 0.68;
-        const firstY = 0.16 + cellHash(cellX, cellY, 8) * 0.68;
-        const secondX = 0.16 + cellHash(cellX, cellY, 11) * 0.68;
-        const secondY = 0.16 + cellHash(cellX, cellY, 12) * 0.68;
-        const firstDistance = ((localX - firstX) ** 2) + ((localY - firstY) ** 2);
-        const secondDistance = ((localX - secondX) ** 2) + ((localY - secondY) ** 2);
-        coverage = Math.min(1, (firstDistance < radius * radius ? 0.18 : 0) + (secondDistance < radius * radius ? 0.16 : 0));
+        // Smooth periodic value noise avoids hard, repeating circular spots.
+        const u = localX * localX * (3 - 2 * localX);
+        const v = localY * localY * (3 - 2 * localY);
+        const sample = (dx: number, dy: number) =>
+          cellHash((cellX + dx) % cells, (cellY + dy) % cells, 7);
+        const top = sample(0, 0) * (1 - u) + sample(1, 0) * u;
+        const bottom = sample(0, 1) * (1 - u) + sample(1, 1) * u;
+        coverage = 0.07 + (top * (1 - v) + bottom * v) * 0.25;
       }
       mask[y * size + x] = coverage;
     }

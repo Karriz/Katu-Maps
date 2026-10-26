@@ -69,16 +69,15 @@ const ROOF_PALETTE_LIGHT = [
 const ROOF_DARK_MULTIPLIER = new THREE.Color('#4a4a52');
 
 /**
- * Light, muted palette for flat roof slabs. These sit inset on the larger
+ * Muted mineral palette for flat roof slabs. These sit inset on the larger
  * building outlines; the building's fill-extrusion top forms a parapet rim
- * around them. The tones are lighter than the building walls so the roof
- * reads as a sun-bleached cap rather than a shadow.
+ * around them. Muted mineral tones separate the roof membrane from its rim.
  */
 const FLAT_ROOF_PALETTE_LIGHT = [
-  new THREE.Color('#c4c0b6'), // light warm gray
-  new THREE.Color('#bcb8ae'), // light taupe
-  new THREE.Color('#c8c2b4'), // light warm stone
-  new THREE.Color('#c0c2ba'), // light cool gray
+  new THREE.Color('#9da49e'), // light warm gray
+  new THREE.Color('#a7a397'), // light taupe
+  new THREE.Color('#aaa89e'), // light warm stone
+  new THREE.Color('#97a2a0'), // light cool gray
 ];
 
 const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
@@ -87,8 +86,8 @@ const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
 
 type RoofFootprint = {
   ring: Array<[number, number]>;
-  /** Whether the source polygon has inner rings (courtyards, atriums). */
-  hasHoles: boolean;
+  /** Inner courtyard and atrium rings in the same local frame. */
+  holes: Array<Array<[number, number]>>;
   centroid: maplibregl.LngLat;
   center: [number, number];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -259,7 +258,7 @@ export class RoofModelLayer implements CustomLayerInterface {
       vertexColors: true,
       flatShading: true,
       roughness: 0.8, metalness: 0,
-      normalMap: this.roofNormalMap, normalScale: new THREE.Vector2(0.8, 0.8),
+      normalMap: this.roofNormalMap, normalScale: new THREE.Vector2(0.35, 0.35),
     });
     this.modelShadows.apply(this.roofMaterial);
     this.applyRoofColors();
@@ -459,9 +458,9 @@ export class RoofModelLayer implements CustomLayerInterface {
       // OpenFreeMap groups many ordinary buildings that share properties into
       // one MultiPolygon feature. Treat every polygon as its own footprint;
       // rejecting the feature type here used to discard most detached houses.
-      for (const { ring: outerRing, hasHoles } of featureFootprintRings(feature)) {
+      for (const { ring: outerRing, holes } of featureFootprintRings(feature)) {
         yield;
-        if (outerRing.length < 4 || outerRing.length > 33) continue;
+        if (outerRing.length < 4 || outerRing.length > 65) continue;
 
         // Skip buildings outside the current viewport so the instance cap
         // is spent on visible buildings, not off-screen ones in loaded tiles.
@@ -488,7 +487,7 @@ export class RoofModelLayer implements CustomLayerInterface {
         if (!isEligibleFootprint(localRing) && !isEligibleFlatRoofFootprint(localRing)) continue;
         footprintCandidates.push({
           ring: localRing,
-          hasHoles,
+          holes: holes.map(ring => ring.map(([lng, lat]) => toLocal(lng, lat))),
           centroid: centroidLngLat,
           center: polygonCentroid(localRing),
           bounds: polygonBounds(localRing),
@@ -527,7 +526,7 @@ export class RoofModelLayer implements CustomLayerInterface {
       // Pitched/hipped roofs: small houses in pitched climates that win the
       // per-building bucket. Taller small footprints (towers) stay flat so a
       // gable never dwarfs the walls.
-      const pitchedEligible = isEligibleFootprint(footprint.ring);
+      const pitchedEligible = footprint.holes.length === 0 && isEligibleFootprint(footprint.ring);
       const canPitch = pitchedEligible
         && climate.pitchedFraction > 0
         && footprint.wallHeight <= 15
@@ -546,7 +545,7 @@ export class RoofModelLayer implements CustomLayerInterface {
         };
         roofData = generateRoofGeometry(candidate);
         palette = ROOF_PALETTE_LIGHT[Math.abs(colorNumericId) % ROOF_PALETTE_LIGHT.length];
-      } else if (!footprint.hasHoles && isEligibleFlatRoofFootprint(footprint.ring) && footprint.wallHeight <= 45) {
+      } else if (isEligibleFlatRoofFootprint(footprint.ring) && footprint.wallHeight <= 45) {
         // Larger buildings get an inset flat roof slab in every climate,
         // leaving a parapet rim of the building top around it. The larger
         // z-offset avoids z-fighting with the coplanar fill-extrusion top.
@@ -555,6 +554,7 @@ export class RoofModelLayer implements CustomLayerInterface {
           ring: footprint.ring,
           wallHeight: footprint.wallHeight,
           type: 'flat',
+          holes: footprint.holes,
           pitchDegrees: 0,
           featureId: footprint.id,
         };
@@ -757,7 +757,7 @@ function pointInPolygon(point: [number, number], ring: Array<[number, number]>):
 
 type FootprintRing = {
   ring: Array<[number, number]>;
-  hasHoles: boolean;
+  holes: Array<Array<[number, number]>>;
 };
 
 function* featureFootprintRings(
@@ -768,7 +768,7 @@ function* featureFootprintRings(
   const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
     : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
   for (const polygon of polygons) {
-    if (polygon[0]) yield { ring: polygon[0] as Array<[number, number]>, hasHoles: polygon.length > 1 };
+    if (polygon[0]) yield { ring: polygon[0] as Array<[number, number]>, holes: polygon.slice(1) as Array<Array<[number, number]>> };
   }
 }
 

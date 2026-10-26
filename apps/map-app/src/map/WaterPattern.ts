@@ -15,10 +15,16 @@ export function* generateWaterPattern(size: number): Generator<void, PatternImag
       const vertical = (y / size) * tau;
       // Integer-frequency waves meet at every edge, making the generated
       // image seamless when MapLibre repeats it across water polygons.
-      const broad = Math.sin(horizontal + vertical * 2) * 0.38;
-      const crossing = Math.cos(horizontal * 2 - vertical) * 0.2;
-      const detail = Math.sin(horizontal * 3 + vertical) * Math.cos(horizontal - vertical * 2) * 0.1;
-      const shade = Math.max(0, Math.min(1, 0.5 + broad + crossing + detail));
+      const broad = Math.sin(horizontal + vertical * 2) * 0.18
+        + Math.cos(horizontal * 2 - vertical) * 0.12;
+      // Fine elongated ripples cross a broader current. Keep every frequency
+      // integral so the static surface stays seamless and deterministic.
+      const current = horizontal * 3 + vertical * 11
+        + Math.sin(horizontal * 2 - vertical) * 0.7;
+      const ripples = Math.sin(current) * 0.11
+        + Math.sin(horizontal * 5 + vertical * 19) * 0.04;
+      const glint = Math.pow(Math.max(0, Math.cos(current)), 12) * 0.16;
+      const shade = Math.max(0, Math.min(1, 0.43 + broad + ripples + glint));
       const offset = (y * size + x) * 4;
 
       data[offset] = Math.round(shadow[0] + (highlight[0] - shadow[0]) * shade);

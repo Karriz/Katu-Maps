@@ -78,6 +78,7 @@ const NASINNEULA_BUILDING_OUTLINE_ID = 6_807_253_782;
 
 type FacadeFootprint = {
   ring: Array<[number, number]>;
+  holes: Array<Array<[number, number]>>;
   centroid: maplibregl.LngLat;
   center: [number, number];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
@@ -442,9 +443,9 @@ export class FacadeModelLayer implements CustomLayerInterface {
       if (wallHeight < FACADE_MIN_WALL_HEIGHT_M) continue;
       if (wallHeight > FACADE_MAX_WALL_HEIGHT_M) continue;
 
-      for (const outerRing of featureFootprintRings(feature)) {
+      for (const { ring: outerRing, holes } of featureFootprintRings(feature)) {
         yield;
-        if (outerRing.length < 4 || outerRing.length > 25) continue;
+        if (outerRing.length < 4 || outerRing.length > 65) continue;
 
         const centroidLngLat = polygonCentroidLngLat(outerRing);
         if (centroidLngLat.lng < west || centroidLngLat.lng > east
@@ -457,6 +458,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
         if (!isEligibleFacadeFootprint(localRing)) continue;
         footprintCandidates.push({
           ring: localRing,
+          holes: holes.map(ring => ring.map(([lng, lat]) => toLocal(lng, lat))),
           centroid: centroidLngLat,
           center: polygonCentroidLocal(localRing),
           bounds: polygonBounds(localRing),
@@ -488,6 +490,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
 
       const candidate: FacadeCandidate = {
         ring: footprint.ring,
+        holes: footprint.holes,
         wallHeight: footprint.wallHeight,
         featureId: footprint.id,
         maxWindows: view.zoom < 16 ? 128 : view.zoom < 17 ? 256 : 512,
@@ -501,7 +504,7 @@ export class FacadeModelLayer implements CustomLayerInterface {
       const geometry = facadeMeshDataToBufferGeometry(facadeData);
       geometry.translate(facadeData.offset[0], wallBaseY, facadeData.offset[1]);
       const variation = FACADE_GLASS_VARIATION[Math.abs(numericId) % FACADE_GLASS_VARIATION.length];
-      bakeVertexColors(geometry, variation);
+      bakeVertexColors(geometry, variation, numericId);
       facades.push({ geometry });
     }
 
@@ -680,13 +683,14 @@ function pointInPolygon(point: [number, number], ring: Array<[number, number]>):
 
 function* featureFootprintRings(
   feature: ReturnType<MaplibreMap['querySourceFeatures']>[number],
-): Generator<Array<[number, number]>> {
+): Generator<{ ring: Array<[number, number]>; holes: Array<Array<[number, number]>> }> {
   const geometry = feature.geometry;
   if (!geometry) return;
   const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
     : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
   for (const polygon of polygons) {
-    if (polygon[0]) yield polygon[0] as Array<[number, number]>;
+    if (polygon[0]) yield { ring: polygon[0] as Array<[number, number]>,
+      holes: polygon.slice(1) as Array<Array<[number, number]>> };
   }
 }
 
@@ -698,13 +702,16 @@ function hashString(s: string): number {
   return hash;
 }
 
-function bakeVertexColors(geometry: THREE.BufferGeometry, color: THREE.Color) {
+function bakeVertexColors(geometry: THREE.BufferGeometry, color: THREE.Color, seed: number) {
   const posAttr = geometry.getAttribute('position');
   const colors = new Float32Array(posAttr.count * 3);
   for (let i = 0; i < posAttr.count; i++) {
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
+    // One restrained tint per pane, shared by its four vertices.
+    const hash = Math.imul(Math.floor(i / 4) ^ seed, 1597334677) >>> 0;
+    const tint = 0.94 + (hash / 4294967295) * 0.12;
+    colors[i * 3] = color.r * tint;
+    colors[i * 3 + 1] = color.g * tint;
+    colors[i * 3 + 2] = color.b * tint;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }

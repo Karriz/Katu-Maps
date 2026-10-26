@@ -70,6 +70,18 @@ export function installMapPatterns(map: MapLibreMap) {
       // Publish at most one image per callback; solid fills remain visible
       // through the transparent pattern fallback until registration completes.
       map.addImage(id, image, { pixelRatio: 0.5 });
+      const kindIndex = groundPatternKinds().findIndex(kind =>
+        id === groundPatternImageId(kind, 'light') || id === groundPatternImageId(kind, 'dark'));
+      const layerId = id === WATER_PATTERN_ID ? 'global-water-pattern' : GROUND_PATTERN_LAYER_IDS[kindIndex];
+      if (layerId && map.getLayer(layerId)) {
+        const paint = map.getPaintProperty(layerId, 'fill-pattern');
+        // Buckets built with the transparent fallback can keep that selection
+        // after addImage. Rebuild the active pattern binding when it is ready.
+        // Warming the other theme must not change the visible palette.
+        if (typeof paint !== 'string' && JSON.stringify(paint)?.includes(JSON.stringify(id))) {
+          map.setPaintProperty(layerId, 'fill-pattern', id);
+        }
+      }
       for (const kind of groundPatternKinds()) {
         if (images.has(groundPatternImageId(kind, 'light')) && images.has(groundPatternImageId(kind, 'dark'))) {
           coverage.delete(kind);

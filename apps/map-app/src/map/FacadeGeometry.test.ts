@@ -27,10 +27,10 @@ describe('FacadeGeometry', () => {
       ])).toBe(true);
     });
 
-    it('rejects an L-shaped footprint', () => {
+    it('accepts an L-shaped footprint', () => {
       expect(isEligibleFacadeFootprint([
         [0, 0], [10, 0], [10, 3], [4, 3], [4, 6], [0, 6], [0, 0],
-      ])).toBe(false);
+      ])).toBe(true);
     });
 
     it('rejects a footprint that is too small', () => {
@@ -64,6 +64,47 @@ describe('FacadeGeometry', () => {
       expect(facade!.uvs.length).toBe(facade!.positions.length / 3 * 2);
       for (let offset = 0; offset < facade!.uvs.length; offset += 8) {
         expect(Array.from(facade!.uvs.slice(offset, offset + 8))).toEqual([0, 0, 1, 0, 1, 1, 0, 1]);
+      }
+    });
+
+    it.each([false, true])('faces out of concave walls and into courtyards (reversed=%s)', reversed => {
+      const outline: Array<[number, number]> = [
+        [0, 0], [40, 0], [40, 12], [12, 12], [12, 40], [0, 40],
+      ];
+      const hole: Array<[number, number]> = [[3, 18], [9, 18], [9, 30], [3, 30]];
+      const facade = generateFacadeGeometry({
+        ring: reversed ? [...outline].reverse() : outline,
+        holes: [reversed ? [...hole].reverse() : hole],
+        wallHeight: 12, featureId: 0, maxWindows: 128,
+      })!;
+      expect(facade.indices.length / 6).toBeLessThanOrEqual(128);
+      let innerWall = 0;
+      let courtyardWall = 0;
+      for (let i = 0; i < facade.positions.length; i += 12) {
+        const x = facade.positions[i] + facade.offset[0];
+        const z = facade.positions[i + 2] + facade.offset[1];
+        if (Math.abs(x - 12.12) < 0.01 && z > 12) {
+          expect(facade.normals[i]).toBeCloseTo(1);
+          innerWall++;
+        }
+        if (Math.abs(x - 3.12) < 0.01 && z > 18 && z < 30) {
+          expect(facade.normals[i]).toBeCloseTo(1);
+          courtyardWall++;
+        }
+      }
+      expect(innerWall).toBeGreaterThan(0);
+      expect(courtyardWall).toBeGreaterThan(0);
+      for (let i = 0; i < facade.indices.length; i += 3) {
+        const [a, b, c] = Array.from(facade.indices.slice(i, i + 3), index => index * 3);
+        const crossX = (facade.positions[b + 1] - facade.positions[a + 1])
+          * (facade.positions[c + 2] - facade.positions[a + 2])
+          - (facade.positions[b + 2] - facade.positions[a + 2])
+          * (facade.positions[c + 1] - facade.positions[a + 1]);
+        const crossZ = (facade.positions[b] - facade.positions[a])
+          * (facade.positions[c + 1] - facade.positions[a + 1])
+          - (facade.positions[b + 1] - facade.positions[a + 1])
+          * (facade.positions[c] - facade.positions[a]);
+        expect(crossX * facade.normals[a] + crossZ * facade.normals[a + 2]).toBeGreaterThan(0);
       }
     });
 

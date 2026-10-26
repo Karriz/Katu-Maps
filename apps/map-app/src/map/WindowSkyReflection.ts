@@ -51,7 +51,7 @@ export class WindowSkyReflection {
   apply(material: THREE.MeshStandardMaterial) {
     const previous = material.onBeforeCompile;
     const previousKey = material.customProgramCacheKey();
-    material.customProgramCacheKey = () => `${previousKey}:window-sky-v2`;
+    material.customProgramCacheKey = () => `${previousKey}:window-sky-v3`;
     material.onBeforeCompile = (shader, renderer) => {
       previous.call(material, shader, renderer);
       Object.assign(shader.uniforms, this.uniforms);
@@ -89,7 +89,7 @@ vec2 trimEdge = min(vWindowUv, 1.0 - vWindowUv);
 float windowTrim = 1.0 - smoothstep(0.04 - windowAa, 0.04 + windowAa, min(trimEdge.x, trimEdge.y));
 diffuseColor.rgb = mix(vec3(0.16, 0.19, 0.20), diffuseColor.rgb, windowPane);
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.45, 0.46), windowTrim);
-roughnessFactor = mix(0.78, 0.10, windowPane);`)
+roughnessFactor = mix(0.78, 0.18, windowPane);`)
         .replace('#include <emissivemap_fragment>', `
 #include <emissivemap_fragment>
 totalEmissiveRadiance *= windowPane;`)

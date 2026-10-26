@@ -145,10 +145,10 @@ describe('RoofGeometry', () => {
       expect(isEligibleFlatRoofFootprint([[-4, -4], [4, -4], [4, 4], [-4, 4], [-4, -4]])).toBe(false);
     });
 
-    it('rejects concave outlines that the inset cannot safely shrink', () => {
+    it('accepts larger concave outlines', () => {
       expect(isEligibleFlatRoofFootprint([
-        [0, 0], [30, 0], [30, 10], [10, 10], [10, 20], [0, 20], [0, 0],
-      ])).toBe(false);
+        [0, 0], [40, 0], [40, 12], [12, 12], [12, 40], [0, 40], [0, 0],
+      ])).toBe(true);
     });
 
     it('rejects a narrow slab wider than the minimum width allows', () => {
@@ -187,6 +187,43 @@ describe('RoofGeometry', () => {
         expect(Math.abs(roof!.positions[i])).toBeLessThan(15);
         expect(Math.abs(roof!.positions[i + 2])).toBeLessThan(15);
       }
+    });
+
+    it.each([false, true])('triangulates an inset L-shaped roof (reversed=%s)', reversed => {
+      const ring: Array<[number, number]> = [[0, 0], [40, 0], [40, 12], [12, 12], [12, 40], [0, 40]];
+      const roof = generateFlatRoofGeometry({
+        ring: reversed ? [...ring].reverse() : ring,
+        wallHeight: 12, type: 'flat', pitchDegrees: 0, featureId: 4,
+      })!;
+      expect(roof).not.toBeNull();
+      expect(projectedTriangleArea(roof.positions, roof.indices)).toBeCloseTo(721.44, 2);
+      for (let i = 1; i < roof.normals.length; i += 3) expect(roof.normals[i]).toBeCloseTo(1);
+    });
+
+    it.each([false, true])('leaves an expanded courtyard opening (reversed=%s)', reversed => {
+      const ring: Array<[number, number]> = [[-20, -20], [20, -20], [20, 20], [-20, 20]];
+      const hole: Array<[number, number]> = [[-8, -8], [8, -8], [8, 8], [-8, 8]];
+      const roof = generateFlatRoofGeometry({
+        ring: reversed ? [...ring].reverse() : ring,
+        holes: [reversed ? [...hole].reverse() : hole],
+        wallHeight: 12, type: 'flat', pitchDegrees: 0, featureId: 4,
+      })!;
+      expect(roof).not.toBeNull();
+      expect(projectedTriangleArea(roof.positions, roof.indices)).toBeCloseTo(1209.6, 2);
+      for (let i = 0; i < roof.indices.length; i += 3) {
+        const triangle = Array.from(roof.indices.slice(i, i + 3));
+        const x = triangle.reduce((sum, v) => sum + roof.positions[v * 3], 0) / 3;
+        const z = triangle.reduce((sum, v) => sum + roof.positions[v * 3 + 2], 0) / 3;
+        expect(Math.abs(x) >= 8.6 || Math.abs(z) >= 8.6).toBe(true);
+      }
+    });
+
+    it('falls back when a courtyard leaves too little room for the parapet', () => {
+      expect(generateFlatRoofGeometry({
+        ring: [[-20, -20], [20, -20], [20, 20], [-20, 20]],
+        holes: [[[-19.5, -19.5], [19.5, -19.5], [19.5, 19.5], [-19.5, 19.5]]],
+        wallHeight: 12, type: 'flat', pitchDegrees: 0, featureId: 4,
+      })).toBeNull();
     });
 
     it('keeps the inset centred on a non-square rectangle', () => {

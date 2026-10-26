@@ -198,7 +198,7 @@ export class BuildingBodyLayer implements CustomLayerInterface {
   private readonly material = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.88, metalness: 0,
     shadowSide: THREE.DoubleSide,
-    normalMap: this.normalMap, normalScale: new THREE.Vector2(0.65, 0.65),
+    normalMap: this.normalMap, normalScale: new THREE.Vector2(0.28, 0.28),
     envMap: this.environmentMap, envMapIntensity: 0.15,
   });
   private readonly mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
@@ -377,6 +377,10 @@ export class BuildingBodyLayer implements CustomLayerInterface {
     const ready = (this.mesh.geometry.getAttribute('position')?.count ?? 0) > 0;
     this.setActive(ready);
     if (!ready) return;
+    // Shadow rendering restores Three's cached viewport. Keep it aligned with
+    // MapLibre's drawing buffer after a resize or device orientation change.
+    const canvas = map.getCanvas();
+    this.renderer.setViewport(0, 0, canvas.width, canvas.height);
     const origin = maplibregl.MercatorCoordinate.fromLngLat(this.origin, this.originElevation);
     const transform = new THREE.Matrix4().makeTranslation(origin.x, origin.y, origin.z)
       .scale(new THREE.Vector3(origin.meterInMercatorCoordinateUnits(),

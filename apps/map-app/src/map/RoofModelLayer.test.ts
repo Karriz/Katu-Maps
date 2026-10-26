@@ -32,7 +32,7 @@ function fixture(features: RoofFeature[]) {
   const layer = new RoofModelLayer('buildings');
   let loaded = false;
   const map = {
-    getZoom: () => 15,
+    getZoom: () => 16,
     getCenter: () => new LngLat(23.76, 61.5),
     getBounds: () => ({
       getWest: () => 23.75, getSouth: () => 61.49,
@@ -148,11 +148,8 @@ describe('RoofModelLayer source refresh', () => {
     expect(sampledCount()).toBeLessThanOrEqual(12);
   });
 
-  it('does not draw a flat roof slab over a building with a courtyard hole', () => {
-    // A large building outline (~1000 m²) with an inner ring (courtyard).
-    // The outer ring is a simple convex rectangle that would normally qualify
-    // for a flat roof, but the hole must prevent the slab from covering the
-    // open courtyard.
+  it('draws a flat roof around a courtyard opening', () => {
+    // The flat roof now follows both the outer ring and the courtyard.
     const w = 23.7598, s = 61.4999;
     const outer: Array<[number, number]> = [
       [w, s], [w + 0.001, s], [w + 0.001, s + 0.001], [w, s + 0.001], [w, s],
@@ -170,7 +167,7 @@ describe('RoofModelLayer source refresh', () => {
     setLoaded(true);
 
     expect(completeJob(() => layer.updateRoofs())).toBe(true);
-    expect(sampledCount()).toBe(0);
+    expect(sampledCount()).toBe(1);
   });
 });
 

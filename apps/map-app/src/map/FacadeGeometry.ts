@@ -4,9 +4,8 @@
  * Operates in local metre coordinates (x = east, z = south, y = up) so
  * the caller can place the resulting mesh at the correct world position.
  *
- * Only simple, convex, near-rectangular footprints get window overlays.
- * Complex multi-part structures, L-shapes, and highly irregular polygons
- * fall back to the plain fill-extrusion walls.
+ * Windows follow individual footprint edges, including concave outlines and
+ * courtyard walls. Per-building and per-view budgets bound the detail.
  */
 
 import * as THREE from 'three';
@@ -16,6 +15,8 @@ export type FacadeCandidate = {
   ring: Array<[number, number]>;
   /** Building wall height in metres (top of walls = base of roof). */
   wallHeight: number;
+  /** Courtyard rings; their windows face into the opening. */
+  holes?: Array<Array<[number, number]>>;
   /** Feature ID for deterministic per-building variation. */
   featureId: number | string;
   /** Optional detail budget, distributed across all walls and stories. */
@@ -33,17 +34,9 @@ export type FacadeMeshData = {
 
 // --- Eligibility -----------------------------------------------------------
 
-const MAX_FACADE_RING_VERTICES = 24;
-const MAX_FACADE_AREA_SQ_M = 2500;
+const MAX_FACADE_RING_VERTICES = 64;
+const MAX_FACADE_AREA_SQ_M = 20_000;
 const MIN_FACADE_AREA_SQ_M = 25;
-/** Reject any concave vertex — only convex (near-rectangular) footprints qualify. */
-const MAX_FACADE_CONCAVE_VERTICES = 0;
-/**
- * Minimum ratio of polygon area to oriented bounding box area. More
- * permissive than the roof threshold (0.93) so pentagons, chamfered
- * corners, and other simple convex shapes still receive facades.
- */
-const MIN_FACADE_RECTANGULARITY = 0.80;
 const MIN_FACADE_WIDTH_M = 4;
 const MAX_FACADE_ASPECT_RATIO = 6;
 
@@ -62,12 +55,6 @@ export function isEligibleFacadeFootprint(
 
   const area = Math.abs(signedArea(verts));
   if (area < MIN_FACADE_AREA_SQ_M || area > MAX_FACADE_AREA_SQ_M) return false;
-
-  if (countConcaveVertices(verts) > MAX_FACADE_CONCAVE_VERTICES) return false;
-
-  const { halfWidth, halfDepth } = orientedBoundingBox(verts);
-  const obbArea = (halfWidth * 2) * (halfDepth * 2);
-  if (obbArea > 0 && area / obbArea < MIN_FACADE_RECTANGULARITY) return false;
 
   const bb = boundingBox(verts);
   const w = bb.maxX - bb.minX;
@@ -124,14 +111,17 @@ export function generateFacadeGeometry(
     : hashString(candidate.featureId);
   const style = WINDOW_STYLES[Math.abs(numericId) % WINDOW_STYLES.length];
 
+  const rings = [local, ...(candidate.holes ?? []).map(ring => stripClosingVertex(ring)
+    .map(([x, z]) => [x - centroid[0], z - centroid[1]] as [number, number]))];
+
   let numStories = Math.min(MAX_STORIES, Math.max(1, Math.round(candidate.wallHeight / STORY_HEIGHT_M)));
   const windowsForEdge = (edgeLength: number) => Math.min(MAX_WINDOWS_PER_WALL,
     Math.max(1, Math.floor(edgeLength / style.horizontalSpacing)));
-  const estimatedWindows = local.reduce((sum, a, index) => {
-    const b = local[(index + 1) % local.length];
+  const estimatedWindows = rings.reduce((total, ring) => total + ring.reduce((sum, a, index) => {
+    const b = ring[(index + 1) % ring.length];
     const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
     return sum + (length >= MIN_EDGE_LENGTH_M ? windowsForEdge(length) : 0);
-  }, 0) * numStories;
+  }, 0), 0) * numStories;
   const maxWindows = Math.max(0, Math.floor(candidate.maxWindows ?? Infinity));
   const density = Math.min(1, Math.sqrt(maxWindows / Math.max(1, estimatedWindows)));
   numStories = Math.max(1, Math.floor(numStories * density));
@@ -142,83 +132,81 @@ export function generateFacadeGeometry(
   const uvs: number[] = [];
   const indices: number[] = [];
 
-  for (let edgeIdx = 0; edgeIdx < local.length; edgeIdx++) {
-    const a = local[edgeIdx];
-    const b = local[(edgeIdx + 1) % local.length];
-    const dx = b[0] - a[0];
-    const dz = b[1] - a[1];
-    const edgeLength = Math.hypot(dx, dz);
-    if (edgeLength < MIN_EDGE_LENGTH_M) continue;
+  for (const [ringIndex, ring] of rings.entries()) {
+    // Winding, rather than the centroid, remains correct at reentrant corners.
+    const outward = (signedArea(ring) > 0 ? 1 : -1) * (ringIndex === 0 ? 1 : -1);
+    for (let edgeIdx = 0; edgeIdx < ring.length; edgeIdx++) {
+      const a = ring[edgeIdx];
+      const b = ring[(edgeIdx + 1) % ring.length];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const edgeLength = Math.hypot(dx, dz);
+      if (edgeLength < MIN_EDGE_LENGTH_M) continue;
 
-    const dirX = dx / edgeLength;
-    const dirZ = dz / edgeLength;
+      const dirX = dx / edgeLength;
+      const dirZ = dz / edgeLength;
 
-    // Outward normal: perpendicular to edge, pointing away from centroid.
-    const midX = (a[0] + b[0]) / 2;
-    const midZ = (a[1] + b[1]) / 2;
-    let nx = dirZ;
-    let nz = -dirX;
-    if (nx * midX + nz * midZ < 0) {
-      nx = -nx;
-      nz = -nz;
-    }
+      const nx = dirZ * outward;
+      const nz = -dirX * outward;
 
-    const numWindows = Math.max(1, Math.floor(windowsForEdge(edgeLength) * density));
-    const spacing = style.horizontalSpacing / Math.max(density, 0.01);
-    const totalSpan = (numWindows - 1) * spacing;
-    const startOffset = (edgeLength - totalSpan) / 2;
+      const numWindows = Math.max(1, Math.floor(windowsForEdge(edgeLength) * density));
+      const spacing = style.horizontalSpacing / Math.max(density, 0.01);
+      const totalSpan = (numWindows - 1) * spacing;
+      const startOffset = (edgeLength - totalSpan) / 2;
 
-    for (let story = 0; story < numStories; story++) {
-      if (story === 0 && style.groundFloorSkip) continue;
+      for (let story = 0; story < numStories; story++) {
+        if (story === 0 && style.groundFloorSkip) continue;
 
-      const storyBase = story * storyHeight;
-      const storyCenter = storyBase + storyHeight / 2;
+        const storyBase = story * storyHeight;
+        const storyCenter = storyBase + storyHeight / 2;
 
-      const heightMultiplier = story === 0 ? style.groundFloorMultiplier : 1.0;
-      const windowHeight = Math.min(style.windowHeight * heightMultiplier, storyHeight * 0.7);
-      if (windowHeight < 0.4) continue;
+        const heightMultiplier = story === 0 ? style.groundFloorMultiplier : 1.0;
+        const windowHeight = Math.min(style.windowHeight * heightMultiplier, storyHeight * 0.7);
+        if (windowHeight < 0.4) continue;
 
-      const yBottom = storyCenter - windowHeight / 2;
-      const yTop = storyCenter + windowHeight / 2;
+        const yBottom = storyCenter - windowHeight / 2;
+        const yTop = storyCenter + windowHeight / 2;
 
-      const rowOffset = style.stagger && story % 2 === 1
-        ? spacing / 2
-        : 0;
+        const rowOffset = style.stagger && story % 2 === 1
+          ? spacing / 2
+          : 0;
 
-      for (let win = 0; win < numWindows; win++) {
-        if (positions.length / 12 >= maxWindows) break;
-        let center = startOffset + win * spacing + rowOffset;
+        for (let win = 0; win < numWindows; win++) {
+          if (positions.length / 12 >= maxWindows) break;
+          let center = startOffset + win * spacing + rowOffset;
 
-        const halfW = style.windowWidth / 2;
-        const minCenter = halfW + CORNER_MARGIN_M;
-        const maxCenter = edgeLength - halfW - CORNER_MARGIN_M;
-        if (maxCenter < minCenter) continue;
-        center = Math.max(minCenter, Math.min(maxCenter, center));
-        if (center < minCenter - 0.01 || center > maxCenter + 0.01) continue;
+          const halfW = style.windowWidth / 2;
+          const minCenter = halfW + CORNER_MARGIN_M;
+          const maxCenter = edgeLength - halfW - CORNER_MARGIN_M;
+          if (maxCenter < minCenter) continue;
+          center = Math.max(minCenter, Math.min(maxCenter, center));
+          if (center < minCenter - 0.01 || center > maxCenter + 0.01) continue;
 
-        const left = center - halfW;
-        const right = center + halfW;
+          const left = center - halfW;
+          const right = center + halfW;
 
-        // Quad vertices (BL, BR, TR, TL) offset outward from the wall.
-        const baseX = a[0];
-        const baseZ = a[1];
-        const ox = nx * OUTWARD_OFFSET_M;
-        const oz = nz * OUTWARD_OFFSET_M;
+          // Quad vertices (BL, BR, TR, TL) offset outward from the wall.
+          const baseX = a[0];
+          const baseZ = a[1];
+          const ox = nx * OUTWARD_OFFSET_M;
+          const oz = nz * OUTWARD_OFFSET_M;
 
-        const p0 = positions.length / 3;
-        positions.push(
-          baseX + left * dirX + ox, yBottom, baseZ + left * dirZ + oz,
-          baseX + right * dirX + ox, yBottom, baseZ + right * dirZ + oz,
-          baseX + right * dirX + ox, yTop, baseZ + right * dirZ + oz,
-          baseX + left * dirX + ox, yTop, baseZ + left * dirZ + oz,
-        );
+          const p0 = positions.length / 3;
+          positions.push(
+            baseX + left * dirX + ox, yBottom, baseZ + left * dirZ + oz,
+            baseX + right * dirX + ox, yBottom, baseZ + right * dirZ + oz,
+            baseX + right * dirX + ox, yTop, baseZ + right * dirZ + oz,
+            baseX + left * dirX + ox, yTop, baseZ + left * dirZ + oz,
+          );
 
-        for (let v = 0; v < 4; v++) {
-          normals.push(nx, 0, nz);
+          for (let v = 0; v < 4; v++) {
+            normals.push(nx, 0, nz);
+          }
+          uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+
+          if (outward > 0) indices.push(p0, p0 + 2, p0 + 1, p0, p0 + 3, p0 + 2);
+          else indices.push(p0, p0 + 1, p0 + 2, p0, p0 + 2, p0 + 3);
         }
-        uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
-
-        indices.push(p0, p0 + 1, p0 + 2, p0, p0 + 2, p0 + 3);
       }
     }
   }
@@ -276,24 +264,6 @@ function polygonCentroid(ring: Array<[number, number]>): [number, number] {
   return [cx / (3 * totalArea), cz / (3 * totalArea)];
 }
 
-function countConcaveVertices(ring: Array<[number, number]>): number {
-  if (ring.length < 3) return ring.length;
-  const verts = stripClosingVertex(ring);
-  let sign = 0;
-  let concave = 0;
-  for (let i = 0; i < verts.length; i++) {
-    const [x1, z1] = verts[i];
-    const [x2, z2] = verts[(i + 1) % verts.length];
-    const [x3, z3] = verts[(i + 2) % verts.length];
-    const cross = (x2 - x1) * (z3 - z2) - (z2 - z1) * (x3 - x2);
-    if (Math.abs(cross) > 1e-9) {
-      if (sign === 0) sign = Math.sign(cross);
-      else if (Math.sign(cross) !== sign) concave += 1;
-    }
-  }
-  return concave;
-}
-
 function boundingBox(ring: Array<[number, number]>): {
   minX: number; maxX: number; minZ: number; maxZ: number;
 } {
@@ -306,76 +276,6 @@ function boundingBox(ring: Array<[number, number]>): {
     if (z > maxZ) maxZ = z;
   }
   return { minX, maxX, minZ, maxZ };
-}
-
-function orientedBoundingBox(ring: Array<[number, number]>): {
-  angle: number;
-  halfWidth: number;
-  halfDepth: number;
-  center: [number, number];
-} {
-  let bestArea = Infinity;
-  let bestAngle = 0;
-  let bestMinU = 0;
-  let bestMaxU = 0;
-  let bestMinV = 0;
-  let bestMaxV = 0;
-
-  for (let i = 0; i < ring.length; i++) {
-    const [x1, z1] = ring[i];
-    const [x2, z2] = ring[(i + 1) % ring.length];
-    const dx = x2 - x1;
-    const dz = z2 - z1;
-    if (Math.hypot(dx, dz) < 1e-6) continue;
-
-    const angle = Math.atan2(dz, dx);
-    const cosA = Math.cos(angle);
-    const sinA = Math.sin(angle);
-    let minU = Infinity;
-    let maxU = -Infinity;
-    let minV = Infinity;
-    let maxV = -Infinity;
-    for (const [x, z] of ring) {
-      const u = x * cosA + z * sinA;
-      const v = -x * sinA + z * cosA;
-      minU = Math.min(minU, u);
-      maxU = Math.max(maxU, u);
-      minV = Math.min(minV, v);
-      maxV = Math.max(maxV, v);
-    }
-    const area = (maxU - minU) * (maxV - minV);
-    if (area < bestArea) {
-      bestArea = area;
-      bestAngle = angle;
-      bestMinU = minU;
-      bestMaxU = maxU;
-      bestMinV = minV;
-      bestMaxV = maxV;
-    }
-  }
-
-  let width = bestMaxU - bestMinU;
-  let depth = bestMaxV - bestMinV;
-  const cosA = Math.cos(bestAngle);
-  const sinA = Math.sin(bestAngle);
-  const centerU = (bestMinU + bestMaxU) / 2;
-  const centerV = (bestMinV + bestMaxV) / 2;
-  const center: [number, number] = [
-    centerU * cosA - centerV * sinA,
-    centerU * sinA + centerV * cosA,
-  ];
-
-  if (depth > width) {
-    bestAngle += Math.PI / 2;
-    [width, depth] = [depth, width];
-  }
-
-  return {
-    angle: bestAngle,
-    halfWidth: width / 2,
-    halfDepth: depth / 2,
-    center,
-  };
 }
 
 function stripClosingVertex(ring: Array<[number, number]>): Array<[number, number]> {

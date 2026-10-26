@@ -7,7 +7,9 @@ describe('building lifecycle and lighting', () => {
   function fixture() {
     const layer = new BuildingBodyLayer('buildings');
     const state = { loaded: true, empty: false, longitude: 0 };
+    const canvas = { width: 1440, height: 900 };
     const map = {
+      getCanvas: () => canvas,
       getZoom: () => 17,
       getCenter: () => new maplibregl.LngLat(state.longitude, 0),
       getBounds: () => new maplibregl.LngLatBounds(
@@ -27,7 +29,7 @@ describe('building lifecycle and lighting', () => {
     build();
     const renderer = {
       shadowMap: { enabled: true },
-      dispose: vi.fn(), resetState: vi.fn(), render: vi.fn(),
+      dispose: vi.fn(), resetState: vi.fn(), render: vi.fn(), setViewport: vi.fn(),
       getContext: () => ({ FRAMEBUFFER_BINDING: 0, FRAMEBUFFER: 1,
         getParameter: () => null, bindFramebuffer: vi.fn() }),
     };
@@ -35,8 +37,19 @@ describe('building lifecycle and lighting', () => {
     const render = () => layer.render({} as never, {
       defaultProjectionData: { mainMatrix: new THREE.Matrix4().toArray() },
     } as never);
-    return { layer, state, build, renderer, render };
+    return { layer, state, build, renderer, render, canvas };
   }
+
+  it('updates the shadow restore viewport when the map drawing buffer resizes', () => {
+    const f = fixture();
+    f.render();
+    expect(f.renderer.setViewport).toHaveBeenLastCalledWith(0, 0, 1440, 900);
+    f.canvas.width = 412;
+    f.canvas.height = 915;
+    f.render();
+    expect(f.renderer.setViewport).toHaveBeenLastCalledWith(0, 0, 412, 915);
+    f.layer.onRemove();
+  });
 
   it('retires geometry and shadow casters after panning into a loaded empty area', () => {
     const f = fixture();
