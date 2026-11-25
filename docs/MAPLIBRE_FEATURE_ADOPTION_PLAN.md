@@ -22,14 +22,6 @@ deliberately ruled out. It should be updated whenever MapLibre is upgraded.
   off-screen correctly while pitched or rotated.
 - Symbol, triangulation, and tile-loading performance work (6.9-6.15), and the
   Safari/iPadOS blank-map and backgrounded-tab workarounds.
-- `Map#calculateAnchoredCameraOptions` (6.11): the manual anchor math in
-  `MapViewportLayout.ts` (`selectionCameraOffset`, `followCameraCenter`) is
-  replaced by one `anchoredCameraOptions` helper that places a selection or a
-  followed vehicle at the visible map target point through MapLibre's own
-  transform, terrain included. `smoothlyFollowVehicle` and the selection
-  cameras in `useMapCameraCoordinator.ts` ease to it. This completed the
-  camera half of the manual panel-offset system; the persistent map padding
-  migration it enables is still open (see Ruled out).
 - `dragRotate: { around: 'pointer' }` (6.15): the `Map` constructor in
   `MapRuntime.ts` now rotates and tilts around the point under the pointer
   instead of the map center. The drive and flight simulators keep the
@@ -69,14 +61,22 @@ Ranked by value per effort. Each item names the code it would touch.
 
 ## Ruled out or not applicable
 
+- `Map#calculateAnchoredCameraOptions` (6.11): designed for interactive drag/
+  zoom gesture handlers rather than programmatic camera moves. In 6.15 it
+  routes through `handleMapControlsRollPitchBearingZoom` +
+  `handleMapControlsPan`, which under globe projection applies a pre-zoom
+  pixel `panDelta` at the post-zoom scale (collapsing large world-to-city
+  jumps such as opening a favourite from world view) and under Mercator
+  projection returns early without panning when `anchorScreenPoint` equals
+  the viewport center. `anchoredCameraOptions` in `MapViewportLayout.ts`
+  instead returns `easeTo` `center` + `offset` options via
+  `selectionCameraOffset`, which handles both globe and Mercator cleanly.
 - `absolutePadding` on `fitBounds`/`cameraForBounds` (6.12): still a no-op
   today (persistent map padding is always zero, so additive equals absolute)
   and its real semantics would set the panel padding as persistent map
-  padding. The camera helpers now anchor through
-  `Map#calculateAnchoredCameraOptions`, which is padding-aware by itself, but
-  the rest of the panel-offset system is still manual:
-  `visibleMapTargetPoint` computes screen targets from panel rects and
-  `fitRouteInView` passes per-call padding, so enabling `absolutePadding`
+  padding. The panel-offset system is still manual (`selectionCameraOffset`
+  and `visibleMapTargetPoint` compute offsets from panel rects and
+  `fitRouteInView` passes per-call padding), so enabling `absolutePadding`
   would double-shift selection and vehicle-follow cameras. Revisit as part
   of the persistent map padding migration, not before it.
 - `addProtocol` returning `ImageBitmap` (6.11): no `addProtocol` usage.
