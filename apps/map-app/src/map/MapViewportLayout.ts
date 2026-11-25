@@ -1,4 +1,4 @@
-import type { CameraOptions, Map } from 'maplibre-gl';
+import type { EaseToOptions, Map } from 'maplibre-gl';
 import { panelPaddingForRects } from './RouteCamera';
 
 export const CONTENT_PANEL_SELECTOR = '.route-panel, .transit-departures-panel, .location-info-panel, .position-information, .nearby-panel, .weather-time-slider, .day-night-time-slider';
@@ -36,13 +36,26 @@ export function visibleMapTargetPoint(map: Map): [number, number] {
   return [(left + right) / 2, (top + bottom) / 2];
 }
 
-/** Camera options that place the location at the visible map target point. */
-export function anchoredCameraOptions(map: Map, coordinates: [number, number], zoom = map.getZoom()): CameraOptions {
-  return map.calculateAnchoredCameraOptions({
-    anchorLocation: coordinates,
-    anchorScreenPoint: visibleMapTargetPoint(map),
-    zoom,
-  });
+export function selectionCameraOffset(map: Map): [number, number] {
+  const mapRect = map.getContainer().getBoundingClientRect();
+  const [targetX, targetY] = visibleMapTargetPoint(map);
+  return [targetX - mapRect.width / 2, targetY - mapRect.height / 2];
+}
+
+/**
+ * EaseTo options that place a geographic coordinate at the visible map target point.
+ *
+ * Uses `center` + `offset` rather than `Map#calculateAnchoredCameraOptions`, because
+ * MapLibre's anchored-camera helper routes through its interactive gesture helpers:
+ * under globe projection it applies a pre-zoom pixel delta at the post-zoom scale,
+ * and under Mercator projection it skips panning when the anchor point is centered.
+ */
+export function anchoredCameraOptions(map: Map, coordinates: [number, number], zoom?: number): EaseToOptions {
+  return {
+    center: coordinates,
+    offset: selectionCameraOffset(map),
+    ...(zoom === undefined ? {} : { zoom }),
+  };
 }
 
 /** Blend frequent vehicle updates into one continuous camera movement. */
